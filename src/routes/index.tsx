@@ -133,7 +133,7 @@ function PMOCommandCenter() {
   const workspace = workspaceQuery.data;
 
   const [activeRail, setActiveRail] = useState<RailName>("Workspaces");
-  const [activeTab, setActiveTab] = useState<TabName>("Ideas");
+  const [activeTab, setActiveTab] = useState<TabName>("Chat");
   const [activeMode, setActiveMode] = useState<WorkspaceMode>("Personal");
   const activeWorkspace = workspace.workspaces[activeMode];
   const [activeProjectId, setActiveProjectId] = useState(activeWorkspace.projects[0]?.id ?? "");
@@ -205,6 +205,8 @@ function PMOCommandCenter() {
   const scopedProjectId = activeChatSection === "project" ? activeProject?.id ?? null : null;
   const conversationKey = activeChat ? getConversationKey(activeMode, scopedProjectId, activeChat.id) : "";
   const workspaceTitle = `${workspaceModeLabel(activeMode)} workspace`;
+  const isWorkspaceRail = activeRail === "Workspaces";
+  const categoryLabel = isWorkspaceRail ? activeTab : activeRail;
   const currentMessages = activeChat ? activeWorkspace.conversations[conversationKey] ?? [
     {
       id: `${conversationKey}-empty`,
@@ -290,14 +292,14 @@ function PMOCommandCenter() {
   function handleRailClick(label: RailName) {
     setActiveRail(label);
     const nextTab: Partial<Record<RailName, TabName>> = {
-      Workspaces: "Ideas",
+      Workspaces: "Chat",
       Chats: "Chat",
       Ideas: "Ideas",
       Artifacts: "Artifacts",
       Decisions: "Decisions",
       Approvals: "Approvals",
       Tasks: "Tasks",
-      Prompts: "Prompt Templates",
+      Prompts: "Prompts",
     };
     setActiveTab(nextTab[label] ?? "Ideas");
   }
@@ -358,7 +360,7 @@ function PMOCommandCenter() {
         <section className="flex min-w-0 flex-col overflow-hidden bg-background">
           <Topbar
             activeMode={activeMode}
-            activeProject={activeProject?.name ?? activeWorkspace.unassignedProjectLabel}
+            categoryLabel={categoryLabel}
             model={model}
             searchTerm={searchTerm}
             workspaceTitle={workspaceTitle}
@@ -374,172 +376,196 @@ function PMOCommandCenter() {
           <Contextbar
             activeMode={activeMode}
             accessLevel={activeWorkspace.accessLevel}
+            categoryLabel={categoryLabel}
+            showScopeTabs
             workspaceTitle={workspaceTitle}
             onAccessOpen={() => setIsAccessOpen(true)}
             onModeChange={handleWorkspaceMode}
           />
 
-          <div className="grid min-h-0 flex-1 bg-card lg:grid-cols-[260px_minmax(430px,1fr)_minmax(320px,380px)] xl:grid-cols-[280px_minmax(520px,1fr)_390px]">
-            <ProjectNav
-              activeChatId={activeChat?.id ?? ""}
-              activeChatSection={activeChatSection}
-              activeMode={activeMode}
-              activeProjectId={activeProject?.id ?? ""}
-              workspace={activeWorkspace}
-              onChatSelect={handleChatSelect}
-              onProjectSelect={handleProjectSelect}
-            />
+          <div
+            className={cn(
+              "grid min-h-0 flex-1 bg-card",
+              isWorkspaceRail
+                ? "lg:grid-cols-[260px_minmax(430px,1fr)_minmax(320px,380px)] xl:grid-cols-[280px_minmax(520px,1fr)_390px]"
+                : "lg:grid-cols-1",
+            )}
+          >
+            {isWorkspaceRail ? (
+              <>
+                <ProjectNav
+                  activeChatId={activeChat?.id ?? ""}
+                  activeChatSection={activeChatSection}
+                  activeMode={activeMode}
+                  activeProjectId={activeProject?.id ?? ""}
+                  workspace={activeWorkspace}
+                  onChatSelect={handleChatSelect}
+                  onProjectSelect={handleProjectSelect}
+                />
 
-            <section className="flex min-w-0 flex-col border-r">
-              <PinnedStrip
-                activeMode={activeMode}
-                artifacts={pinnedArtifacts}
-                ideas={pinnedIdeas}
-                onOpenPins={() => setActiveTab("Artifacts")}
-                onSelectArtifact={(artifact) => {
-                  setSelectedArtifactTitle(artifact.title);
-                  setActiveTab("Artifacts");
-                  setRightOpen(true);
-                }}
-                onSelectIdea={(idea) => {
-                  setSelectedIdeaId(idea.id);
-                  setActiveTab("Ideas");
-                  setRightOpen(true);
-                }}
-              />
-
-              <div className="scrollbar-thin flex h-12 shrink-0 items-end gap-4 overflow-x-auto border-b px-4">
-                {tabs.map((tab) => (
-                  <button
-                    className={cn(
-                      "h-12 whitespace-nowrap border-b-2 border-transparent text-sm font-medium text-muted-foreground",
-                      tab === activeTab && "border-primary text-primary",
-                    )}
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveTab(tab)}
-                  >
-                    {tab}
-                  </button>
-                ))}
-              </div>
-
-              <section className="scrollbar-thin min-h-0 flex-1 overflow-auto p-4 pb-32">
-                {activeTab === "Chat" ? <ChatView messages={currentMessages} /> : null}
-                {activeTab === "Ideas" ? (
-                  <IdeasView
-                    ideas={filteredIdeas}
-                    selectedIdeaId={selectedIdea?.id}
-                    searchTerm={searchTerm}
-                    statusFilter={statusFilter}
-                    pinnedIdeaIds={activeWorkspace.pinnedIdeaIds}
-                    onAddIdea={() => setIsAddOpen(true)}
-                    onSearchTerm={setSearchTerm}
-                    onSelectIdea={(idea) => {
-                      setSelectedIdeaId(idea.id);
-                      setRightOpen(true);
-                    }}
-                    onStatusFilter={setStatusFilter}
-                    onTogglePin={(id) => toggleIdeaPinMutation.mutate(id)}
-                  />
-                ) : null}
-                {activeTab === "Artifacts" ? (
-                  <ArtifactsView
+                <section className="flex min-w-0 flex-col border-r">
+                  <PinnedStrip
                     activeMode={activeMode}
-                    artifacts={activeWorkspace.artifacts}
-                    selectedArtifactTitle={selectedArtifact?.title}
-                    onPreview={setPreviewArtifact}
+                    artifacts={pinnedArtifacts}
+                    ideas={pinnedIdeas}
+                    onOpenPins={() => setActiveTab("Artifacts")}
                     onSelectArtifact={(artifact) => {
                       setSelectedArtifactTitle(artifact.title);
+                      setActiveTab("Artifacts");
                       setRightOpen(true);
                     }}
-                    onShare={() => updateToast("Share options prepared")}
-                    onTogglePin={(artifact) =>
-                      toggleArtifactPinMutation.mutate({ title: artifact.title, mode: activeMode })
-                    }
+                    onSelectIdea={(idea) => {
+                      setSelectedIdeaId(idea.id);
+                      setActiveTab("Ideas");
+                      setRightOpen(true);
+                    }}
                   />
-                ) : null}
-                {activeTab === "Decisions" ? (
-                  <DecisionView decisions={activeWorkspace.decisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
-                ) : null}
-                {activeTab === "Approvals" ? (
-                  <ApprovalView approvals={activeWorkspace.approvals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
-                ) : null}
-                {activeTab === "Tasks" ? (
-                  <TaskView tasks={activeWorkspace.tasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
-                ) : null}
-                {activeTab === "Prompt Templates" ? (
-                  <PromptView
+
+                  <div className="scrollbar-thin flex h-12 shrink-0 items-end gap-4 overflow-x-auto border-b px-4">
+                    {tabs.map((tab) => (
+                      <button
+                        className={cn(
+                          "h-12 whitespace-nowrap border-b-2 border-transparent text-sm font-medium text-muted-foreground",
+                          tab === activeTab && "border-primary text-primary",
+                        )}
+                        key={tab}
+                        type="button"
+                        onClick={() => setActiveTab(tab)}
+                      >
+                        {tab}
+                      </button>
+                    ))}
+                  </div>
+
+                  <section className="scrollbar-thin min-h-0 flex-1 overflow-auto p-4 pb-32">
+                    {activeTab === "Chat" ? <ChatView messages={currentMessages} /> : null}
+                    {activeTab === "Ideas" ? (
+                      <IdeasView
+                        ideas={filteredIdeas}
+                        selectedIdeaId={selectedIdea?.id}
+                        searchTerm={searchTerm}
+                        statusFilter={statusFilter}
+                        pinnedIdeaIds={activeWorkspace.pinnedIdeaIds}
+                        onAddIdea={() => setIsAddOpen(true)}
+                        onSearchTerm={setSearchTerm}
+                        onSelectIdea={(idea) => {
+                          setSelectedIdeaId(idea.id);
+                          setRightOpen(true);
+                        }}
+                        onStatusFilter={setStatusFilter}
+                        onTogglePin={(id) => toggleIdeaPinMutation.mutate(id)}
+                      />
+                    ) : null}
+                    {activeTab === "Artifacts" ? (
+                      <ArtifactsView
+                        activeMode={activeMode}
+                        artifacts={activeWorkspace.artifacts}
+                        selectedArtifactTitle={selectedArtifact?.title}
+                        onPreview={setPreviewArtifact}
+                        onSelectArtifact={(artifact) => {
+                          setSelectedArtifactTitle(artifact.title);
+                          setRightOpen(true);
+                        }}
+                        onShare={() => updateToast("Share options prepared")}
+                        onTogglePin={(artifact) =>
+                          toggleArtifactPinMutation.mutate({ title: artifact.title, mode: activeMode })
+                        }
+                      />
+                    ) : null}
+                    {activeTab === "Decisions" ? (
+                      <DecisionView decisions={activeWorkspace.decisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
+                    ) : null}
+                    {activeTab === "Approvals" ? (
+                      <ApprovalView approvals={activeWorkspace.approvals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
+                    ) : null}
+                    {activeTab === "Tasks" ? (
+                      <TaskView tasks={activeWorkspace.tasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
+                    ) : null}
+                    {activeTab === "Prompts" ? (
+                      <PromptView
+                        onUsePrompt={(prompt) => {
+                          setChatInput(prompt);
+                          setActiveTab("Chat");
+                        }}
+                      />
+                    ) : null}
+                  </section>
+
+                  <form
+                    className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px] xl:grid-cols-[minmax(0,1fr)_38px_38px_auto_44px]"
+                    onSubmit={handleSendMessage}
+                  >
+                    <Input
+                      aria-label="Ask the PMO assistant"
+                      placeholder={`Ask about ${activeProject?.name ?? activeWorkspace.unassignedProjectLabel} / ${activeChat?.title ?? "chat"}`}
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                    />
+                    <Button type="button" variant="outline" size="icon" aria-label="Attach file" onClick={() => updateToast("Attachment queued")}>
+                      <Paperclip />
+                    </Button>
+                    <Button type="button" variant="outline" size="icon" aria-label="Add workspace context" onClick={() => updateToast("Workspace context added")}>
+                      <Folder />
+                    </Button>
+                    <Button type="button" variant="outline" className="hidden xl:inline-flex" onClick={() => updateToast(`${model} ready`)}>
+                      <Bot />
+                      {model}
+                      <ChevronDown />
+                    </Button>
+                    <Button type="submit" size="icon" aria-label="Send message" disabled={sendMessageMutation.isPending}>
+                      <Send />
+                    </Button>
+                  </form>
+                </section>
+
+                {rightOpen ? (
+                  <DetailPanel
+                    activeMode={activeMode}
+                    activeTab={activeTab}
+                    artifact={selectedArtifact}
+                    decisions={activeWorkspace.decisions}
+                    idea={selectedIdea}
+                    isPinned={selectedIdea ? activeWorkspace.pinnedIdeaIds.includes(selectedIdea.id) : false}
+                    metrics={metrics}
+                    prompts={promptTemplates}
+                    tasks={activeWorkspace.tasks}
+                    approvals={activeWorkspace.approvals}
+                    workspaceTitle={workspaceTitle}
+                    onClose={() => setRightOpen(false)}
+                    onPreviewArtifact={() => selectedArtifact && setPreviewArtifact(selectedArtifact)}
+                    onShare={() => updateToast("Share link options ready")}
+                    onStatusChange={(status) => selectedIdea && updateStatusMutation.mutate({ id: selectedIdea.id, status })}
+                    onToggleArtifactPin={() =>
+                      selectedArtifact && toggleArtifactPinMutation.mutate({ title: selectedArtifact.title, mode: activeMode })
+                    }
+                    onToggleIdeaPin={() => selectedIdea && toggleIdeaPinMutation.mutate(selectedIdea.id)}
                     onUsePrompt={(prompt) => {
                       setChatInput(prompt);
                       setActiveTab("Chat");
                     }}
+                    onVoteIdea={() => selectedIdea && voteIdeaMutation.mutate(selectedIdea.id)}
+                    onToggleDecision={(id) => toggleDecisionMutation.mutate(id)}
+                    onToggleApproval={(id) => toggleApprovalMutation.mutate(id)}
+                    onToggleTask={(id) => toggleTaskMutation.mutate(id)}
                   />
-                ) : null}
-              </section>
-
-              <form
-                className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px] xl:grid-cols-[minmax(0,1fr)_38px_38px_auto_44px]"
-                onSubmit={handleSendMessage}
-              >
-                <Input
-                  aria-label="Ask the PMO assistant"
-                  placeholder={`Ask about ${activeProject?.name ?? activeWorkspace.unassignedProjectLabel} / ${activeChat?.title ?? "chat"}`}
-                  value={chatInput}
-                  onChange={(event) => setChatInput(event.target.value)}
-                />
-                <Button type="button" variant="outline" size="icon" aria-label="Attach file" onClick={() => updateToast("Attachment queued")}>
-                  <Paperclip />
-                </Button>
-                <Button type="button" variant="outline" size="icon" aria-label="Add workspace context" onClick={() => updateToast("Workspace context added")}>
-                  <Folder />
-                </Button>
-                <Button type="button" variant="outline" className="hidden xl:inline-flex" onClick={() => updateToast(`${model} ready`)}>
-                  <Bot />
-                  {model}
-                  <ChevronDown />
-                </Button>
-                <Button type="submit" size="icon" aria-label="Send message" disabled={sendMessageMutation.isPending}>
-                  <Send />
-                </Button>
-              </form>
-            </section>
-
-            {rightOpen ? (
-              <DetailPanel
+                ) : (
+                  <Button className="m-4 hidden self-start lg:inline-flex" type="button" variant="outline" onClick={() => setRightOpen(true)}>
+                    <Eye />
+                    Open details
+                  </Button>
+                )}
+              </>
+            ) : (
+              <CategoryTablePage
                 activeMode={activeMode}
-                activeTab={activeTab}
-                artifact={selectedArtifact}
-                decisions={activeWorkspace.decisions}
-                idea={selectedIdea}
-                isPinned={selectedIdea ? activeWorkspace.pinnedIdeaIds.includes(selectedIdea.id) : false}
-                metrics={metrics}
-                prompts={promptTemplates}
-                tasks={activeWorkspace.tasks}
-                approvals={activeWorkspace.approvals}
-                workspaceTitle={workspaceTitle}
-                onClose={() => setRightOpen(false)}
-                onPreviewArtifact={() => selectedArtifact && setPreviewArtifact(selectedArtifact)}
-                onShare={() => updateToast("Share link options ready")}
-                onStatusChange={(status) => selectedIdea && updateStatusMutation.mutate({ id: selectedIdea.id, status })}
-                onToggleArtifactPin={() =>
-                  selectedArtifact && toggleArtifactPinMutation.mutate({ title: selectedArtifact.title, mode: activeMode })
-                }
-                onToggleIdeaPin={() => selectedIdea && toggleIdeaPinMutation.mutate(selectedIdea.id)}
+                rail={activeRail}
+                workspace={activeWorkspace}
                 onUsePrompt={(prompt) => {
                   setChatInput(prompt);
+                  setActiveRail("Workspaces");
                   setActiveTab("Chat");
                 }}
-                onVoteIdea={() => selectedIdea && voteIdeaMutation.mutate(selectedIdea.id)}
-                onToggleDecision={(id) => toggleDecisionMutation.mutate(id)}
-                onToggleApproval={(id) => toggleApprovalMutation.mutate(id)}
-                onToggleTask={(id) => toggleTaskMutation.mutate(id)}
               />
-            ) : (
-              <Button className="m-4 hidden self-start lg:inline-flex" type="button" variant="outline" onClick={() => setRightOpen(true)}>
-                <Eye />
-                Open details
-              </Button>
             )}
           </div>
         </section>
@@ -620,7 +646,7 @@ function PrimaryRail({
 
 function Topbar({
   activeMode,
-  activeProject,
+  categoryLabel,
   model,
   searchTerm,
   workspaceTitle,
@@ -630,7 +656,7 @@ function Topbar({
   onSearchTerm,
 }: {
   activeMode: WorkspaceMode;
-  activeProject: string;
+  categoryLabel: string;
   model: string;
   searchTerm: string;
   workspaceTitle: string;
@@ -649,7 +675,7 @@ function Topbar({
         <div className="min-w-0">
           <h1 className="truncate text-base font-semibold lg:text-xl">AI Command Center</h1>
           <p className="truncate text-xs text-muted-foreground">
-            {workspaceTitle} / {activeProject}
+            {workspaceTitle} / {categoryLabel}
           </p>
         </div>
       </div>
@@ -688,12 +714,16 @@ function Topbar({
 function Contextbar({
   accessLevel,
   activeMode,
+  categoryLabel,
+  showScopeTabs,
   workspaceTitle,
   onAccessOpen,
   onModeChange,
 }: {
   accessLevel: ScopedWorkspaceState["accessLevel"];
   activeMode: WorkspaceMode;
+  categoryLabel: string;
+  showScopeTabs: boolean;
   workspaceTitle: string;
   onAccessOpen: () => void;
   onModeChange: (mode: WorkspaceMode) => void;
@@ -701,26 +731,28 @@ function Contextbar({
   return (
     <section className="grid gap-3 border-b bg-card px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-5">
       <div className="min-w-0 space-y-2">
-        <div className="flex w-full overflow-hidden rounded-md border md:w-fit">
-          {workspaceModes.map((mode) => (
-            <button
-              className={cn(
-                "h-9 min-w-0 flex-1 px-3 text-xs font-medium text-muted-foreground transition-colors md:min-w-28",
-                activeMode === mode && "bg-primary text-primary-foreground",
-              )}
-              key={mode}
-              type="button"
-              onClick={() => onModeChange(mode)}
-            >
-              {workspaceModeLabel(mode)}
-            </button>
-          ))}
-        </div>
+        {showScopeTabs ? (
+          <div className="flex w-full overflow-hidden rounded-md border md:w-fit">
+            {workspaceModes.map((mode) => (
+              <button
+                className={cn(
+                  "h-9 min-w-0 flex-1 px-3 text-xs font-medium text-muted-foreground transition-colors md:min-w-28",
+                  activeMode === mode && "bg-primary text-primary-foreground",
+                )}
+                key={mode}
+                type="button"
+                onClick={() => onModeChange(mode)}
+              >
+                {workspaceModeLabel(mode)}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="flex min-w-0 items-center gap-2 overflow-x-auto text-sm text-muted-foreground">
           <Folder className="size-4 shrink-0" />
           <strong className="shrink-0 text-foreground">{workspaceTitle}</strong>
           <span>/</span>
-          <span className="truncate">Pinned knowledge, decisions, artifacts, and prompts</span>
+          <span className="truncate">{categoryLabel}</span>
         </div>
       </div>
       <div className="flex items-center gap-3">
@@ -816,7 +848,7 @@ function ProjectNav({
             type="button"
             onClick={() => onChatSelect("workspace", chat.id)}
           >
-            <Archive className="size-4" />
+            <MessageCircle className="size-4" />
             <span className="min-w-0 flex-1 truncate">{chat.title}</span>
           </button>
         ))}
@@ -1295,6 +1327,213 @@ function PromptView({ onUsePrompt }: { onUsePrompt: (value: string) => void }) {
       </div>
     </div>
   );
+}
+
+type ChatTableRow = {
+  id: string;
+  title: string;
+  scope: string;
+  project: string;
+  section: "Project" | "Standalone";
+  messages: number;
+  description: string;
+};
+
+type PromptTableRow = {
+  id: string;
+  scope: string;
+  title: string;
+  prompt: string;
+};
+
+function CategoryTablePage({
+  activeMode,
+  rail,
+  workspace,
+  onUsePrompt,
+}: {
+  activeMode: WorkspaceMode;
+  rail: Exclude<RailName, "Workspaces">;
+  workspace: ScopedWorkspaceState;
+  onUsePrompt: (prompt: string) => void;
+}) {
+  const scopeLabel = workspaceModeLabel(activeMode);
+
+  return (
+    <section className="scrollbar-thin min-h-0 overflow-auto p-4 lg:p-6">
+      <div className="mb-4">
+        <span className="text-xs font-semibold uppercase text-muted-foreground">{scopeLabel}</span>
+        <h2 className="text-xl font-semibold">{rail}</h2>
+        <p className="text-sm text-muted-foreground">
+          {rail === "Chats"
+            ? "Project chats and standalone workspace chats for this scope."
+            : `${rail} scoped to ${scopeLabel}.`}
+        </p>
+      </div>
+      {rail === "Chats" ? <ChatsTable workspace={workspace} scopeLabel={scopeLabel} /> : null}
+      {rail === "Ideas" ? <IdeasTable ideas={workspace.ideas} /> : null}
+      {rail === "Artifacts" ? <ArtifactsTable artifacts={workspace.artifacts} /> : null}
+      {rail === "Decisions" ? <DecisionsTable decisions={workspace.decisions} /> : null}
+      {rail === "Approvals" ? <ApprovalsTable approvals={workspace.approvals} /> : null}
+      {rail === "Tasks" ? <TasksTable tasks={workspace.tasks} /> : null}
+      {rail === "Prompts" ? <PromptsTable scopeLabel={scopeLabel} onUsePrompt={onUsePrompt} /> : null}
+    </section>
+  );
+}
+
+function ChatsTable({ scopeLabel, workspace }: { scopeLabel: string; workspace: ScopedWorkspaceState }) {
+  const data = useMemo<ChatTableRow[]>(() => {
+    const standaloneRows = workspace.workspaceChats.map((chat) => ({
+      id: chat.id,
+      title: chat.title,
+      scope: scopeLabel,
+      project: "None",
+      section: "Standalone" as const,
+      messages: workspace.conversations[getConversationKey(workspace.mode, null, chat.id)]?.length ?? 0,
+      description: chat.description,
+    }));
+    const projectRows = workspace.projects.flatMap((project) =>
+      project.projectChats.map((chat) => ({
+        id: chat.id,
+        title: chat.title,
+        scope: scopeLabel,
+        project: project.name,
+        section: "Project" as const,
+        messages: workspace.conversations[getConversationKey(workspace.mode, project.id, chat.id)]?.length ?? 0,
+        description: chat.description,
+      })),
+    );
+    return [...projectRows, ...standaloneRows];
+  }, [scopeLabel, workspace]);
+
+  const columns = useMemo<ColumnDef<ChatTableRow>[]>(
+    () => [
+      { accessorKey: "title", header: "Chat" },
+      {
+        accessorKey: "section",
+        header: "Type",
+        cell: ({ row }) => <Badge variant={row.original.section === "Project" ? "info" : "secondary"}>{row.original.section}</Badge>,
+      },
+      { accessorKey: "project", header: "Project" },
+      { accessorKey: "messages", header: "Messages" },
+      { accessorKey: "description", header: "Description" },
+    ],
+    [],
+  );
+
+  return <DataTable columns={columns} data={data} getRowId={(row) => row.id} />;
+}
+
+function IdeasTable({ ideas }: { ideas: Idea[] }) {
+  const columns = useMemo<ColumnDef<Idea>[]>(
+    () => [
+      { accessorKey: "title", header: "Idea" },
+      { accessorKey: "category", header: "Category" },
+      { accessorKey: "owner", header: "Owner" },
+      { accessorKey: "votes", header: "Votes" },
+      { accessorKey: "impact", header: "Impact", cell: ({ row }) => <ScoreCell value={row.original.impact} /> },
+      { accessorKey: "status", header: "Status", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+    ],
+    [],
+  );
+
+  return <DataTable columns={columns} data={ideas} getRowId={(idea) => idea.id} />;
+}
+
+function ArtifactsTable({ artifacts }: { artifacts: Artifact[] }) {
+  const columns = useMemo<ColumnDef<Artifact>[]>(
+    () => [
+      { accessorKey: "title", header: "Artifact" },
+      { accessorKey: "type", header: "Type" },
+      { accessorKey: "owner", header: "Owner" },
+      { accessorKey: "date", header: "Date" },
+      { accessorKey: "status", header: "Status" },
+      { accessorKey: "r2Key", header: "R2 key" },
+    ],
+    [],
+  );
+
+  return <DataTable columns={columns} data={artifacts} getRowId={(artifact) => artifact.title} />;
+}
+
+function DecisionsTable({ decisions }: { decisions: Decision[] }) {
+  const columns = useMemo<ColumnDef<Decision>[]>(
+    () => [
+      { accessorKey: "title", header: "Decision" },
+      { accessorKey: "owner", header: "Owner" },
+      { accessorKey: "due", header: "Due" },
+      { accessorKey: "status", header: "Status" },
+    ],
+    [],
+  );
+
+  return <DataTable columns={columns} data={decisions} getRowId={(decision) => decision.id} />;
+}
+
+function ApprovalsTable({ approvals }: { approvals: Approval[] }) {
+  const columns = useMemo<ColumnDef<Approval>[]>(
+    () => [
+      { accessorKey: "title", header: "Approval" },
+      { accessorKey: "owner", header: "Approver" },
+      { accessorKey: "due", header: "Due" },
+      { accessorKey: "status", header: "Status" },
+    ],
+    [],
+  );
+
+  return <DataTable columns={columns} data={approvals} getRowId={(approval) => approval.id} />;
+}
+
+function TasksTable({ tasks }: { tasks: Task[] }) {
+  const columns = useMemo<ColumnDef<Task>[]>(
+    () => [
+      { accessorKey: "title", header: "Task" },
+      { accessorKey: "owner", header: "Owner" },
+      { accessorKey: "source", header: "Source" },
+      { accessorKey: "status", header: "Status" },
+    ],
+    [],
+  );
+
+  return <DataTable columns={columns} data={tasks} getRowId={(task) => task.id} />;
+}
+
+function PromptsTable({
+  onUsePrompt,
+  scopeLabel,
+}: {
+  onUsePrompt: (prompt: string) => void;
+  scopeLabel: string;
+}) {
+  const data = useMemo<PromptTableRow[]>(
+    () =>
+      promptTemplates.map((prompt, index) => ({
+        id: `${scopeLabel.toLowerCase()}-prompt-${index + 1}`,
+        scope: scopeLabel,
+        title: `Prompt ${index + 1}`,
+        prompt,
+      })),
+    [scopeLabel],
+  );
+  const columns = useMemo<ColumnDef<PromptTableRow>[]>(
+    () => [
+      { accessorKey: "title", header: "Prompt" },
+      { accessorKey: "scope", header: "Scope" },
+      { accessorKey: "prompt", header: "Text" },
+      {
+        id: "action",
+        header: "",
+        cell: ({ row }) => (
+          <Button type="button" variant="outline" size="sm" onClick={() => onUsePrompt(row.original.prompt)}>
+            Use
+          </Button>
+        ),
+      },
+    ],
+    [onUsePrompt],
+  );
+
+  return <DataTable columns={columns} data={data} getRowId={(prompt) => prompt.id} />;
 }
 
 function DetailPanel({

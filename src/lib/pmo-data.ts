@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { createServerFn } from "@tanstack/react-start";
 
 export type IdeaStatus = "New" | "Review" | "Pilot" | "Approved" | "Implemented" | "Blocked";
-export type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompt Templates";
+export type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
 export type RailName = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
 export type WorkspaceMode = "Personal" | "Team" | "Org";
 export type WorkspaceScope = "personal" | "team" | "org";
@@ -153,7 +153,7 @@ export const statusMeta: Record<IdeaStatus, { label: string; tone: "info" | "war
   Blocked: { label: "Blocked", tone: "destructive", description: "Needs a decision, data source, or owner." },
 };
 
-export const tabs: TabName[] = ["Chat", "Ideas", "Artifacts", "Decisions", "Approvals", "Tasks", "Prompt Templates"];
+export const tabs: TabName[] = ["Chat", "Ideas", "Artifacts", "Decisions", "Approvals", "Tasks", "Prompts"];
 export const workspaceModes: WorkspaceMode[] = ["Personal", "Team", "Org"];
 export const statusFilters: Array<IdeaStatus | "All"> = ["All", "New", "Review", "Pilot", "Approved", "Implemented", "Blocked"];
 export const modelOptions = ["GPT 5.5", "Claude Opus 4.6", "Gemini Flash 3.5"];
