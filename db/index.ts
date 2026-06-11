@@ -11,3 +11,15 @@ export function getDb() {
 
   return drizzle(env.DB, { schema });
 }
+
+export function getArtifactsBucket() {
+  const runtimeEnv = env as typeof env & { ARTIFACTS_BUCKET?: R2Bucket };
+
+  if (!runtimeEnv.ARTIFACTS_BUCKET) {
+    throw new Error(
+      "Cloudflare R2 binding `ARTIFACTS_BUCKET` is unavailable. Set the `r2` field in .openai/hosting.json to `ARTIFACTS_BUCKET` before using artifact storage."
+    );
+  }
+
+  return runtimeEnv.ARTIFACTS_BUCKET;
+}
