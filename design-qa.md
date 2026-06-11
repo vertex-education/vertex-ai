@@ -65,6 +65,9 @@ focused region comparison evidence: Focused checks covered the top navigation, l
 - Browser validation passed for brand logo rendering, LMS/Data Migration project chat switching, project-specific messages, and composer popover anchoring.
 - Browser validation passed for improvement-strip tab order, artifact preview modal content, artifact download links, and local 200 responses for the generated DOCX/PPTX/XLSX files.
 - Browser validation passed for workspace mode switching, dynamic breadcrumbs, artifact pinning, no remaining create/generate artifact buttons, Approvals/Tasks tab switching, and pinned-rail hit targets.
+- Browser validation passed for icon-only blue rail labels, no `Global` wording in the rail, context-only chat sidebars, global table scope filtering from the top workspace tabs, and non-workspace breadcrumbs omitting chat/item names.
+- Browser validation passed for the reintroduced Chat tab, composer send switching to Chat, and the page title/header rename to AI Command Center.
+- Browser validation passed for right-sidebar `Workspace` casing and dynamic cards under metrics for Ideas, Artifacts, and Tasks.
 - Browser text entry validation was partially blocked by the Browser plugin's virtual clipboard path, but the text-entry handlers compile, the fields are rendered, and the add-idea/chat submit logic was validated in the previous pass before this broader interaction expansion.
 
 **Follow-up Polish**

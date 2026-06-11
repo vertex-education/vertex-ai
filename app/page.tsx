@@ -28,7 +28,6 @@ import {
   Plus,
   Search,
   Send,
-  Settings,
   Share2,
   ShieldCheck,
   Sparkles,
@@ -40,8 +39,8 @@ import {
 import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 
 type IdeaStatus = "New" | "Review" | "Pilot" | "Approved" | "Implemented" | "Blocked";
-type TabName = "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompt Templates";
-type RailName = "Chat" | "Projects" | "Teams" | "Artifacts" | "Prompts" | "Settings";
+type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompt Templates";
+type RailName = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
 type WorkspaceMode = "Personal" | "Team" | "Project" | "Team Project";
 type TopbarMenu = "notifications" | "people" | "model" | "workspace" | "attachment" | null;
 type ComposerMenu = "model" | "workspace" | "attachment" | null;
@@ -691,8 +690,40 @@ const projectChats: Record<string, string[]> = {
   "AI Innovation Lab": ["AI Lab Shared Chat", "Pilot Intake", "Governance Review", "Adoption Metrics"],
 };
 
-const tabs: TabName[] = ["Ideas", "Artifacts", "Decisions", "Approvals", "Tasks", "Prompt Templates"];
+const workspaceChatSets: Record<WorkspaceMode, { heading: string; chats: string[]; savedHeading: string; saved: string[] }> = {
+  Personal: {
+    heading: "Chats",
+    chats: ["My PMO Assistant", "Meeting Notes", "Follow-up Drafts", "Private Idea Scratchpad"],
+    savedHeading: "Saved Chats",
+    saved: ["My Weekly Summary", "Personal Action Review"],
+  },
+  Team: {
+    heading: "Team Chats",
+    chats: ["PMO Team Chat", "Intake Council", "Steering Prep", "Risk & Escalations"],
+    savedHeading: "Team Saved Chats",
+    saved: ["Q2 Planning Summary", "Resourcing Discussion"],
+  },
+  Project: {
+    heading: "Project Chats",
+    chats: ["My Project Notes", "Roadmap Review", "Stakeholder Follow-ups", "Personal Risks"],
+    savedHeading: "Project Saved Chats",
+    saved: ["My Vertex Hub Brief", "Private Launch Notes"],
+  },
+  "Team Project": {
+    heading: "Project Chats",
+    chats: ["Shared Chat", "Roadmap Planning", "Stakeholder Updates", "Risk & Issues", "Decision Log"],
+    savedHeading: "Project Saved Chats",
+    saved: ["Q2 Planning Summary", "Resourcing Discussion"],
+  },
+};
+
+const tabs: TabName[] = ["Chat", "Ideas", "Artifacts", "Decisions", "Approvals", "Tasks", "Prompt Templates"];
 const workspaceModes: WorkspaceMode[] = ["Personal", "Team", "Project", "Team Project"];
+const promptTemplates = [
+  "Summarize improvement ideas by impact, effort, and status for Steering Committee.",
+  "Draft a concise nudge for owners of decisions older than seven days.",
+  "Create a RAID summary from the last five project updates.",
+];
 const statusFilters: Array<IdeaStatus | "All"> = [
   "All",
   "New",
@@ -720,6 +751,10 @@ function initials(name: string) {
     .toUpperCase();
 }
 
+function workspaceModeLabel(mode: WorkspaceMode) {
+  return mode === "Project" ? "Personal Project" : mode;
+}
+
 function iconForArtifact(type: "doc" | "ppt" | "sheet" | string) {
   if (type === "sheet" || type === "XLSX") return <ClipboardList size={18} />;
   if (type === "ppt" || type === "PPTX") return <BarChart3 size={18} />;
@@ -739,7 +774,7 @@ export default function Home() {
   const [shareOpen, setShareOpen] = useState(false);
   const [toast, setToast] = useState("Prototype ready");
   const [rightOpen, setRightOpen] = useState(true);
-  const [activeRail, setActiveRail] = useState<RailName>("Chat");
+  const [activeRail, setActiveRail] = useState<RailName>("Workspaces");
   const [activeProject, setActiveProject] = useState("Vertex Hub");
   const [activeChat, setActiveChat] = useState("Shared Chat");
   const [activeMode, setActiveMode] = useState<WorkspaceMode>("Team Project");
@@ -766,14 +801,20 @@ export default function Home() {
         : activeMode === "Project"
           ? `${activeProject} personal project`
           : `${activeProject} team project`;
+  const contextChats =
+    activeMode === "Team Project"
+      ? { ...workspaceChatSets[activeMode], chats: projectChats[activeProject] ?? workspaceChatSets[activeMode].chats }
+      : workspaceChatSets[activeMode];
   const breadcrumbs =
-    activeMode === "Personal"
-      ? ["Personal Workspace"]
-      : activeMode === "Team"
-        ? ["PMO Team", "Team Workspace"]
-        : activeMode === "Project"
-          ? ["Personal Workspace", activeProject, activeChat]
-          : ["PMO Team", activeProject, activeChat];
+    activeRail !== "Workspaces"
+      ? [workspaceModeLabel(activeMode), activeRail]
+      : activeMode === "Personal"
+        ? ["Personal Workspace"]
+        : activeMode === "Team"
+          ? ["PMO Team", "Team Workspace"]
+          : activeMode === "Project"
+            ? ["Personal Workspace", activeProject, activeChat]
+            : ["PMO Team", activeProject, activeChat];
   const conversationKey = `${activeProject}::${activeChat}`;
   const currentMessages = conversations[conversationKey] ?? [
     {
@@ -836,6 +877,8 @@ export default function Home() {
       [conversationKey]: [...(current[conversationKey] ?? currentMessages), newUserMessage, response],
     }));
     setChatInput("");
+    setActiveRail("Workspaces");
+    setActiveTab("Chat");
     updateToast("Chat updated with assistant recommendation");
   }
 
@@ -895,12 +938,19 @@ export default function Home() {
 
   function handleRailClick(label: RailName) {
     setActiveRail(label);
-    if (label === "Chat" || label === "Projects") setActiveTab("Ideas");
-    if (label === "Artifacts") setActiveTab("Artifacts");
-    if (label === "Prompts") setActiveTab("Prompt Templates");
-    if (label === "Teams") setTopbarMenu("people");
-    if (label === "Settings") setIsAccessOpen(true);
+    if (label === "Workspaces") setActiveTab("Ideas");
     updateToast(`${label} opened`);
+  }
+
+  function handleWorkspaceModeSelect(mode: WorkspaceMode) {
+    setActiveMode(mode);
+    setRightOpen(true);
+    const nextChat =
+      mode === "Team Project"
+        ? (projectChats[activeProject]?.[0] ?? workspaceChatSets[mode].chats[0])
+        : workspaceChatSets[mode].chats[0];
+    setActiveChat(nextChat);
+    updateToast(`${mode} mode selected`);
   }
 
   function handleProjectSelect(project: string) {
@@ -953,31 +1003,51 @@ export default function Home() {
     updateToast("Decision status updated");
   }
 
+  function toggleApprovalStatus(id: string) {
+    setApprovals((current) =>
+      current.map((item) =>
+        item.id === id
+          ? { ...item, status: item.status === "Approved" ? "Needed" : "Approved", due: item.status === "Approved" ? "Due this week" : "Approved just now" }
+          : item,
+      ),
+    );
+    updateToast("Approval status updated");
+  }
+
+  function toggleTaskStatus(id: string) {
+    setTasks((current) =>
+      current.map((item) => (item.id === id ? { ...item, status: item.status === "Done" ? "Open" : "Done" } : item)),
+    );
+    updateToast("Task status updated");
+  }
+
   return (
     <main className="prototype-shell">
-      <div className="app-frame" aria-label="PMO Team Chat prototype">
+      <div className="app-frame" aria-label="AI Command Center prototype">
         <aside className="primary-rail" aria-label="Global navigation">
           <div className="rail-logo">
             <img src="/vertex-mountain-blue.svg" alt="Vertex Education" />
           </div>
-          <RailItem icon={<MessageCircle size={20} />} label="Chat" active={activeRail === "Chat"} onClick={() => handleRailClick("Chat")} />
-          <RailItem icon={<FolderOpen size={20} />} label="Projects" active={activeRail === "Projects"} onClick={() => handleRailClick("Projects")} />
-          <RailItem icon={<Users size={20} />} label="Teams" active={activeRail === "Teams"} onClick={() => handleRailClick("Teams")} />
+          <RailItem icon={<FolderOpen size={20} />} label="Workspaces" active={activeRail === "Workspaces"} onClick={() => handleRailClick("Workspaces")} />
+          <RailItem icon={<MessageCircle size={20} />} label="Chats" active={activeRail === "Chats"} onClick={() => handleRailClick("Chats")} />
+          <RailItem icon={<Lightbulb size={20} />} label="Ideas" active={activeRail === "Ideas"} onClick={() => handleRailClick("Ideas")} />
           <RailItem icon={<Archive size={20} />} label="Artifacts" active={activeRail === "Artifacts"} onClick={() => handleRailClick("Artifacts")} />
+          <RailItem icon={<ClipboardList size={20} />} label="Decisions" active={activeRail === "Decisions"} onClick={() => handleRailClick("Decisions")} />
+          <RailItem icon={<ShieldCheck size={20} />} label="Approvals" active={activeRail === "Approvals"} onClick={() => handleRailClick("Approvals")} />
+          <RailItem icon={<CheckCircle2 size={20} />} label="Tasks" active={activeRail === "Tasks"} onClick={() => handleRailClick("Tasks")} />
           <RailItem icon={<Sparkles size={20} />} label="Prompts" active={activeRail === "Prompts"} onClick={() => handleRailClick("Prompts")} />
           <div className="rail-spacer" />
-          <RailItem icon={<Settings size={20} />} label="Settings" active={activeRail === "Settings"} onClick={() => handleRailClick("Settings")} />
           <img className="rail-avatar" src={avatarPriya} alt="Priya Shah" />
         </aside>
 
         <section className="workspace-shell">
           <header className="topbar">
             <div className="topbar-title">
-              <button className="icon-button mobile-only" type="button" aria-label="Open menu" onClick={() => handleRailClick("Projects")}>
+              <button className="icon-button mobile-only" type="button" aria-label="Open menu" onClick={() => handleRailClick("Workspaces")}>
                 <Menu size={20} />
               </button>
               <img className="brand-wordmark" src="/vertex-horizontal.svg" alt="Vertex Education" />
-              <h1>PMO Team Chatbot</h1>
+              <h1>AI Command Center</h1>
             </div>
             <label className="global-search">
               <Search size={16} />
@@ -1013,11 +1083,7 @@ export default function Home() {
           <section className="contextbar">
             <div className="mode-tabs" aria-label="Workspace mode">
               {workspaceModes.map((item) => (
-                <button className={item === activeMode ? "active" : ""} type="button" key={item} onClick={() => {
-                  setActiveMode(item);
-                  setRightOpen(true);
-                  updateToast(`${item} mode selected`);
-                }}>
+                <button className={item === activeMode ? "active" : ""} type="button" key={item} onClick={() => handleWorkspaceModeSelect(item)}>
                   {item === "Project" ? "Personal Project" : item}
                 </button>
               ))}
@@ -1049,14 +1115,18 @@ export default function Home() {
             </div>
           </section>
 
+          {activeRail === "Workspaces" ? (
           <div className="content-grid">
             <ProjectNav
+              activeMode={activeMode}
               activeProject={activeProject}
               activeChat={activeChat}
-              chats={projectChats[activeProject] ?? projectChats["Vertex Hub"]}
+              chats={contextChats.chats}
+              chatHeading={contextChats.heading}
+              savedHeading={contextChats.savedHeading}
+              savedChats={contextChats.saved}
               onProjectSelect={handleProjectSelect}
               onChatSelect={handleChatSelect}
-              onQuickAccess={(target) => updateToast(`${target} opened`)}
             />
 
             <section className="main-panel" aria-label="Shared chat workspace">
@@ -1087,6 +1157,7 @@ export default function Home() {
                     className={activeTab === tab ? "active" : ""}
                     onClick={() => setActiveTab(tab)}
                   >
+                    {tab === "Chat" ? <MessageCircle size={16} /> : null}
                     {tab === "Ideas" ? <Lightbulb size={16} /> : null}
                     {tab === "Artifacts" ? <Archive size={16} /> : null}
                     {tab === "Approvals" ? <ShieldCheck size={16} /> : null}
@@ -1096,6 +1167,10 @@ export default function Home() {
                   </button>
                 ))}
               </div>
+
+              {activeTab === "Chat" ? (
+                <ChatView messages={currentMessages} />
+              ) : null}
 
               {activeTab === "Ideas" ? (
                 <IdeasView
@@ -1133,8 +1208,8 @@ export default function Home() {
               ) : null}
 
               {activeTab === "Decisions" ? <DecisionView decisions={decisions} onToggle={toggleDecisionStatus} /> : null}
-              {activeTab === "Approvals" ? <ApprovalView approvals={approvals} onToggle={(id) => setApprovals((current) => current.map((item) => item.id === id ? { ...item, status: item.status === "Approved" ? "Needed" : "Approved", due: item.status === "Approved" ? "Due this week" : "Approved just now" } : item))} /> : null}
-              {activeTab === "Tasks" ? <TaskView tasks={tasks} onToggle={(id) => setTasks((current) => current.map((item) => item.id === id ? { ...item, status: item.status === "Done" ? "Open" : "Done" } : item))} /> : null}
+              {activeTab === "Approvals" ? <ApprovalView approvals={approvals} onToggle={toggleApprovalStatus} /> : null}
+              {activeTab === "Tasks" ? <TaskView tasks={tasks} onToggle={toggleTaskStatus} /> : null}
               {activeTab === "Prompt Templates" ? <PromptView onUsePrompt={setChatInput} /> : null}
 
               <form className="composer" onSubmit={handleSend}>
@@ -1175,7 +1250,7 @@ export default function Home() {
               <aside className="detail-panel" aria-label="Workspace metrics and pinned items">
                 <div className="panel-header">
                   <div>
-                    <span className="eyebrow">{activeMode} workspace</span>
+                    <span className="eyebrow">{activeMode} Workspace</span>
                     <h2>{workspaceTitle}</h2>
                   </div>
                   <button className="icon-button" type="button" onClick={() => setRightOpen(false)} aria-label="Collapse details">
@@ -1189,16 +1264,30 @@ export default function Home() {
                   ))}
                 </div>
 
-                <IdeaDetail
-                  idea={selectedIdea}
-                  onVote={voteSelectedIdea}
-                  onStatusChange={changeSelectedStatus}
-                  isPinned={pinnedIdeaIds.includes(selectedIdea.id)}
-                  onTogglePin={() => toggleIdeaPin(selectedIdea.id)}
+                <SidebarInsight
+                  activeTab={activeTab}
+                  activeChat={activeChat}
+                  messages={currentMessages}
+                  selectedIdea={selectedIdea}
+                  selectedArtifact={selectedArtifact}
+                  decisions={decisions}
+                  approvals={approvals}
+                  tasks={tasks}
+                  isIdeaPinned={pinnedIdeaIds.includes(selectedIdea.id)}
+                  isArtifactPinned={selectedArtifact.pinnedTo.includes(activeMode)}
+                  onVoteIdea={voteSelectedIdea}
+                  onIdeaStatusChange={changeSelectedStatus}
+                  onToggleIdeaPin={() => toggleIdeaPin(selectedIdea.id)}
+                  onToggleArtifactPin={() => toggleArtifactPin(selectedArtifact)}
+                  onPreviewArtifact={() => setPreviewArtifact(selectedArtifact)}
                   onShare={() => {
                     setShareOpen((current) => !current);
                     updateToast("Share menu opened");
                   }}
+                  onToggleDecision={toggleDecisionStatus}
+                  onToggleApproval={toggleApprovalStatus}
+                  onToggleTask={toggleTaskStatus}
+                  onUsePrompt={setChatInput}
                 />
 
                 <section className="workspace-card">
@@ -1218,27 +1307,6 @@ export default function Home() {
                   </div>
                 </section>
 
-                <section className="workspace-card artifact-detail-card">
-                  <div className="card-title-row">
-                    <h3>Selected Artifact</h3>
-                    <button type="button" onClick={() => toggleArtifactPin(selectedArtifact)}>
-                      {selectedArtifact.pinnedTo.includes(activeMode) ? "Unpin" : "Pin here"}
-                    </button>
-                  </div>
-                  <p>{selectedArtifact.summary}</p>
-                  <span className="artifact-detail-meta">{selectedArtifact.type} - {selectedArtifact.status} - {selectedArtifact.owner}</span>
-                  <div className="artifact-detail-actions">
-                    <button className="secondary-button" type="button" onClick={() => setPreviewArtifact(selectedArtifact)}>
-                      <Eye size={16} />
-                      Preview
-                    </button>
-                    <a className="secondary-button" href={selectedArtifact.href} download>
-                      <Download size={16} />
-                      Download
-                    </a>
-                  </div>
-                </section>
-
                 {shareOpen ? <SharePopover onToast={updateToast} /> : null}
               </aside>
             ) : (
@@ -1248,6 +1316,19 @@ export default function Home() {
               </button>
             )}
           </div>
+          ) : (
+            <GlobalTableView
+              view={activeRail}
+              activeMode={activeMode}
+              projects={Object.keys(projectChats)}
+              ideas={ideas}
+              artifacts={artifacts}
+              decisions={decisions}
+              approvals={approvals}
+              tasks={tasks}
+              onOpenWorkspace={() => setActiveRail("Workspaces")}
+            />
+          )}
         </section>
 
         <div className="toast" role="status">
@@ -1300,47 +1381,39 @@ function RailItem({
 }
 
 function ProjectNav({
+  activeMode,
   activeProject,
   activeChat,
   chats,
+  chatHeading,
+  savedHeading,
+  savedChats,
   onProjectSelect,
   onChatSelect,
-  onQuickAccess,
 }: {
+  activeMode: WorkspaceMode;
   activeProject: string;
   activeChat: string;
   chats: string[];
+  chatHeading: string;
+  savedHeading: string;
+  savedChats: string[];
   onProjectSelect: (project: string) => void;
   onChatSelect: (chat: string) => void;
-  onQuickAccess: (target: string) => void;
 }) {
   const teamProjects = ["Vertex Hub", "LMS Next Gen", "Data Migration", "AI Innovation Lab"];
-  const quickAccess = [
-    ["Global Projects", FolderOpen],
-    ["Team Management", Users],
-    ["Global Artifacts", Archive],
-    ["Prompt Catalog", Sparkles],
-  ] as const;
+  const showProjects = activeMode === "Project" || activeMode === "Team Project";
 
   return (
     <aside className="project-nav" aria-label="Project navigation">
       <div className="nav-section-heading">
-        <span>Quick access</span>
+        <span>{activeMode === "Team" ? "Team workspace" : activeMode === "Personal" ? "Personal workspace" : activeProject}</span>
       </div>
 
-      <div className="nav-group compact-group">
-        {quickAccess.map(([label, Icon]) => (
-          <button className="nav-link" type="button" key={label} onClick={() => onQuickAccess(label)}>
-            <Icon size={15} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="nav-group">
+      {showProjects ? <div className="nav-group">
         <div className="nav-group-label">
           <ChevronDown size={15} />
-          Team Projects
+          {activeMode === "Project" ? "Personal Projects" : "Team Projects"}
         </div>
         {teamProjects.map((project) => (
           <button className={`nav-link ${project === activeProject ? "active" : ""}`} type="button" key={project} onClick={() => onProjectSelect(project)}>
@@ -1349,12 +1422,12 @@ function ProjectNav({
             {project === activeProject ? <span className="nav-dot" /> : null}
           </button>
         ))}
-      </div>
+      </div> : null}
 
       <div className="nav-group">
         <div className="nav-group-label">
           <ChevronDown size={15} />
-          Chats
+          {chatHeading}
         </div>
         {chats.map((chat) => (
           <button className={`nav-link ${chat === activeChat ? "active" : ""}`} type="button" key={chat} onClick={() => onChatSelect(chat)}>
@@ -1367,9 +1440,9 @@ function ProjectNav({
       <div className="nav-group">
         <div className="nav-group-label">
           <ChevronDown size={15} />
-          Saved Chats
+          {savedHeading}
         </div>
-        {["Q2 Planning Summary", "Resourcing Discussion"].map((chat) => (
+        {savedChats.map((chat) => (
           <button className={`nav-link ${chat === activeChat ? "active" : ""}`} type="button" key={chat} onClick={() => onChatSelect(chat)}>
             <Archive size={15} />
             <span>{chat}</span>
@@ -1377,6 +1450,177 @@ function ProjectNav({
         ))}
       </div>
     </aside>
+  );
+}
+
+function ChatView({ messages }: { messages: ChatMessage[] }) {
+  return (
+    <div className="chat-view">
+      <div className="messages">
+        {messages.map((message) => (
+          <article className={`message ${message.role}`} key={message.id}>
+            {message.role === "assistant" ? (
+              <div className="assistant-avatar">V</div>
+            ) : (
+              <img className="message-avatar" src={message.avatar} alt={message.author} />
+            )}
+            <div className="message-body">
+              <div className="message-meta">
+                <strong>{message.author}</strong>
+                {message.role === "assistant" ? <span className="model-chip">GPT 5.5</span> : null}
+                <span>{message.time}</span>
+              </div>
+              <p>{message.text}</p>
+              {message.artifact ? (
+                <button className={`artifact-card ${message.artifact.type}`} type="button">
+                  <span className="artifact-icon">{iconForArtifact(message.artifact.type)}</span>
+                  <span>
+                    <strong>{message.artifact.title}</strong>
+                    <em>{message.artifact.meta}</em>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+              ) : null}
+            </div>
+          </article>
+        ))}
+
+        <div className="pin-note">
+          <Sparkles size={17} />
+          <span>Assistant extracted improvement ideas, tasks, decisions, approvals, and artifacts from this chat.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GlobalTableView({
+  view,
+  activeMode,
+  projects,
+  ideas,
+  artifacts,
+  decisions,
+  approvals,
+  tasks,
+  onOpenWorkspace,
+}: {
+  view: Exclude<RailName, "Workspaces">;
+  activeMode: WorkspaceMode;
+  projects: string[];
+  ideas: Idea[];
+  artifacts: Artifact[];
+  decisions: Decision[];
+  approvals: Approval[];
+  tasks: Task[];
+  onOpenWorkspace: () => void;
+}) {
+  const projectForIndex = (index: number) => projects[index % projects.length] ?? "Vertex Hub";
+  const scopeForIndex = (index: number): WorkspaceMode =>
+    (["Team Project", "Team", "Project", "Personal"] as WorkspaceMode[])[index % 4];
+  const scopeLabel = (scope: WorkspaceMode) => scope === "Project" ? "Personal Project" : scope;
+  const formatScopes = (scopes: WorkspaceMode[]) => scopes.map(scopeLabel).join(", ");
+
+  const chatRows = [
+    ...workspaceChatSets.Personal.chats.map((chat) => ["Personal", "-", chat, "Active chat"]),
+    ...workspaceChatSets.Personal.saved.map((chat) => ["Personal", "-", chat, "Saved chat"]),
+    ...workspaceChatSets.Team.chats.map((chat) => ["Team", "-", chat, "Active chat"]),
+    ...workspaceChatSets.Team.saved.map((chat) => ["Team", "-", chat, "Saved chat"]),
+    ...projects.flatMap((project) => [
+      ...(projectChats[project] ?? []).map((chat) => ["Team Project", project, chat, "Active chat"]),
+      ...workspaceChatSets.Project.chats.slice(0, 2).map((chat) => ["Personal Project", project, chat, "Active chat"]),
+      ...workspaceChatSets["Team Project"].saved.map((chat) => ["Team Project", project, chat, "Saved chat"]),
+    ]),
+  ];
+
+  const scopedRows = (rows: Array<Array<ReactNode>>) =>
+    rows.filter((row) => String(row[0]).split(",").map((scope) => scope.trim()).includes(scopeLabel(activeMode)));
+
+  const config: { title: string; subtitle: string; columns: string[]; rows: Array<Array<ReactNode>> } =
+    view === "Chats" ? {
+      title: "Chats",
+      subtitle: "All active and saved chats with their workspace assignment.",
+      columns: ["Scope", "Project", "Chat", "Type"],
+      rows: scopedRows(chatRows),
+    } : view === "Ideas" ? {
+      title: "Ideas",
+      subtitle: "Improvement ideas generated from chats with workspace and project scope.",
+      columns: ["Scope", "Project", "Idea", "Status", "Owner"],
+      rows: scopedRows(ideas.map((idea, index) => {
+        const scope = scopeForIndex(index);
+        return [scopeLabel(scope), scope.includes("Project") ? projectForIndex(index) : "-", idea.title, statusMeta[idea.status].label, idea.owner];
+      })),
+    } : view === "Artifacts" ? {
+      title: "Artifacts",
+      subtitle: "Downloadable artifacts with pinning and workspace scope.",
+      columns: ["Scope", "Project", "Artifact", "Type", "Owner"],
+      rows: scopedRows(artifacts.map((artifact, index) => [formatScopes(artifact.pinnedTo), artifact.pinnedTo.some((scope) => scope.includes("Project")) ? projectForIndex(index) : "-", artifact.title, artifact.type, artifact.owner])),
+    } : view === "Decisions" ? {
+      title: "Decisions",
+      subtitle: "Decision records collected across personal, team, and project contexts.",
+      columns: ["Scope", "Project", "Decision", "Status", "Owner"],
+      rows: scopedRows(decisions.map((decision, index) => {
+        const scope = scopeForIndex(index);
+        return [scopeLabel(scope), scope.includes("Project") ? projectForIndex(index) : "-", decision.title, decision.status, decision.owner];
+      })),
+    } : view === "Approvals" ? {
+      title: "Approvals",
+      subtitle: "Approval asks across global PMO workspaces.",
+      columns: ["Scope", "Project", "Approval", "Status", "Approver"],
+      rows: scopedRows(approvals.map((approval, index) => {
+        const scope = scopeForIndex(index + 1);
+        return [scopeLabel(scope), scope.includes("Project") ? projectForIndex(index) : "-", approval.title, approval.status, approval.owner];
+      })),
+    } : view === "Tasks" ? {
+      title: "Tasks",
+      subtitle: "Tasks surfaced from chats, decisions, and artifacts.",
+      columns: ["Scope", "Project", "Task", "Status", "Owner"],
+      rows: scopedRows(tasks.map((task, index) => {
+        const scope = scopeForIndex(index + 2);
+        return [scopeLabel(scope), scope.includes("Project") ? projectForIndex(index) : "-", task.title, task.status, task.owner];
+      })),
+    } : {
+      title: "Prompts",
+      subtitle: "Prompt templates cataloged by intended workspace scope.",
+      columns: ["Scope", "Project", "Prompt", "Type"],
+      rows: scopedRows(promptTemplates.map((prompt, index) => {
+        const scope = scopeForIndex(index + 1);
+        return [scopeLabel(scope), scope.includes("Project") ? projectForIndex(index) : "-", prompt, "Template"];
+      })),
+    };
+
+  return (
+    <section className="global-view" aria-label={config.title}>
+      <div className="global-view-header">
+        <div>
+          <span className="eyebrow">{scopeLabel(activeMode)} scope</span>
+          <h2>{config.title}</h2>
+          <p>{config.subtitle}</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={onOpenWorkspace}>
+          <FolderOpen size={16} />
+          Workspaces
+        </button>
+      </div>
+      <div className="global-table-wrap">
+        <table className="global-table">
+          <thead>
+            <tr>
+              {config.columns.map((column) => <th key={column}>{column}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {config.rows.map((row, rowIndex) => (
+              <tr key={`${config.title}-${rowIndex}`}>
+                {row.map((cell, cellIndex) => (
+                  <td key={`${config.title}-${rowIndex}-${cellIndex}`}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -1582,6 +1826,160 @@ function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; va
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function SidebarInsight({
+  activeTab,
+  activeChat,
+  messages,
+  selectedIdea,
+  selectedArtifact,
+  decisions,
+  approvals,
+  tasks,
+  isIdeaPinned,
+  isArtifactPinned,
+  onVoteIdea,
+  onIdeaStatusChange,
+  onToggleIdeaPin,
+  onToggleArtifactPin,
+  onPreviewArtifact,
+  onShare,
+  onToggleDecision,
+  onToggleApproval,
+  onToggleTask,
+  onUsePrompt,
+}: {
+  activeTab: TabName;
+  activeChat: string;
+  messages: ChatMessage[];
+  selectedIdea: Idea;
+  selectedArtifact: Artifact;
+  decisions: Decision[];
+  approvals: Approval[];
+  tasks: Task[];
+  isIdeaPinned: boolean;
+  isArtifactPinned: boolean;
+  onVoteIdea: () => void;
+  onIdeaStatusChange: (status: IdeaStatus) => void;
+  onToggleIdeaPin: () => void;
+  onToggleArtifactPin: () => void;
+  onPreviewArtifact: () => void;
+  onShare: () => void;
+  onToggleDecision: (id: string) => void;
+  onToggleApproval: (id: string) => void;
+  onToggleTask: (id: string) => void;
+  onUsePrompt: (value: string) => void;
+}) {
+  if (activeTab === "Ideas") {
+    return (
+      <IdeaDetail
+        idea={selectedIdea}
+        onVote={onVoteIdea}
+        onStatusChange={onIdeaStatusChange}
+        isPinned={isIdeaPinned}
+        onTogglePin={onToggleIdeaPin}
+        onShare={onShare}
+      />
+    );
+  }
+
+  if (activeTab === "Artifacts") {
+    return (
+      <section className="workspace-card artifact-detail-card">
+        <div className="card-title-row">
+          <h3>Selected Artifact</h3>
+          <button type="button" onClick={onToggleArtifactPin}>
+            {isArtifactPinned ? "Unpin" : "Pin here"}
+          </button>
+        </div>
+        <p>{selectedArtifact.summary}</p>
+        <span className="artifact-detail-meta">{selectedArtifact.type} - {selectedArtifact.status} - {selectedArtifact.owner}</span>
+        <div className="artifact-detail-actions">
+          <button className="secondary-button" type="button" onClick={onPreviewArtifact}>
+            <Eye size={16} />
+            Preview
+          </button>
+          <a className="secondary-button" href={selectedArtifact.href} download>
+            <Download size={16} />
+            Download
+          </a>
+        </div>
+      </section>
+    );
+  }
+
+  if (activeTab === "Decisions") {
+    const decision = decisions.find((item) => item.status !== "Done") ?? decisions[0];
+    return (
+      <section className="workspace-card sidebar-insight-card">
+        <span className="eyebrow">Decision focus</span>
+        <h3>{decision.title}</h3>
+        <p>Owner: {decision.owner}. Current status is {decision.status.toLowerCase()} with timing marked as {decision.due}.</p>
+        <button className="secondary-button" type="button" onClick={() => onToggleDecision(decision.id)}>
+          <ClipboardList size={16} />
+          {decision.status === "Done" ? "Reopen" : "Mark done"}
+        </button>
+      </section>
+    );
+  }
+
+  if (activeTab === "Approvals") {
+    const approval = approvals.find((item) => item.status !== "Approved") ?? approvals[0];
+    return (
+      <section className="workspace-card sidebar-insight-card">
+        <span className="eyebrow">Approval focus</span>
+        <h3>{approval.title}</h3>
+        <p>Approver: {approval.owner}. Status is {approval.status.toLowerCase()} and timing is {approval.due}.</p>
+        <button className="secondary-button" type="button" onClick={() => onToggleApproval(approval.id)}>
+          <ShieldCheck size={16} />
+          {approval.status === "Approved" ? "Reopen" : "Approve"}
+        </button>
+      </section>
+    );
+  }
+
+  if (activeTab === "Tasks") {
+    const task = tasks.find((item) => item.status !== "Done") ?? tasks[0];
+    return (
+      <section className="workspace-card sidebar-insight-card">
+        <span className="eyebrow">Task focus</span>
+        <h3>{task.title}</h3>
+        <p>Owner: {task.owner}. Surfaced from {task.source}. Current status is {task.status.toLowerCase()}.</p>
+        <button className="secondary-button" type="button" onClick={() => onToggleTask(task.id)}>
+          <CheckCircle2 size={16} />
+          {task.status === "Done" ? "Reopen" : "Mark done"}
+        </button>
+      </section>
+    );
+  }
+
+  if (activeTab === "Prompt Templates") {
+    const prompt = promptTemplates[0];
+    return (
+      <section className="workspace-card sidebar-insight-card">
+        <span className="eyebrow">Prompt focus</span>
+        <h3>{promptTemplates.length} reusable templates</h3>
+        <p>{prompt}</p>
+        <button className="secondary-button" type="button" onClick={() => onUsePrompt(prompt)}>
+          <Sparkles size={16} />
+          Use prompt
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="workspace-card sidebar-insight-card">
+      <span className="eyebrow">Chat intelligence</span>
+      <h3>{activeChat}</h3>
+      <p>{messages.length} messages in this thread. The assistant is surfacing ideas, tasks, approvals, decisions, and pinned artifacts from the current conversation.</p>
+      <div className="tag-row">
+        <span>{messages.filter((message) => message.role === "assistant").length} assistant responses</span>
+        <span>{messages.filter((message) => message.artifact).length} artifacts referenced</span>
+      </div>
+    </section>
   );
 }
 
@@ -1878,12 +2276,6 @@ function TaskView({ tasks, onToggle }: { tasks: Task[]; onToggle: (id: string) =
 }
 
 function PromptView({ onUsePrompt }: { onUsePrompt: (value: string) => void }) {
-  const prompts = [
-    "Summarize improvement ideas by impact, effort, and status for Steering Committee.",
-    "Draft a concise nudge for owners of decisions older than seven days.",
-    "Create a RAID summary from the last five project updates.",
-  ];
-
   return (
     <div className="prompt-view">
       <div className="ideas-toolbar">
@@ -1893,7 +2285,7 @@ function PromptView({ onUsePrompt }: { onUsePrompt: (value: string) => void }) {
         </div>
       </div>
       <div className="prompt-grid">
-        {prompts.map((prompt) => (
+        {promptTemplates.map((prompt) => (
           <button className="prompt-card" type="button" key={prompt} onClick={() => onUsePrompt(prompt)}>
             <Sparkles size={18} />
             <span>{prompt}</span>
