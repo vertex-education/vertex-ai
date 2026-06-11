@@ -75,11 +75,13 @@ import {
   type Approval,
   type Artifact,
   type ChatMessage,
+  type ChatSection,
   type Decision,
   type Idea,
   type IdeaStatus,
-  type PmoWorkspaceState,
+  type ProjectSummary,
   type RailName,
+  type ScopedWorkspaceState,
   type TabName,
   type Task,
   type WorkspaceMode,
@@ -90,7 +92,6 @@ import {
   modelOptions,
   pmoWorkspaceQueryKey,
   pmoWorkspaceQueryOptions,
-  projectChats,
   promptTemplates,
   sendChatMessage,
   statusFilters,
@@ -104,7 +105,6 @@ import {
   updateAccessLevel,
   updateIdeaStatus,
   voteIdea,
-  workspaceChatSets,
   workspaceModeLabel,
   workspaceModes,
 } from "@/lib/pmo-data";
@@ -114,7 +114,7 @@ export const Route = createFileRoute("/")({
     await context.queryClient.ensureQueryData(pmoWorkspaceQueryOptions());
   },
   head: () => ({
-    meta: [{ title: "PMO Chatbot Command Center" }],
+    meta: [{ title: "AI Command Center" }],
   }),
   component: PMOCommandCenter,
 });
@@ -134,11 +134,13 @@ function PMOCommandCenter() {
 
   const [activeRail, setActiveRail] = useState<RailName>("Workspaces");
   const [activeTab, setActiveTab] = useState<TabName>("Ideas");
-  const [activeProject, setActiveProject] = useState("Vertex Hub");
-  const [activeChat, setActiveChat] = useState("Shared Chat");
-  const [activeMode, setActiveMode] = useState<WorkspaceMode>("Team Project");
-  const [selectedIdeaId, setSelectedIdeaId] = useState(workspace.ideas[0]?.id ?? "");
-  const [selectedArtifactTitle, setSelectedArtifactTitle] = useState(workspace.artifacts[1]?.title ?? workspace.artifacts[0]?.title ?? "");
+  const [activeMode, setActiveMode] = useState<WorkspaceMode>("Personal");
+  const activeWorkspace = workspace.workspaces[activeMode];
+  const [activeProjectId, setActiveProjectId] = useState(activeWorkspace.projects[0]?.id ?? "");
+  const [activeChatSection, setActiveChatSection] = useState<ChatSection>("workspace");
+  const [activeChatId, setActiveChatId] = useState(activeWorkspace.workspaceChats[0]?.id ?? "");
+  const [selectedIdeaId, setSelectedIdeaId] = useState(activeWorkspace.ideas[0]?.id ?? "");
+  const [selectedArtifactTitle, setSelectedArtifactTitle] = useState(activeWorkspace.artifacts[1]?.title ?? activeWorkspace.artifacts[0]?.title ?? "");
   const [statusFilter, setStatusFilter] = useState<IdeaStatus | "All">("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [chatInput, setChatInput] = useState("");
@@ -153,24 +155,24 @@ function PMOCommandCenter() {
     queryClient.invalidateQueries({ queryKey: pmoWorkspaceQueryKey });
 
   const addIdeaMutation = useMutation({
-    mutationFn: (input: AddIdeaInput) => addIdea({ data: input }),
+    mutationFn: (input: AddIdeaInput) => addIdea({ data: { ...input, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
   const sendMessageMutation = useMutation({
-    mutationFn: (input: { project: string; chat: string; text: string; model: string }) =>
+    mutationFn: (input: { mode: WorkspaceMode; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) =>
       sendChatMessage({ data: input }),
     onSuccess: invalidateWorkspace,
   });
   const updateStatusMutation = useMutation({
-    mutationFn: (input: { id: string; status: IdeaStatus }) => updateIdeaStatus({ data: input }),
+    mutationFn: (input: { id: string; status: IdeaStatus }) => updateIdeaStatus({ data: { ...input, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
   const voteIdeaMutation = useMutation({
-    mutationFn: (id: string) => voteIdea({ data: { id } }),
+    mutationFn: (id: string) => voteIdea({ data: { id, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
   const toggleIdeaPinMutation = useMutation({
-    mutationFn: (id: string) => toggleIdeaPin({ data: { id } }),
+    mutationFn: (id: string) => toggleIdeaPin({ data: { id, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
   const toggleArtifactPinMutation = useMutation({
@@ -178,59 +180,53 @@ function PMOCommandCenter() {
     onSuccess: invalidateWorkspace,
   });
   const toggleDecisionMutation = useMutation({
-    mutationFn: (id: string) => toggleDecisionStatus({ data: { id } }),
+    mutationFn: (id: string) => toggleDecisionStatus({ data: { id, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
   const toggleApprovalMutation = useMutation({
-    mutationFn: (id: string) => toggleApprovalStatus({ data: { id } }),
+    mutationFn: (id: string) => toggleApprovalStatus({ data: { id, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
   const toggleTaskMutation = useMutation({
-    mutationFn: (id: string) => toggleTaskStatus({ data: { id } }),
+    mutationFn: (id: string) => toggleTaskStatus({ data: { id, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
   const updateAccessMutation = useMutation({
-    mutationFn: (accessLevel: PmoWorkspaceState["accessLevel"]) => updateAccessLevel({ data: { accessLevel } }),
+    mutationFn: (accessLevel: ScopedWorkspaceState["accessLevel"]) => updateAccessLevel({ data: { accessLevel, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
 
-  const workspaceTitle =
-    activeMode === "Personal"
-      ? "Personal workspace"
-      : activeMode === "Team"
-        ? "PMO Team workspace"
-        : activeMode === "Project"
-          ? `${activeProject} personal project`
-          : `${activeProject} team project`;
-
-  const chatSet =
-    activeMode === "Team Project"
-      ? { ...workspaceChatSets[activeMode], chats: projectChats[activeProject] ?? workspaceChatSets[activeMode].chats }
-      : workspaceChatSets[activeMode];
-
-  const conversationKey = getConversationKey(activeProject, activeChat);
-  const currentMessages = workspace.conversations[conversationKey] ?? [
+  const activeProject = activeWorkspace.projects.find((project) => project.id === activeProjectId) ?? activeWorkspace.projects[0];
+  const projectChats = activeProject?.projectChats ?? [];
+  const activeChat =
+    activeChatSection === "project"
+      ? projectChats.find((chat) => chat.id === activeChatId) ?? projectChats[0]
+      : activeWorkspace.workspaceChats.find((chat) => chat.id === activeChatId) ?? activeWorkspace.workspaceChats[0];
+  const scopedProjectId = activeChatSection === "project" ? activeProject?.id ?? null : null;
+  const conversationKey = activeChat ? getConversationKey(activeMode, scopedProjectId, activeChat.id) : "";
+  const workspaceTitle = `${workspaceModeLabel(activeMode)} workspace`;
+  const currentMessages = activeChat ? activeWorkspace.conversations[conversationKey] ?? [
     {
       id: `${conversationKey}-empty`,
-      author: "PMO Assistant",
+      author: "AI Command Center",
       role: "system" as const,
       time: "Now",
-      text: "No messages in this scoped workspace yet. Ask the PMO assistant to summarize decisions, risks, or artifacts.",
+      text: "No messages in this scoped workspace yet. Ask the assistant to summarize decisions, risks, or artifacts.",
     },
-  ];
+  ] : [];
 
-  const selectedIdea = workspace.ideas.find((idea) => idea.id === selectedIdeaId) ?? workspace.ideas[0];
+  const selectedIdea = activeWorkspace.ideas.find((idea) => idea.id === selectedIdeaId) ?? activeWorkspace.ideas[0];
   const selectedArtifact =
-    workspace.artifacts.find((artifact) => artifact.title === selectedArtifactTitle) ?? workspace.artifacts[0];
+    activeWorkspace.artifacts.find((artifact) => artifact.title === selectedArtifactTitle) ?? activeWorkspace.artifacts[0];
 
-  const pinnedIdeas = workspace.pinnedIdeaIds
-    .map((id) => workspace.ideas.find((idea) => idea.id === id))
+  const pinnedIdeas = activeWorkspace.pinnedIdeaIds
+    .map((id) => activeWorkspace.ideas.find((idea) => idea.id === id))
     .filter((idea): idea is Idea => Boolean(idea));
-  const pinnedArtifacts = workspace.artifacts.filter((artifact) => artifact.pinnedTo.includes(activeMode));
+  const pinnedArtifacts = activeWorkspace.artifacts.filter((artifact) => artifact.pinnedTo.includes(activeMode));
 
   const filteredIdeas = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
-    return workspace.ideas.filter((idea) => {
+    return activeWorkspace.ideas.filter((idea) => {
       const statusMatches = statusFilter === "All" || idea.status === statusFilter;
       const textMatches =
         !normalizedSearch ||
@@ -240,19 +236,19 @@ function PMOCommandCenter() {
           .includes(normalizedSearch);
       return statusMatches && textMatches;
     });
-  }, [workspace.ideas, searchTerm, statusFilter]);
+  }, [activeWorkspace.ideas, searchTerm, statusFilter]);
 
   const metrics = [
     {
       icon: Lightbulb,
       label: "Active ideas",
-      value: String(workspace.ideas.length),
-      detail: `${workspace.ideas.filter((idea) => idea.status === "Pilot").length} pilots`,
+      value: String(activeWorkspace.ideas.length),
+      detail: `${activeWorkspace.ideas.filter((idea) => idea.status === "Pilot").length} pilots`,
     },
     {
       icon: ClipboardList,
       label: "Open decisions",
-      value: String(workspace.decisions.filter((decision) => decision.status !== "Done").length),
+      value: String(activeWorkspace.decisions.filter((decision) => decision.status !== "Done").length),
       detail: "Governance actions",
     },
     {
@@ -265,15 +261,26 @@ function PMOCommandCenter() {
       icon: Activity,
       label: "Query state",
       value: workspaceQuery.isFetching ? "Syncing" : "Fresh",
-      detail: workspace.updatedAt,
+      detail: activeWorkspace.updatedAt,
     },
   ];
 
   useEffect(() => {
-    if (!selectedIdea && workspace.ideas[0]) {
-      setSelectedIdeaId(workspace.ideas[0].id);
+    if (!selectedIdea && activeWorkspace.ideas[0]) {
+      setSelectedIdeaId(activeWorkspace.ideas[0].id);
     }
-  }, [selectedIdea, workspace.ideas]);
+  }, [activeWorkspace.ideas, selectedIdea]);
+
+  useEffect(() => {
+    const nextWorkspace = workspace.workspaces[activeMode];
+    const nextProject = nextWorkspace.projects[0];
+    const nextChat = nextWorkspace.workspaceChats[0];
+    setActiveProjectId(nextProject?.id ?? "");
+    setActiveChatSection("workspace");
+    setActiveChatId(nextChat?.id ?? "");
+    setSelectedIdeaId(nextWorkspace.ideas[0]?.id ?? "");
+    setSelectedArtifactTitle(nextWorkspace.artifacts[0]?.title ?? "");
+  }, [activeMode, workspace.workspaces]);
 
   function updateToast(message: string) {
     setToast(message);
@@ -298,25 +305,38 @@ function PMOCommandCenter() {
   function handleWorkspaceMode(mode: WorkspaceMode) {
     setActiveMode(mode);
     setRightOpen(true);
-    setActiveChat(
-      mode === "Team Project"
-        ? projectChats[activeProject]?.[0] ?? workspaceChatSets[mode].chats[0]
-        : workspaceChatSets[mode].chats[0],
-    );
   }
 
-  function handleProjectSelect(project: string) {
-    setActiveProject(project);
-    setActiveChat(projectChats[project]?.[0] ?? "Shared Chat");
-    setActiveTab("Ideas");
+  function handleProjectSelect(project: ProjectSummary) {
+    setActiveProjectId(project.id);
+    setActiveChatSection("project");
+    setActiveChatId(project.projectChats[0]?.id ?? "");
+    setActiveTab("Chat");
     setRightOpen(true);
+  }
+
+  function handleChatSelect(section: ChatSection, chatId: string) {
+    setActiveChatSection(section);
+    setActiveChatId(chatId);
+    const chatTitle =
+      section === "project"
+        ? projectChats.find((chat) => chat.id === chatId)?.title
+        : activeWorkspace.workspaceChats.find((chat) => chat.id === chatId)?.title;
+    setActiveTab(chatTitle?.includes("Decision") ? "Decisions" : "Chat");
   }
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = chatInput.trim();
-    if (!text) return;
-    await sendMessageMutation.mutateAsync({ project: activeProject, chat: activeChat, text, model });
+    if (!text || !activeChat) return;
+    await sendMessageMutation.mutateAsync({
+      mode: activeMode,
+      projectId: scopedProjectId,
+      chatId: activeChat.id,
+      chatTitle: activeChat.title,
+      text,
+      model,
+    });
     setChatInput("");
     setActiveTab("Chat");
     updateToast("Query invalidated after assistant response");
@@ -338,7 +358,7 @@ function PMOCommandCenter() {
         <section className="flex min-w-0 flex-col overflow-hidden bg-background">
           <Topbar
             activeMode={activeMode}
-            activeProject={activeProject}
+            activeProject={activeProject?.name ?? activeWorkspace.unassignedProjectLabel}
             model={model}
             searchTerm={searchTerm}
             workspaceTitle={workspaceTitle}
@@ -353,7 +373,7 @@ function PMOCommandCenter() {
 
           <Contextbar
             activeMode={activeMode}
-            accessLevel={workspace.accessLevel}
+            accessLevel={activeWorkspace.accessLevel}
             workspaceTitle={workspaceTitle}
             onAccessOpen={() => setIsAccessOpen(true)}
             onModeChange={handleWorkspaceMode}
@@ -361,14 +381,12 @@ function PMOCommandCenter() {
 
           <div className="grid min-h-0 flex-1 bg-card lg:grid-cols-[260px_minmax(430px,1fr)_minmax(320px,380px)] xl:grid-cols-[280px_minmax(520px,1fr)_390px]">
             <ProjectNav
-              activeChat={activeChat}
+              activeChatId={activeChat?.id ?? ""}
+              activeChatSection={activeChatSection}
               activeMode={activeMode}
-              activeProject={activeProject}
-              chatSet={chatSet}
-              onChatSelect={(chat) => {
-                setActiveChat(chat);
-                setActiveTab(chat.includes("Decision") ? "Decisions" : "Chat");
-              }}
+              activeProjectId={activeProject?.id ?? ""}
+              workspace={activeWorkspace}
+              onChatSelect={handleChatSelect}
               onProjectSelect={handleProjectSelect}
             />
 
@@ -414,7 +432,7 @@ function PMOCommandCenter() {
                     selectedIdeaId={selectedIdea?.id}
                     searchTerm={searchTerm}
                     statusFilter={statusFilter}
-                    pinnedIdeaIds={workspace.pinnedIdeaIds}
+                    pinnedIdeaIds={activeWorkspace.pinnedIdeaIds}
                     onAddIdea={() => setIsAddOpen(true)}
                     onSearchTerm={setSearchTerm}
                     onSelectIdea={(idea) => {
@@ -428,7 +446,7 @@ function PMOCommandCenter() {
                 {activeTab === "Artifacts" ? (
                   <ArtifactsView
                     activeMode={activeMode}
-                    artifacts={workspace.artifacts}
+                    artifacts={activeWorkspace.artifacts}
                     selectedArtifactTitle={selectedArtifact?.title}
                     onPreview={setPreviewArtifact}
                     onSelectArtifact={(artifact) => {
@@ -442,13 +460,13 @@ function PMOCommandCenter() {
                   />
                 ) : null}
                 {activeTab === "Decisions" ? (
-                  <DecisionView decisions={workspace.decisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
+                  <DecisionView decisions={activeWorkspace.decisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
                 ) : null}
                 {activeTab === "Approvals" ? (
-                  <ApprovalView approvals={workspace.approvals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
+                  <ApprovalView approvals={activeWorkspace.approvals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
                 ) : null}
                 {activeTab === "Tasks" ? (
-                  <TaskView tasks={workspace.tasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
+                  <TaskView tasks={activeWorkspace.tasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
                 ) : null}
                 {activeTab === "Prompt Templates" ? (
                   <PromptView
@@ -466,7 +484,7 @@ function PMOCommandCenter() {
               >
                 <Input
                   aria-label="Ask the PMO assistant"
-                  placeholder={`Ask about ${activeProject} / ${activeChat}`}
+                  placeholder={`Ask about ${activeProject?.name ?? activeWorkspace.unassignedProjectLabel} / ${activeChat?.title ?? "chat"}`}
                   value={chatInput}
                   onChange={(event) => setChatInput(event.target.value)}
                 />
@@ -492,13 +510,13 @@ function PMOCommandCenter() {
                 activeMode={activeMode}
                 activeTab={activeTab}
                 artifact={selectedArtifact}
-                decisions={workspace.decisions}
+                decisions={activeWorkspace.decisions}
                 idea={selectedIdea}
-                isPinned={selectedIdea ? workspace.pinnedIdeaIds.includes(selectedIdea.id) : false}
+                isPinned={selectedIdea ? activeWorkspace.pinnedIdeaIds.includes(selectedIdea.id) : false}
                 metrics={metrics}
                 prompts={promptTemplates}
-                tasks={workspace.tasks}
-                approvals={workspace.approvals}
+                tasks={activeWorkspace.tasks}
+                approvals={activeWorkspace.approvals}
                 workspaceTitle={workspaceTitle}
                 onClose={() => setRightOpen(false)}
                 onPreviewArtifact={() => selectedArtifact && setPreviewArtifact(selectedArtifact)}
@@ -539,7 +557,7 @@ function PMOCommandCenter() {
         onSubmit={handleAddIdea}
       />
       <AccessDialog
-        accessLevel={workspace.accessLevel}
+        accessLevel={activeWorkspace.accessLevel}
         open={isAccessOpen}
         pending={updateAccessMutation.isPending}
         onOpenChange={setIsAccessOpen}
@@ -629,9 +647,9 @@ function Topbar({
         </Button>
         <img alt="Vertex Education" className="hidden h-7 w-auto sm:block" src="/vertex-horizontal.svg" />
         <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold lg:text-xl">PMO Chatbot</h1>
+          <h1 className="truncate text-base font-semibold lg:text-xl">AI Command Center</h1>
           <p className="truncate text-xs text-muted-foreground">
-            {workspaceTitle} / {activeMode === "Team Project" ? activeProject : workspaceModeLabel(activeMode)}
+            {workspaceTitle} / {activeProject}
           </p>
         </div>
       </div>
@@ -660,7 +678,7 @@ function Topbar({
         </select>
         <Button type="button" variant="outline" className="hidden md:inline-flex">
           <Users />
-          PMO Team
+          AI Ops
         </Button>
       </div>
     </header>
@@ -674,7 +692,7 @@ function Contextbar({
   onAccessOpen,
   onModeChange,
 }: {
-  accessLevel: PmoWorkspaceState["accessLevel"];
+  accessLevel: ScopedWorkspaceState["accessLevel"];
   activeMode: WorkspaceMode;
   workspaceTitle: string;
   onAccessOpen: () => void;
@@ -720,72 +738,92 @@ function Contextbar({
 }
 
 function ProjectNav({
-  activeChat,
+  activeChatId,
+  activeChatSection,
   activeMode,
-  activeProject,
-  chatSet,
+  activeProjectId,
+  workspace,
   onChatSelect,
   onProjectSelect,
 }: {
-  activeChat: string;
+  activeChatId: string;
+  activeChatSection: ChatSection;
   activeMode: WorkspaceMode;
-  activeProject: string;
-  chatSet: { heading: string; chats: string[]; savedHeading: string; saved: string[] };
-  onChatSelect: (chat: string) => void;
-  onProjectSelect: (project: string) => void;
+  activeProjectId: string;
+  workspace: ScopedWorkspaceState;
+  onChatSelect: (section: ChatSection, chatId: string) => void;
+  onProjectSelect: (project: ProjectSummary) => void;
 }) {
-  const projects = Object.keys(projectChats);
+  const activeProject = workspace.projects.find((project) => project.id === activeProjectId) ?? workspace.projects[0];
+  const projectChats = activeProject?.projectChats ?? [];
 
   return (
     <aside className="scrollbar-thin hidden min-h-0 overflow-auto border-r bg-muted/40 p-3 lg:block">
       <div className="mb-2 flex items-center justify-between px-2 text-xs font-semibold uppercase text-muted-foreground">
-        <span>{activeMode === "Team" ? "Team workspace" : activeMode === "Personal" ? "Personal workspace" : activeProject}</span>
+        <span>{workspace.projectsHeading}</span>
         <Plus className="size-4" />
       </div>
-      {projects.map((project) => (
+      {workspace.projects.map((project) => (
         <button
           className={cn(
             "mb-1 flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-            project === activeProject && "bg-accent text-accent-foreground font-medium",
+            project.id === activeProjectId && "bg-accent text-accent-foreground font-medium",
           )}
-          key={project}
+          key={project.id}
           type="button"
           onClick={() => onProjectSelect(project)}
         >
           <Folder className="size-4" />
-          <span className="min-w-0 flex-1 truncate">{project}</span>
+          <span className="min-w-0 flex-1 truncate">{project.name}</span>
+          <Badge variant={project.status === "Active" ? "success" : project.status === "Watch" ? "warning" : "secondary"}>
+            {project.status}
+          </Badge>
         </button>
       ))}
 
-      <div className="mt-5 px-2 text-xs font-semibold uppercase text-muted-foreground">{chatSet.heading}</div>
+      <div className="mt-5 px-2 text-xs font-semibold uppercase text-muted-foreground">{workspace.projectChatsHeading}</div>
       <div className="mt-2 space-y-1">
-        {chatSet.chats.map((chat) => (
+        {projectChats.map((chat) => (
           <button
             className={cn(
               "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-              chat === activeChat && "bg-card text-primary shadow-xs",
+              activeChatSection === "project" && chat.id === activeChatId && "bg-card text-primary shadow-xs",
             )}
-            key={chat}
+            key={chat.id}
             type="button"
-            onClick={() => onChatSelect(chat)}
+            onClick={() => onChatSelect("project", chat.id)}
           >
             <MessageCircle className="size-4" />
-            <span className="min-w-0 flex-1 truncate">{chat}</span>
+            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
           </button>
         ))}
       </div>
 
-      <div className="mt-5 px-2 text-xs font-semibold uppercase text-muted-foreground">{chatSet.savedHeading}</div>
+      <div className="mt-5 px-2 text-xs font-semibold uppercase text-muted-foreground">{workspace.workspaceChatsHeading}</div>
       <div className="mt-2 space-y-1">
-        {chatSet.saved.map((chat) => (
+        <button
+          className={cn(
+            "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+            activeChatSection === "workspace" && activeChatId === workspace.workspaceChats[0]?.id && "bg-card text-primary shadow-xs",
+          )}
+          type="button"
+          onClick={() => workspace.workspaceChats[0] && onChatSelect("workspace", workspace.workspaceChats[0].id)}
+        >
+          <Archive className="size-4" />
+          <span className="min-w-0 flex-1 truncate">{workspace.unassignedProjectLabel}</span>
+        </button>
+        {workspace.workspaceChats.map((chat) => (
           <button
-            className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            key={chat}
+            className={cn(
+              "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+              activeChatSection === "workspace" && chat.id === activeChatId && "bg-card text-primary shadow-xs",
+            )}
+            key={chat.id}
             type="button"
-            onClick={() => onChatSelect(chat)}
+            onClick={() => onChatSelect("workspace", chat.id)}
           >
             <Archive className="size-4" />
-            <span className="min-w-0 flex-1 truncate">{chat}</span>
+            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
           </button>
         ))}
       </div>
@@ -1690,11 +1728,11 @@ function AccessDialog({
   onOpenChange,
   onSave,
 }: {
-  accessLevel: PmoWorkspaceState["accessLevel"];
+  accessLevel: ScopedWorkspaceState["accessLevel"];
   open: boolean;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (accessLevel: PmoWorkspaceState["accessLevel"]) => void;
+  onSave: (accessLevel: ScopedWorkspaceState["accessLevel"]) => void;
 }) {
   const [draft, setDraft] = useState(accessLevel);
 

@@ -14,7 +14,13 @@
     "start": "vite preview",
     "lint": "eslint .",
     "cf-typegen": "wrangler types",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 execute site-creator-d1 --config=./dist/server/wrangler.json --local --file=./drizzle/0000_secret_hellfire_club.sql",
+    "db:seed": "wrangler d1 execute site-creator-d1 --config=./dist/server/wrangler.json --local --file=./db/seed/ai-command-center.sql",
+    "db:migrate:remote": "wrangler d1 execute site-creator-d1 --config=./dist/server/wrangler.json --remote --file=./drizzle/0000_secret_hellfire_club.sql",
+    "db:seed:remote": "wrangler d1 execute site-creator-d1 --config=./dist/server/wrangler.json --remote --file=./db/seed/ai-command-center.sql",
+    "r2:seed": "powershell -ExecutionPolicy Bypass -File ./scripts/seed-r2.ps1 -Bucket site-creator-r2",
+    "r2:seed:remote": "powershell -ExecutionPolicy Bypass -File ./scripts/seed-r2.ps1 -Bucket site-creator-r2 -Remote"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.16",
