@@ -254,8 +254,8 @@ function withProjectChats(mode: WorkspaceMode, project: Omit<ProjectSummary, "pr
     ...project,
     projectChats: projectChatTemplates[mode].map((title, index) => ({
       id: `${project.id}-chat-${index + 1}`,
-      title,
-      description: `${title} for ${project.name}.`,
+      title: `${project.name} ${title}`,
+      description: `${workspaceModeLabel(mode)} project chat scoped to ${project.name}.`,
     })),
   };
 }

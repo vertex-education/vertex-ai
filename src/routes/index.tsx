@@ -781,7 +781,12 @@ function ProjectNav({
         </button>
       ))}
 
-      <div className="mt-5 px-2 text-xs font-semibold uppercase text-muted-foreground">{workspace.projectChatsHeading}</div>
+      <div className="mt-5 px-2">
+        <div className="text-xs font-semibold uppercase text-muted-foreground">{workspace.projectChatsHeading}</div>
+        {activeProject ? (
+          <div className="mt-1 truncate text-xs font-medium text-foreground">{activeProject.name}</div>
+        ) : null}
+      </div>
       <div className="mt-2 space-y-1">
         {projectChats.map((chat) => (
           <button
@@ -801,17 +806,6 @@ function ProjectNav({
 
       <div className="mt-5 px-2 text-xs font-semibold uppercase text-muted-foreground">{workspace.workspaceChatsHeading}</div>
       <div className="mt-2 space-y-1">
-        <button
-          className={cn(
-            "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-            activeChatSection === "workspace" && activeChatId === workspace.workspaceChats[0]?.id && "bg-card text-primary shadow-xs",
-          )}
-          type="button"
-          onClick={() => workspace.workspaceChats[0] && onChatSelect("workspace", workspace.workspaceChats[0].id)}
-        >
-          <Archive className="size-4" />
-          <span className="min-w-0 flex-1 truncate">{workspace.unassignedProjectLabel}</span>
-        </button>
         {workspace.workspaceChats.map((chat) => (
           <button
             className={cn(
