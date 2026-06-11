@@ -1,70 +1,185 @@
-# vinext-starter
+# AI Command Center
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+AI Command Center is a TanStack Start workspace app for PMO-style chat, project, idea, task, decision, approval, and artifact workflows.
+
+The app is organized around three explicit workspace scopes:
+
+- `Personal`: personal projects, project chats, and personal chats.
+- `Team`: team projects, project chats, and team chats.
+- `Org`: org projects, project chats, and org chats.
+
+Each scope has its own projects, chats, ideas, artifacts, decisions, approvals, tasks, activity, and seed data. The UI is designed so lower scopes do not surface higher-scope information, and switching a project dynamically changes the `Project Chats` section for the selected workspace.
+
+## Stack
+
+- React 19
+- TanStack Start, Router, Query, Form, and Table
+- Vite
+- Tailwind CSS
+- Drizzle ORM
+- Cloudflare Workers runtime
+- Cloudflare D1 for structured workspace data
+- Cloudflare R2 for artifact files
+- Codex Sites metadata in `.openai/hosting.json`
 
 ## Prerequisites
 
 - Node.js `>=22.13.0`
+- npm
+- Wrangler authentication for Cloudflare operations
 
-## Quick Start
+Check Cloudflare auth:
 
-```bash
+```powershell
+npx wrangler whoami
+```
+
+## Local Development
+
+Install dependencies and start the dev server:
+
+```powershell
 npm install
 npm run dev
+```
+
+Build and type-check:
+
+```powershell
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Lint:
 
-## Included Shape
+```powershell
+npm run lint
+```
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## Data Model
 
-## Workspace Auth Headers
+The D1 schema lives in [db/schema.ts](db/schema.ts).
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+Core tables:
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+- `workspaces`: Personal, Team, and Org scope records.
+- `projects`: scoped projects.
+- `chats`: workspace chats and project chats.
+- `chat_messages`: chat history.
+- `ideas`: scoped improvement ideas.
+- `artifacts`: artifact metadata and R2 object keys.
+- `workspace_actions`: decisions, approvals, and tasks.
 
-Treat the full name as optional and fall back to email when it is absent:
+Generated Drizzle migrations are stored in `drizzle/`.
 
-```tsx
-import { headers } from "next/headers";
+## Cloudflare Bindings
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+Standalone Cloudflare deployment uses [wrangler.jsonc](wrangler.jsonc):
 
-  const displayName = fullName ?? email;
-  // ...
+- `DB` -> D1 database `ai-command-center-db`
+- `ARTIFACTS_BUCKET` -> R2 bucket `ai-command-center-artifacts`
+
+Codex Sites uses [.openai/hosting.json](.openai/hosting.json) for logical binding declarations:
+
+```json
+{
+  "d1": "DB",
+  "r2": "ARTIFACTS_BUCKET"
 }
+```
+
+Note: Codex Sites is OpenAI-managed hosting. The root `wrangler.jsonc` is for Cloudflare-account controlled Workers/D1/R2 operations.
+
+## D1 Setup
+
+Generate migrations after schema changes:
+
+```powershell
+npm run db:generate
+```
+
+Apply and seed local D1:
+
+```powershell
+npm run db:migrate
+npm run db:seed
+```
+
+Apply and seed remote D1:
+
+```powershell
+npm run db:migrate:remote
+npm run db:seed:remote
+```
+
+Seed SQL is in [db/seed/ai-command-center.sql](db/seed/ai-command-center.sql).
+
+## R2 Setup
+
+R2 seed files are stored under `r2-seed/` and mirror the object keys used in D1 artifact metadata.
+
+Seed local R2:
+
+```powershell
+npm run r2:seed
+```
+
+Seed remote R2:
+
+```powershell
+npm run r2:seed:remote
+```
+
+The seed set includes separate DOCX, XLSX, and PPTX files for Personal, Team, and Org.
+
+## Artifact Files
+
+Public artifact download copies live in `public/artifacts/`.
+
+R2 source seed copies live in:
+
+- `r2-seed/personal/artifacts/`
+- `r2-seed/team/artifacts/`
+- `r2-seed/org/artifacts/`
+
+The D1 `artifacts.r2_key` values match the R2 object paths.
+
+## Deployment
+
+For Codex Sites:
+
+1. Run `npm run build`.
+2. Save and deploy through the Sites connector.
+
+For a Cloudflare-account Worker deployment:
+
+1. Run `npm run build`.
+2. Confirm `wrangler.jsonc` points to the desired D1 database and R2 bucket.
+3. Run:
+
+```powershell
+npx wrangler deploy --config=./wrangler.jsonc
 ```
 
 ## Useful Commands
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+```powershell
+npm run dev
+npm run build
+npm run lint
+npm run cf-typegen
+npm run db:generate
+npm run db:migrate
+npm run db:seed
+npm run db:migrate:remote
+npm run db:seed:remote
+npm run r2:seed
+npm run r2:seed:remote
+```
 
-## Learn More
+## Operational Notes
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- Remote D1 has been created as `ai-command-center-db`.
+- Remote R2 has been created as `ai-command-center-artifacts`.
+- Both remote D1 and R2 have been seeded with scoped dummy data.
+- `worker-configuration.d.ts` is generated by Wrangler and should be refreshed after binding changes.
+- Keep `.openai/hosting.json` and `wrangler.jsonc` aligned on binding names: `DB` and `ARTIFACTS_BUCKET`.
