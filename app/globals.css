@@ -126,6 +126,7 @@ button {
 }
 
 .primary-rail {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -152,6 +153,7 @@ button {
 }
 
 .rail-item {
+  position: relative;
   width: 54px;
   min-height: 58px;
   display: grid;
@@ -164,8 +166,29 @@ button {
 }
 
 .rail-item span {
-  font-size: 11px;
-  font-weight: 650;
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  z-index: 80;
+  min-width: max-content;
+  transform: translateY(-50%) translateX(-4px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #fff;
+  background: rgba(5, 38, 83, 0.96);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.rail-item:hover span,
+.rail-item:focus-visible span {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
 }
 
 .rail-item.active,
@@ -448,6 +471,73 @@ a.icon-button {
   display: grid;
   grid-template-columns: 260px minmax(440px, 1fr) minmax(330px, 390px);
   background: #fff;
+}
+
+.global-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px;
+  overflow: auto;
+  background: #fff;
+}
+
+.global-view-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.global-view-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.global-view-header p {
+  margin: 6px 0 0;
+  color: #5b6678;
+  font-size: 13px;
+}
+
+.global-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.global-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+  font-size: 13px;
+}
+
+.global-table th,
+.global-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.global-table th {
+  color: #344054;
+  background: #f8fafc;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.global-table td {
+  color: #273142;
+}
+
+.global-table tr:last-child td {
+  border-bottom: 0;
 }
 
 .project-nav {
@@ -1323,6 +1413,24 @@ a.icon-button {
 .artifact-detail-card {
   display: grid;
   gap: 8px;
+}
+
+.sidebar-insight-card {
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar-insight-card h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.sidebar-insight-card p {
+  margin: 0;
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .artifact-detail-actions {

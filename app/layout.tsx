@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PMO Team Chat Prototype",
-  description: "A clickable PMO team chat prototype for improvement idea triage.",
+  title: "AI Command Center",
+  description: "A clickable AI command center prototype for scoped PMO workspace operations.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
