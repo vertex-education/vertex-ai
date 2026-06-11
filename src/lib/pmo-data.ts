@@ -1,3 +1,5 @@
+/// <reference path="../../worker-configuration.d.ts" />
+
 import { queryOptions } from "@tanstack/react-query";
 import { createServerFn } from "@tanstack/react-start";
 
@@ -24,6 +26,7 @@ export type ProjectSummary = {
 
 export type Idea = {
   id: string;
+  projectId: string | null;
   title: string;
   status: IdeaStatus;
   category: string;
@@ -56,6 +59,7 @@ export type ChatMessage = {
 };
 
 export type Artifact = {
+  projectId: string | null;
   title: string;
   type: string;
   owner: string;
@@ -70,6 +74,7 @@ export type Artifact = {
 
 export type Decision = {
   id: string;
+  projectId: string | null;
   title: string;
   status: "Open" | "Blocked" | "Done";
   owner: string;
@@ -78,6 +83,7 @@ export type Decision = {
 
 export type Approval = {
   id: string;
+  projectId: string | null;
   title: string;
   owner: string;
   due: string;
@@ -86,6 +92,7 @@ export type Approval = {
 
 export type Task = {
   id: string;
+  projectId: string | null;
   title: string;
   owner: string;
   source: string;
@@ -170,6 +177,24 @@ const scopeByMode: Record<WorkspaceMode, WorkspaceScope> = {
 };
 
 const assistantName = "AI Command Center";
+const gemmaModelId = "@cf/google/gemma-4-26b-a4b-it";
+
+type CloudflareContext = {
+  cloudflare?: {
+    env?: {
+      AI?: Ai;
+    };
+  };
+};
+
+type WorkersAiTextResponse = {
+  response?: string;
+  result?: {
+    response?: string;
+  };
+};
+
+type WorkersAiChatResponse = WorkersAiTextResponse & Partial<ChatCompletionsOutput>;
 
 const workspaceSeed = {
   Personal: {
@@ -260,22 +285,34 @@ function withProjectChats(mode: WorkspaceMode, project: Omit<ProjectSummary, "pr
   };
 }
 
-function buildIdea(mode: WorkspaceMode, index: number, title: string, category: string, status: IdeaStatus, owner: string, avatar: string): Idea {
+function buildIdea(
+  mode: WorkspaceMode,
+  index: number,
+  title: string,
+  category: string,
+  status: IdeaStatus,
+  owner: string,
+  avatar: string,
+  project?: ProjectSummary,
+): Idea {
+  const scopeName = project?.name ?? `${workspaceModeLabel(mode)} workspace`;
+  const normalizedIndex = project ? index % 10 : index;
   return {
-    id: `${scopeByMode[mode]}-idea-${index}`,
+    id: `${scopeByMode[mode]}-${project?.id ?? "workspace"}-idea-${index}`,
+    projectId: project?.id ?? null,
     title,
     status,
     category,
     owner,
     avatar,
     created: index === 1 ? "Today" : `Jun ${11 - index}`,
-    votes: 18 - index * 2,
-    impact: 92 - index * 7,
-    effort: 34 + index * 8,
-    confidence: 88 - index * 4,
-    summary: `${workspaceModeLabel(mode)} scoped idea. This record is intentionally different from the other workspaces so scope switching is obvious.`,
-    nextStep: `Confirm the ${workspaceModeLabel(mode).toLowerCase()} owner, artifact evidence, and decision path.`,
-    tags: [workspaceModeLabel(mode), category, status],
+    votes: Math.max(3, 18 - normalizedIndex * 2),
+    impact: Math.max(42, 92 - normalizedIndex * 7),
+    effort: Math.min(82, 34 + normalizedIndex * 8),
+    confidence: Math.max(58, 88 - normalizedIndex * 4),
+    summary: `${scopeName} scoped idea. This record is intentionally different from the other workspace and project scopes so switching views is obvious.`,
+    nextStep: `Confirm the ${scopeName.toLowerCase()} owner, artifact evidence, and decision path.`,
+    tags: [workspaceModeLabel(mode), project?.name ?? "No project", category, status],
     metrics: [`${mode} metric ${index}`, "Scoped evidence only", "No lower-scope exposure"],
     thread: [
       `${workspaceModeLabel(mode)} idea captured in AI Command Center.`,
@@ -311,8 +348,16 @@ function buildMessages(mode: WorkspaceMode, label: string, projectName?: string)
   ];
 }
 
-function buildArtifacts(mode: WorkspaceMode): Artifact[] {
-  return workspaceSeed[mode].artifacts.map(([title, type, owner, date, status, href, r2Key]) => ({
+function buildArtifacts(mode: WorkspaceMode, project?: ProjectSummary): Artifact[] {
+  const artifactRows = project
+    ? [
+        [`${project.name} Scope Brief`, "DOCX", mode === "Org" ? "Priya Shah" : mode === "Team" ? "Taylor Kim" : "Alex Morgan", "Jun 11, 2026", "Draft", `/artifacts/${project.id}-scope-brief.docx`, `${scopeByMode[mode]}/projects/${project.id}/scope-brief.docx`],
+        [`${project.name} Metrics Model`, "XLSX", "Jordan Lee", "Jun 10, 2026", "Pinned", `/artifacts/${project.id}-metrics-model.xlsx`, `${scopeByMode[mode]}/projects/${project.id}/metrics-model.xlsx`],
+      ] satisfies Array<[string, string, string, string, Artifact["status"], string, string]>
+    : workspaceSeed[mode].artifacts;
+
+  return artifactRows.map(([title, type, owner, date, status, href, r2Key]) => ({
+    projectId: project?.id ?? null,
     title,
     type,
     owner,
@@ -320,9 +365,9 @@ function buildArtifacts(mode: WorkspaceMode): Artifact[] {
     status,
     href,
     r2Key,
-    summary: `${workspaceModeLabel(mode)} artifact stored as R2 object ${r2Key}.`,
+    summary: `${project?.name ?? workspaceModeLabel(mode)} artifact stored as R2 object ${r2Key}.`,
     preview: [
-      `${workspaceModeLabel(mode)}-only evidence and working notes.`,
+      `${project?.name ?? workspaceModeLabel(mode)}-only evidence and working notes.`,
       "Dummy artifact content is intentionally unique by workspace.",
       "D1 stores metadata while R2 stores the file bytes.",
     ],
@@ -345,7 +390,7 @@ function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
     }
   }
 
-  const ideas =
+  const workspaceIdeas =
     mode === "Personal"
       ? [
           buildIdea(mode, 1, "Private meeting follow-up assistant", "Planning", "Pilot", "Alex Morgan", avatarAlex),
@@ -360,8 +405,53 @@ function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
         : [
             buildIdea(mode, 1, "Org AI governance classifier", "Governance", "Approved", "Priya Shah", avatarPriya),
             buildIdea(mode, 2, "Portfolio health narrative builder", "Planning", "Pilot", "Jordan Lee", avatarJordan),
-            buildIdea(mode, 3, "Enterprise artifact retention monitor", "Artifacts", "New", "Taylor Kim", avatarTaylor),
-          ];
+          buildIdea(mode, 3, "Enterprise artifact retention monitor", "Artifacts", "New", "Taylor Kim", avatarTaylor),
+        ];
+  const projectIdeas = projects.flatMap((project, index) => [
+    buildIdea(mode, index + 10, `${project.name} decision summarizer`, "Governance", "Review", mode === "Org" ? "Priya Shah" : "Taylor Kim", mode === "Org" ? avatarPriya : avatarTaylor, project),
+    buildIdea(mode, index + 20, `${project.name} artifact gap detector`, "Artifacts", "Pilot", "Jordan Lee", avatarJordan, project),
+  ]);
+  const ideas = [...workspaceIdeas, ...projectIdeas];
+  const artifacts = [
+    ...buildArtifacts(mode),
+    ...projects.flatMap((project) => buildArtifacts(mode, project)),
+  ];
+  const workspaceDecisions: Decision[] = [
+    { id: `${scopeByMode[mode]}-workspace-decision-1`, projectId: null, title: `${workspaceModeLabel(mode)} scope owner confirmed`, status: "Open", owner: mode === "Org" ? "Priya Shah" : "Alex Morgan", due: "Due Jun 14" },
+    { id: `${scopeByMode[mode]}-workspace-decision-2`, projectId: null, title: `${workspaceModeLabel(mode)} artifact retention path`, status: mode === "Personal" ? "Done" : "Blocked", owner: "Jordan Lee", due: mode === "Personal" ? "Done" : "Due Jun 12" },
+  ];
+  const projectDecisions: Decision[] = projects.map((project, index) => ({
+    id: `${project.id}-decision-${index + 1}`,
+    projectId: project.id,
+    title: `${project.name} delivery decision`,
+    status: project.status === "Watch" ? "Blocked" : "Open",
+    owner: mode === "Org" ? "Strategy Office" : "Maya Chen",
+    due: `Due Jun ${14 + index}`,
+  }));
+  const workspaceApprovals: Approval[] = [
+    { id: `${scopeByMode[mode]}-workspace-approval-1`, projectId: null, title: `${workspaceModeLabel(mode)} workspace publishing`, owner: mode === "Org" ? "Strategy Office" : "Taylor Kim", due: "Due Jun 15", status: "Needed" },
+    { id: `${scopeByMode[mode]}-workspace-approval-2`, projectId: null, title: `${workspaceModeLabel(mode)} data visibility`, owner: "Priya Shah", due: "Requested", status: "Requested" },
+  ];
+  const projectApprovals: Approval[] = projects.map((project, index) => ({
+    id: `${project.id}-approval-${index + 1}`,
+    projectId: project.id,
+    title: `${project.name} artifact approval`,
+    owner: mode === "Personal" ? "Alex Morgan" : "Taylor Kim",
+    due: `Due Jun ${15 + index}`,
+    status: project.status === "Planning" ? "Needed" : "Requested",
+  }));
+  const workspaceTasks: Task[] = [
+    { id: `${scopeByMode[mode]}-workspace-task-1`, projectId: null, title: `Review ${workspaceModeLabel(mode).toLowerCase()} project chat coverage`, owner: "Maya Chen", source: seed.projectChatsHeading, status: "Open" },
+    { id: `${scopeByMode[mode]}-workspace-task-2`, projectId: null, title: `Refresh ${workspaceModeLabel(mode).toLowerCase()} artifacts`, owner: "Alex Morgan", source: "Artifacts", status: "In progress" },
+  ];
+  const projectTasks: Task[] = projects.map((project, index) => ({
+    id: `${project.id}-task-${index + 1}`,
+    projectId: project.id,
+    title: `${project.name} follow-up from project chat`,
+    owner: index % 2 === 0 ? "Maya Chen" : "Jordan Lee",
+    source: project.projectChats[0]?.title ?? seed.projectChatsHeading,
+    status: project.status === "Active" ? "In progress" : "Open",
+  }));
 
   return {
     scope: scopeByMode[mode],
@@ -374,19 +464,10 @@ function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
     workspaceChats: seed.workspaceChats,
     ideas,
     conversations,
-    artifacts: buildArtifacts(mode),
-    decisions: [
-      { id: `${scopeByMode[mode]}-decision-1`, title: `${workspaceModeLabel(mode)} scope owner confirmed`, status: "Open", owner: mode === "Org" ? "Priya Shah" : "Alex Morgan", due: "Due Jun 14" },
-      { id: `${scopeByMode[mode]}-decision-2`, title: `${workspaceModeLabel(mode)} artifact retention path`, status: mode === "Personal" ? "Done" : "Blocked", owner: "Jordan Lee", due: mode === "Personal" ? "Done" : "Due Jun 12" },
-    ],
-    approvals: [
-      { id: `${scopeByMode[mode]}-approval-1`, title: `${workspaceModeLabel(mode)} workspace publishing`, owner: mode === "Org" ? "Strategy Office" : "Taylor Kim", due: "Due Jun 15", status: "Needed" },
-      { id: `${scopeByMode[mode]}-approval-2`, title: `${workspaceModeLabel(mode)} data visibility`, owner: "Priya Shah", due: "Requested", status: "Requested" },
-    ],
-    tasks: [
-      { id: `${scopeByMode[mode]}-task-1`, title: `Review ${workspaceModeLabel(mode).toLowerCase()} project chat coverage`, owner: "Maya Chen", source: seed.projectChatsHeading, status: "Open" },
-      { id: `${scopeByMode[mode]}-task-2`, title: `Refresh ${workspaceModeLabel(mode).toLowerCase()} artifacts`, owner: "Alex Morgan", source: "Artifacts", status: "In progress" },
-    ],
+    artifacts,
+    decisions: [...workspaceDecisions, ...projectDecisions],
+    approvals: [...workspaceApprovals, ...projectApprovals],
+    tasks: [...workspaceTasks, ...projectTasks],
     pinnedIdeaIds: ideas.slice(0, 2).map((idea) => idea.id),
     accessLevel: "Read / Write",
     activity: [
@@ -443,6 +524,85 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.round(Math.random() * 1000)}`;
 }
 
+function extractAiResponse(result: unknown) {
+  if (typeof result === "string") return result;
+  if (result && typeof result === "object") {
+    const response = result as WorkersAiChatResponse;
+    return response.response ?? response.result?.response ?? response.choices?.[0]?.message?.content ?? "";
+  }
+  return "";
+}
+
+function fallbackAssistantText(mode: WorkspaceMode, chatTitle: string, scope: WorkspaceScope) {
+  return (
+    `I reviewed ${workspaceModeLabel(mode)} / ${chatTitle}. ` +
+    `Only ${scope} scoped records were considered, including same-scope artifacts in R2.`
+  );
+}
+
+async function runGemmaChat({
+  context,
+  data,
+  existingMessages,
+  workspace,
+}: {
+  context: unknown;
+  data: { mode: WorkspaceMode; projectId: string | null; chatTitle: string; text: string };
+  existingMessages: ChatMessage[];
+  workspace: ScopedWorkspaceState;
+}) {
+  const ai = (context as CloudflareContext).cloudflare?.env?.AI;
+  if (!ai) {
+    return `${fallbackAssistantText(data.mode, data.chatTitle, workspace.scope)} Workers AI is not available in this runtime yet.`;
+  }
+
+  const project = workspace.projects.find((item) => item.id === data.projectId);
+  const scopedIdeas = workspace.ideas.filter((idea) => idea.projectId === data.projectId);
+  const scopedArtifacts = workspace.artifacts.filter((artifact) => artifact.projectId === data.projectId);
+  const scopedDecisions = workspace.decisions.filter((decision) => decision.projectId === data.projectId);
+  const scopedApprovals = workspace.approvals.filter((approval) => approval.projectId === data.projectId);
+  const scopedTasks = workspace.tasks.filter((task) => task.projectId === data.projectId);
+  const recentMessages = existingMessages.slice(-8).map((message) => ({
+    role: message.role === "assistant" ? "assistant" : "user",
+    content: `${message.author}: ${message.text}`,
+  }));
+
+  const scopeContext = [
+    `Workspace scope: ${workspaceModeLabel(data.mode)} (${workspace.scope})`,
+    `Project scope: ${project?.name ?? workspace.unassignedProjectLabel}`,
+    `Active chat: ${data.chatTitle}`,
+    `Ideas: ${scopedIdeas.map((idea) => `${idea.title} [${idea.status}]`).join("; ") || "none"}`,
+    `Artifacts: ${scopedArtifacts.map((artifact) => `${artifact.title} (${artifact.type}, ${artifact.status})`).join("; ") || "none"}`,
+    `Decisions: ${scopedDecisions.map((decision) => `${decision.title} [${decision.status}]`).join("; ") || "none"}`,
+    `Approvals: ${scopedApprovals.map((approval) => `${approval.title} [${approval.status}]`).join("; ") || "none"}`,
+    `Tasks: ${scopedTasks.map((task) => `${task.title} [${task.status}]`).join("; ") || "none"}`,
+  ].join("\n");
+
+  const result = await ai.run(gemmaModelId, {
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are AI Command Center, a concise PMO assistant. Use only the provided workspace/project context. Do not infer or expose higher-scope or unrelated workspace data. Return practical next actions. If the user asks for a specific prefix or response format, follow it exactly.",
+      },
+      {
+        role: "user",
+        content: `Current scoped context:\n${scopeContext}`,
+      },
+      ...recentMessages,
+      {
+        role: "user",
+        content: data.text,
+      },
+    ],
+    max_tokens: 650,
+    temperature: 0.3,
+  });
+
+  const responseText = extractAiResponse(result).trim();
+  return responseText || fallbackAssistantText(data.mode, data.chatTitle, workspace.scope);
+}
+
 function cycleDecisionStatus(status: Decision["status"]): Decision["status"] {
   if (status === "Open") return "Done";
   if (status === "Blocked") return "Open";
@@ -490,11 +650,12 @@ export const fetchPmoWorkspace = createServerFn({ method: "GET" }).handler(async
 
 export const sendChatMessage = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) => data)
-  .handler(async ({ data }) => {
+  .handler(async ({ context, data }) => {
     const workspace = getMutableWorkspace(data.mode);
     const conversationKey = getConversationKey(data.mode, data.projectId, data.chatId);
     const text = data.text.trim();
     if (!text) return clone(getMutableRoot());
+    const existingMessages = workspace.conversations[conversationKey] ?? [];
 
     const userMessage: ChatMessage = {
       id: createId("msg-user"),
@@ -504,36 +665,42 @@ export const sendChatMessage = createServerFn({ method: "POST" })
       time: nowLabel(),
       text,
     };
+    const aiText = await runGemmaChat({
+      context,
+      data: { ...data, text },
+      existingMessages,
+      workspace,
+    });
     const response: ChatMessage = {
       id: createId("msg-assistant"),
       author: assistantName,
       role: "assistant",
       time: nowLabel(),
-      text:
-        `I reviewed ${workspaceModeLabel(data.mode)} / ${data.chatTitle} with ${data.model}. ` +
-        `Only ${workspace.scope} scoped records were considered, including same-scope artifacts in R2.`,
+      text: aiText,
       artifact: {
         title: `${workspaceModeLabel(data.mode)} Action Snapshot`,
-        meta: `DOCX - Generated by ${data.model}`,
+        meta: `DOCX - Generated by Gemma 4`,
         type: "doc",
       },
     };
 
-    workspace.conversations[conversationKey] = [...(workspace.conversations[conversationKey] ?? []), userMessage, response];
+    workspace.conversations[conversationKey] = [...existingMessages, userMessage, response];
     recordActivity(workspace, "Chat response generated", `${data.chatTitle} updated in ${workspaceModeLabel(data.mode)}.`);
     return clone(getMutableRoot());
   });
 
 export const addIdea = createServerFn({ method: "POST" })
-  .validator((data: AddIdeaInput & { mode?: WorkspaceMode }) => data)
+  .validator((data: AddIdeaInput & { mode?: WorkspaceMode; projectId?: string | null }) => data)
   .handler(async ({ data }) => {
     const mode = data.mode ?? "Personal";
     const workspace = getMutableWorkspace(mode);
+    const project = workspace.projects.find((item) => item.id === data.projectId);
     const title = data.title.trim();
     if (!title) return clone(getMutableRoot());
 
     const nextIdea: Idea = {
       id: createId(`${workspace.scope}-idea`),
+      projectId: project?.id ?? null,
       title,
       status: data.status,
       category: data.category,
@@ -544,9 +711,9 @@ export const addIdea = createServerFn({ method: "POST" })
       impact: impactScore(data.impact),
       effort: data.impact === "High" ? 52 : data.impact === "Medium" ? 42 : 30,
       confidence: data.impact === "High" ? 78 : 66,
-      summary: data.summary.trim() || `New ${workspaceModeLabel(mode).toLowerCase()} improvement idea captured from the workspace.`,
+      summary: data.summary.trim() || `New ${project?.name ?? workspaceModeLabel(mode).toLowerCase()} improvement idea captured from the current scope.`,
       nextStep: "Confirm owner, evidence source, and governance fit.",
-      tags: [data.category, data.impact, workspaceModeLabel(mode)],
+      tags: [data.category, data.impact, workspaceModeLabel(mode), project?.name ?? "No project"],
       metrics: ["Owner confirmation needed", "Evidence source pending", "Governance review pending"],
       thread: ["Idea captured through AI Command Center.", "Assistant prepared initial impact and follow-up fields."],
     };

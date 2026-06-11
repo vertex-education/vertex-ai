@@ -16,9 +16,7 @@ import {
   ArrowUpDown,
   BarChart3,
   Bell,
-  Bot,
   CheckCircle2,
-  ChevronDown,
   ClipboardList,
   Download,
   Eye,
@@ -76,6 +74,7 @@ import {
   type Artifact,
   type ChatMessage,
   type ChatSection,
+  type ChatSummary,
   type Decision,
   type Idea,
   type IdeaStatus,
@@ -89,7 +88,6 @@ import {
   avatarAlex,
   getConversationKey,
   initials,
-  modelOptions,
   pmoWorkspaceQueryKey,
   pmoWorkspaceQueryOptions,
   promptTemplates,
@@ -127,6 +125,94 @@ const emptyIdeaForm: AddIdeaInput = {
   summary: "",
 };
 
+type DetailMetric = {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  detail: string;
+};
+
+function getDetailMetrics({
+  activeTab,
+  artifacts,
+  approvals,
+  decisions,
+  ideas,
+  messages,
+  pinnedArtifacts,
+  queryState,
+  scopeContextLabel,
+  tasks,
+  updatedAt,
+}: {
+  activeTab: TabName;
+  artifacts: Artifact[];
+  approvals: Approval[];
+  decisions: Decision[];
+  ideas: Idea[];
+  messages: ChatMessage[];
+  pinnedArtifacts: Artifact[];
+  queryState: string;
+  scopeContextLabel: string;
+  tasks: Task[];
+  updatedAt: string;
+}): DetailMetric[] {
+  if (activeTab === "Chat") {
+    return [
+      { icon: MessageCircle, label: "Messages", value: String(messages.length), detail: scopeContextLabel },
+      { icon: Paperclip, label: "Artifacts", value: String(artifacts.length), detail: "Current scope" },
+      { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+      { icon: Folder, label: "Context", value: scopeContextLabel === "No project" ? "None" : "Scoped", detail: scopeContextLabel },
+    ];
+  }
+  if (activeTab === "Artifacts") {
+    return [
+      { icon: Archive, label: "Artifacts", value: String(artifacts.length), detail: scopeContextLabel },
+      { icon: Star, label: "Pinned", value: String(pinnedArtifacts.length), detail: "Current scope" },
+      { icon: FileText, label: "Docs", value: String(artifacts.filter((artifact) => artifact.type === "DOCX").length), detail: "DOCX" },
+      { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+    ];
+  }
+  if (activeTab === "Decisions") {
+    return [
+      { icon: ClipboardList, label: "Decisions", value: String(decisions.length), detail: scopeContextLabel },
+      { icon: CheckCircle2, label: "Open", value: String(decisions.filter((decision) => decision.status !== "Done").length), detail: "Needs action" },
+      { icon: Activity, label: "Blocked", value: String(decisions.filter((decision) => decision.status === "Blocked").length), detail: "Escalations" },
+      { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+    ];
+  }
+  if (activeTab === "Approvals") {
+    return [
+      { icon: ShieldCheck, label: "Approvals", value: String(approvals.length), detail: scopeContextLabel },
+      { icon: Bell, label: "Pending", value: String(approvals.filter((approval) => approval.status !== "Approved").length), detail: "Needs response" },
+      { icon: CheckCircle2, label: "Approved", value: String(approvals.filter((approval) => approval.status === "Approved").length), detail: "Complete" },
+      { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+    ];
+  }
+  if (activeTab === "Tasks") {
+    return [
+      { icon: CheckCircle2, label: "Tasks", value: String(tasks.length), detail: scopeContextLabel },
+      { icon: Activity, label: "Open", value: String(tasks.filter((task) => task.status !== "Done").length), detail: "Follow-ups" },
+      { icon: Folder, label: "Sources", value: String(new Set(tasks.map((task) => task.source)).size), detail: "Distinct sources" },
+      { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+    ];
+  }
+  if (activeTab === "Prompts") {
+    return [
+      { icon: Sparkles, label: "Prompts", value: String(promptTemplates.length), detail: scopeContextLabel },
+      { icon: MessageCircle, label: "Target", value: "Chat", detail: "Use inserts into composer" },
+      { icon: Folder, label: "Context", value: scopeContextLabel === "No project" ? "None" : "Scoped", detail: scopeContextLabel },
+      { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+    ];
+  }
+  return [
+    { icon: Lightbulb, label: "Ideas", value: String(ideas.length), detail: scopeContextLabel },
+    { icon: Activity, label: "Pilots", value: String(ideas.filter((idea) => idea.status === "Pilot").length), detail: "In flight" },
+    { icon: Star, label: "Pinned", value: String(ideas.filter((idea) => idea.status === "Approved").length), detail: "Approved" },
+    { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+  ];
+}
+
 function PMOCommandCenter() {
   const queryClient = useQueryClient();
   const workspaceQuery = useSuspenseQuery(pmoWorkspaceQueryOptions());
@@ -144,7 +230,6 @@ function PMOCommandCenter() {
   const [statusFilter, setStatusFilter] = useState<IdeaStatus | "All">("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [chatInput, setChatInput] = useState("");
-  const [model, setModel] = useState(modelOptions[0]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isAccessOpen, setIsAccessOpen] = useState(false);
   const [previewArtifact, setPreviewArtifact] = useState<Artifact | null>(null);
@@ -155,7 +240,7 @@ function PMOCommandCenter() {
     queryClient.invalidateQueries({ queryKey: pmoWorkspaceQueryKey });
 
   const addIdeaMutation = useMutation({
-    mutationFn: (input: AddIdeaInput) => addIdea({ data: { ...input, mode: activeMode } }),
+    mutationFn: (input: AddIdeaInput) => addIdea({ data: { ...input, mode: activeMode, projectId: scopedProjectId } }),
     onSuccess: invalidateWorkspace,
   });
   const sendMessageMutation = useMutation({
@@ -206,7 +291,13 @@ function PMOCommandCenter() {
   const conversationKey = activeChat ? getConversationKey(activeMode, scopedProjectId, activeChat.id) : "";
   const workspaceTitle = `${workspaceModeLabel(activeMode)} workspace`;
   const isWorkspaceRail = activeRail === "Workspaces";
-  const categoryLabel = isWorkspaceRail ? activeTab : activeRail;
+  const scopeContextLabel = activeProject && scopedProjectId ? activeProject.name : activeWorkspace.unassignedProjectLabel;
+  const scopedIdeas = activeWorkspace.ideas.filter((idea) => idea.projectId === scopedProjectId);
+  const scopedArtifacts = activeWorkspace.artifacts.filter((artifact) => artifact.projectId === scopedProjectId);
+  const scopedDecisions = activeWorkspace.decisions.filter((decision) => decision.projectId === scopedProjectId);
+  const scopedApprovals = activeWorkspace.approvals.filter((approval) => approval.projectId === scopedProjectId);
+  const scopedTasks = activeWorkspace.tasks.filter((task) => task.projectId === scopedProjectId);
+  const scopedPrompts = promptTemplates.map((prompt) => `${scopeContextLabel}: ${prompt}`);
   const currentMessages = activeChat ? activeWorkspace.conversations[conversationKey] ?? [
     {
       id: `${conversationKey}-empty`,
@@ -217,18 +308,21 @@ function PMOCommandCenter() {
     },
   ] : [];
 
-  const selectedIdea = activeWorkspace.ideas.find((idea) => idea.id === selectedIdeaId) ?? activeWorkspace.ideas[0];
+  const selectedIdea = scopedIdeas.find((idea) => idea.id === selectedIdeaId) ?? scopedIdeas[0];
   const selectedArtifact =
-    activeWorkspace.artifacts.find((artifact) => artifact.title === selectedArtifactTitle) ?? activeWorkspace.artifacts[0];
+    scopedArtifacts.find((artifact) => artifact.title === selectedArtifactTitle) ?? scopedArtifacts[0];
+  const selectedDecision = scopedDecisions.find((decision) => decision.status !== "Done") ?? scopedDecisions[0];
+  const selectedApproval = scopedApprovals.find((approval) => approval.status !== "Approved") ?? scopedApprovals[0];
+  const selectedTask = scopedTasks.find((task) => task.status !== "Done") ?? scopedTasks[0];
 
   const pinnedIdeas = activeWorkspace.pinnedIdeaIds
-    .map((id) => activeWorkspace.ideas.find((idea) => idea.id === id))
+    .map((id) => scopedIdeas.find((idea) => idea.id === id))
     .filter((idea): idea is Idea => Boolean(idea));
-  const pinnedArtifacts = activeWorkspace.artifacts.filter((artifact) => artifact.pinnedTo.includes(activeMode));
+  const pinnedArtifacts = scopedArtifacts.filter((artifact) => artifact.pinnedTo.includes(activeMode));
 
   const filteredIdeas = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
-    return activeWorkspace.ideas.filter((idea) => {
+    return scopedIdeas.filter((idea) => {
       const statusMatches = statusFilter === "All" || idea.status === statusFilter;
       const textMatches =
         !normalizedSearch ||
@@ -238,40 +332,32 @@ function PMOCommandCenter() {
           .includes(normalizedSearch);
       return statusMatches && textMatches;
     });
-  }, [activeWorkspace.ideas, searchTerm, statusFilter]);
+  }, [scopedIdeas, searchTerm, statusFilter]);
 
-  const metrics = [
-    {
-      icon: Lightbulb,
-      label: "Active ideas",
-      value: String(activeWorkspace.ideas.length),
-      detail: `${activeWorkspace.ideas.filter((idea) => idea.status === "Pilot").length} pilots`,
-    },
-    {
-      icon: ClipboardList,
-      label: "Open decisions",
-      value: String(activeWorkspace.decisions.filter((decision) => decision.status !== "Done").length),
-      detail: "Governance actions",
-    },
-    {
-      icon: Archive,
-      label: "Pinned artifacts",
-      value: String(pinnedArtifacts.length),
-      detail: workspaceModeLabel(activeMode),
-    },
-    {
-      icon: Activity,
-      label: "Query state",
-      value: workspaceQuery.isFetching ? "Syncing" : "Fresh",
-      detail: activeWorkspace.updatedAt,
-    },
-  ];
+  const metrics = getDetailMetrics({
+    activeTab,
+    artifacts: scopedArtifacts,
+    approvals: scopedApprovals,
+    decisions: scopedDecisions,
+    ideas: scopedIdeas,
+    messages: currentMessages,
+    pinnedArtifacts,
+    queryState: workspaceQuery.isFetching ? "Syncing" : "Fresh",
+    scopeContextLabel,
+    tasks: scopedTasks,
+    updatedAt: activeWorkspace.updatedAt,
+  });
 
   useEffect(() => {
-    if (!selectedIdea && activeWorkspace.ideas[0]) {
-      setSelectedIdeaId(activeWorkspace.ideas[0].id);
+    if (!selectedIdea && scopedIdeas[0]) {
+      setSelectedIdeaId(scopedIdeas[0].id);
     }
-  }, [activeWorkspace.ideas, selectedIdea]);
+  }, [scopedIdeas, selectedIdea]);
+
+  useEffect(() => {
+    setSelectedIdeaId(scopedIdeas[0]?.id ?? "");
+    setSelectedArtifactTitle(scopedArtifacts[0]?.title ?? "");
+  }, [scopedProjectId, scopedIdeas, scopedArtifacts]);
 
   useEffect(() => {
     const nextWorkspace = workspace.workspaces[activeMode];
@@ -281,7 +367,7 @@ function PMOCommandCenter() {
     setActiveChatSection("workspace");
     setActiveChatId(nextChat?.id ?? "");
     setSelectedIdeaId(nextWorkspace.ideas[0]?.id ?? "");
-    setSelectedArtifactTitle(nextWorkspace.artifacts[0]?.title ?? "");
+    setSelectedArtifactTitle(nextWorkspace.artifacts.find((artifact) => artifact.projectId === null)?.title ?? "");
   }, [activeMode, workspace.workspaces]);
 
   function updateToast(message: string) {
@@ -324,7 +410,7 @@ function PMOCommandCenter() {
       section === "project"
         ? projectChats.find((chat) => chat.id === chatId)?.title
         : activeWorkspace.workspaceChats.find((chat) => chat.id === chatId)?.title;
-    setActiveTab(chatTitle?.includes("Decision") ? "Decisions" : "Chat");
+    setActiveTab("Chat");
   }
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
@@ -337,7 +423,7 @@ function PMOCommandCenter() {
       chatId: activeChat.id,
       chatTitle: activeChat.title,
       text,
-      model,
+      model: "Gemma 4",
     });
     setChatInput("");
     setActiveTab("Chat");
@@ -359,15 +445,7 @@ function PMOCommandCenter() {
 
         <section className="flex min-w-0 flex-col overflow-hidden bg-background">
           <Topbar
-            activeMode={activeMode}
-            categoryLabel={categoryLabel}
-            model={model}
             searchTerm={searchTerm}
-            workspaceTitle={workspaceTitle}
-            onModelChange={(value) => {
-              setModel(value);
-              updateToast(`${value} selected`);
-            }}
             onSearchTerm={setSearchTerm}
             onMobileMenu={() => handleRailClick("Workspaces")}
             onNotify={() => updateToast("Decision taxonomy is still blocked")}
@@ -376,9 +454,7 @@ function PMOCommandCenter() {
           <Contextbar
             activeMode={activeMode}
             accessLevel={activeWorkspace.accessLevel}
-            categoryLabel={categoryLabel}
             showScopeTabs
-            workspaceTitle={workspaceTitle}
             onAccessOpen={() => setIsAccessOpen(true)}
             onModeChange={handleWorkspaceMode}
           />
@@ -459,7 +535,7 @@ function PMOCommandCenter() {
                     {activeTab === "Artifacts" ? (
                       <ArtifactsView
                         activeMode={activeMode}
-                        artifacts={activeWorkspace.artifacts}
+                        artifacts={scopedArtifacts}
                         selectedArtifactTitle={selectedArtifact?.title}
                         onPreview={setPreviewArtifact}
                         onSelectArtifact={(artifact) => {
@@ -473,16 +549,17 @@ function PMOCommandCenter() {
                       />
                     ) : null}
                     {activeTab === "Decisions" ? (
-                      <DecisionView decisions={activeWorkspace.decisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
+                      <DecisionView decisions={scopedDecisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
                     ) : null}
                     {activeTab === "Approvals" ? (
-                      <ApprovalView approvals={activeWorkspace.approvals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
+                      <ApprovalView approvals={scopedApprovals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
                     ) : null}
                     {activeTab === "Tasks" ? (
-                      <TaskView tasks={activeWorkspace.tasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
+                      <TaskView tasks={scopedTasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
                     ) : null}
                     {activeTab === "Prompts" ? (
                       <PromptView
+                        prompts={scopedPrompts}
                         onUsePrompt={(prompt) => {
                           setChatInput(prompt);
                           setActiveTab("Chat");
@@ -492,12 +569,12 @@ function PMOCommandCenter() {
                   </section>
 
                   <form
-                    className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px] xl:grid-cols-[minmax(0,1fr)_38px_38px_auto_44px]"
+                    className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px]"
                     onSubmit={handleSendMessage}
                   >
                     <Input
                       aria-label="Ask the PMO assistant"
-                      placeholder={`Ask about ${activeProject?.name ?? activeWorkspace.unassignedProjectLabel} / ${activeChat?.title ?? "chat"}`}
+                      placeholder={`Ask about ${scopeContextLabel} / ${activeChat?.title ?? "chat"}`}
                       value={chatInput}
                       onChange={(event) => setChatInput(event.target.value)}
                     />
@@ -506,11 +583,6 @@ function PMOCommandCenter() {
                     </Button>
                     <Button type="button" variant="outline" size="icon" aria-label="Add workspace context" onClick={() => updateToast("Workspace context added")}>
                       <Folder />
-                    </Button>
-                    <Button type="button" variant="outline" className="hidden xl:inline-flex" onClick={() => updateToast(`${model} ready`)}>
-                      <Bot />
-                      {model}
-                      <ChevronDown />
                     </Button>
                     <Button type="submit" size="icon" aria-label="Send message" disabled={sendMessageMutation.isPending}>
                       <Send />
@@ -522,14 +594,17 @@ function PMOCommandCenter() {
                   <DetailPanel
                     activeMode={activeMode}
                     activeTab={activeTab}
+                    activeChat={activeChat}
                     artifact={selectedArtifact}
-                    decisions={activeWorkspace.decisions}
+                    approval={selectedApproval}
+                    decision={selectedDecision}
                     idea={selectedIdea}
                     isPinned={selectedIdea ? activeWorkspace.pinnedIdeaIds.includes(selectedIdea.id) : false}
+                    messages={currentMessages}
                     metrics={metrics}
-                    prompts={promptTemplates}
-                    tasks={activeWorkspace.tasks}
-                    approvals={activeWorkspace.approvals}
+                    prompts={scopedPrompts}
+                    scopeContextLabel={scopeContextLabel}
+                    task={selectedTask}
                     workspaceTitle={workspaceTitle}
                     onClose={() => setRightOpen(false)}
                     onPreviewArtifact={() => selectedArtifact && setPreviewArtifact(selectedArtifact)}
@@ -610,10 +685,6 @@ function PrimaryRail({
     { label: "Chats", icon: MessageCircle },
     { label: "Ideas", icon: Lightbulb },
     { label: "Artifacts", icon: Archive },
-    { label: "Decisions", icon: ClipboardList },
-    { label: "Approvals", icon: ShieldCheck },
-    { label: "Tasks", icon: CheckCircle2 },
-    { label: "Prompts", icon: Sparkles },
   ];
 
   return (
@@ -645,23 +716,13 @@ function PrimaryRail({
 }
 
 function Topbar({
-  activeMode,
-  categoryLabel,
-  model,
   searchTerm,
-  workspaceTitle,
   onMobileMenu,
-  onModelChange,
   onNotify,
   onSearchTerm,
 }: {
-  activeMode: WorkspaceMode;
-  categoryLabel: string;
-  model: string;
   searchTerm: string;
-  workspaceTitle: string;
   onMobileMenu: () => void;
-  onModelChange: (model: string) => void;
   onNotify: () => void;
   onSearchTerm: (value: string) => void;
 }) {
@@ -674,9 +735,6 @@ function Topbar({
         <img alt="Vertex Education" className="hidden h-7 w-auto sm:block" src="/vertex-horizontal.svg" />
         <div className="min-w-0">
           <h1 className="truncate text-base font-semibold lg:text-xl">AI Command Center</h1>
-          <p className="truncate text-xs text-muted-foreground">
-            {workspaceTitle} / {categoryLabel}
-          </p>
         </div>
       </div>
       <label className="hidden h-9 items-center gap-2 rounded-md border bg-background px-3 text-muted-foreground lg:flex">
@@ -692,16 +750,6 @@ function Topbar({
         <Button type="button" variant="outline" size="icon" aria-label="Notifications" onClick={onNotify}>
           <Bell />
         </Button>
-        <select
-          aria-label="Model"
-          className="hidden h-9 rounded-md border bg-background px-2 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 md:block"
-          value={model}
-          onChange={(event) => onModelChange(event.target.value)}
-        >
-          {modelOptions.map((option) => (
-            <option key={option}>{option}</option>
-          ))}
-        </select>
         <Button type="button" variant="outline" className="hidden md:inline-flex">
           <Users />
           AI Ops
@@ -714,17 +762,13 @@ function Topbar({
 function Contextbar({
   accessLevel,
   activeMode,
-  categoryLabel,
   showScopeTabs,
-  workspaceTitle,
   onAccessOpen,
   onModeChange,
 }: {
   accessLevel: ScopedWorkspaceState["accessLevel"];
   activeMode: WorkspaceMode;
-  categoryLabel: string;
   showScopeTabs: boolean;
-  workspaceTitle: string;
   onAccessOpen: () => void;
   onModeChange: (mode: WorkspaceMode) => void;
 }) {
@@ -748,17 +792,11 @@ function Contextbar({
             ))}
           </div>
         ) : null}
-        <div className="flex min-w-0 items-center gap-2 overflow-x-auto text-sm text-muted-foreground">
-          <Folder className="size-4 shrink-0" />
-          <strong className="shrink-0 text-foreground">{workspaceTitle}</strong>
-          <span>/</span>
-          <span className="truncate">{categoryLabel}</span>
-        </div>
       </div>
       <div className="flex items-center gap-3">
         <ShieldCheck className="size-5 text-success" />
         <div className="min-w-0">
-          <strong className="block text-sm">Team access</strong>
+          <strong className="block text-sm">{workspaceModeLabel(activeMode)} access</strong>
           <span className="text-xs text-muted-foreground">{accessLevel}</span>
         </div>
         <Button type="button" variant="outline" onClick={onAccessOpen}>
@@ -1305,15 +1343,15 @@ function ActionTable<TData extends object>({
   );
 }
 
-function PromptView({ onUsePrompt }: { onUsePrompt: (value: string) => void }) {
+function PromptView({ onUsePrompt, prompts }: { onUsePrompt: (value: string) => void; prompts: string[] }) {
   return (
     <div className="space-y-4">
       <div>
-        <span className="text-xs font-semibold uppercase text-muted-foreground">Prompt templates</span>
-        <h2 className="text-xl font-semibold">Reusable PMO prompts</h2>
+        <span className="text-xs font-semibold uppercase text-muted-foreground">Prompts</span>
+        <h2 className="text-xl font-semibold">Scoped prompts</h2>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {promptTemplates.map((prompt) => (
+        {prompts.map((prompt) => (
           <button
             className="grid min-h-28 gap-3 rounded-lg border bg-card p-4 text-left text-sm leading-6 hover:bg-accent/35"
             key={prompt}
@@ -1539,14 +1577,17 @@ function PromptsTable({
 function DetailPanel({
   activeMode,
   activeTab,
-  approvals,
+  activeChat,
+  approval,
   artifact,
-  decisions,
+  decision,
   idea,
   isPinned,
+  messages,
   metrics,
   prompts,
-  tasks,
+  scopeContextLabel,
+  task,
   workspaceTitle,
   onClose,
   onPreviewArtifact,
@@ -1562,14 +1603,17 @@ function DetailPanel({
 }: {
   activeMode: WorkspaceMode;
   activeTab: TabName;
-  approvals: Approval[];
+  activeChat?: ChatSummary;
+  approval?: Approval;
   artifact?: Artifact;
-  decisions: Decision[];
+  decision?: Decision;
   idea?: Idea;
   isPinned: boolean;
-  metrics: Array<{ icon: ComponentType<{ className?: string }>; label: string; value: string; detail: string }>;
+  messages: ChatMessage[];
+  metrics: DetailMetric[];
   prompts: string[];
-  tasks: Task[];
+  scopeContextLabel: string;
+  task?: Task;
   workspaceTitle: string;
   onClose: () => void;
   onPreviewArtifact: () => void;
@@ -1583,10 +1627,6 @@ function DetailPanel({
   onUsePrompt: (prompt: string) => void;
   onVoteIdea: () => void;
 }) {
-  const openDecision = decisions.find((decision) => decision.status !== "Done") ?? decisions[0];
-  const openApproval = approvals.find((approval) => approval.status !== "Approved") ?? approvals[0];
-  const openTask = tasks.find((task) => task.status !== "Done") ?? tasks[0];
-
   return (
     <aside className="scrollbar-thin hidden min-h-0 overflow-auto bg-muted/35 p-4 lg:block">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -1605,15 +1645,11 @@ function DetailPanel({
         ))}
       </div>
 
-      {activeTab === "Artifacts" && artifact ? (
-        <ArtifactDetail
-          activeMode={activeMode}
-          artifact={artifact}
-          onPreviewArtifact={onPreviewArtifact}
-          onShare={onShare}
-          onToggleArtifactPin={onToggleArtifactPin}
-        />
-      ) : idea ? (
+      {activeTab === "Chat" ? (
+        <ChatMetadata activeChat={activeChat} messages={messages} scopeContextLabel={scopeContextLabel} workspaceTitle={workspaceTitle} />
+      ) : null}
+
+      {activeTab === "Ideas" && idea ? (
         <IdeaDetail
           idea={idea}
           isPinned={isPinned}
@@ -1624,45 +1660,151 @@ function DetailPanel({
         />
       ) : null}
 
-      {openDecision ? (
-        <SidebarAction
+      {activeTab === "Artifacts" && artifact ? (
+        <ArtifactDetail
+          activeMode={activeMode}
+          artifact={artifact}
+          onPreviewArtifact={onPreviewArtifact}
+          onShare={onShare}
+          onToggleArtifactPin={onToggleArtifactPin}
+        />
+      ) : null}
+
+      {activeTab === "Decisions" && decision ? (
+        <WorkflowMetadata
           icon={ClipboardList}
           label="Decision"
-          title={openDecision.title}
-          detail={`${openDecision.owner} / ${openDecision.status}`}
+          title={decision.title}
+          detail={`${decision.owner} / ${decision.status} / ${decision.due}`}
           action="Advance"
-          onClick={() => onToggleDecision(openDecision.id)}
+          onClick={() => onToggleDecision(decision.id)}
         />
       ) : null}
-      {openApproval ? (
-        <SidebarAction
+      {activeTab === "Approvals" && approval ? (
+        <WorkflowMetadata
           icon={ShieldCheck}
           label="Approval"
-          title={openApproval.title}
-          detail={`${openApproval.owner} / ${openApproval.status}`}
+          title={approval.title}
+          detail={`${approval.owner} / ${approval.status} / ${approval.due}`}
           action="Advance"
-          onClick={() => onToggleApproval(openApproval.id)}
+          onClick={() => onToggleApproval(approval.id)}
         />
       ) : null}
-      {openTask ? (
-        <SidebarAction
+      {activeTab === "Tasks" && task ? (
+        <WorkflowMetadata
           icon={CheckCircle2}
           label="Task"
-          title={openTask.title}
-          detail={`${openTask.owner} / ${openTask.status}`}
+          title={task.title}
+          detail={`${task.owner} / ${task.status} / ${task.source}`}
           action="Advance"
-          onClick={() => onToggleTask(openTask.id)}
+          onClick={() => onToggleTask(task.id)}
         />
       ) : null}
-      <SidebarAction
-        icon={Sparkles}
-        label="Prompt"
-        title={prompts[0]}
-        detail="Reusable Steering Committee prep"
-        action="Use"
-        onClick={() => onUsePrompt(prompts[0])}
-      />
+      {activeTab === "Prompts" ? <PromptMetadata prompts={prompts} scopeContextLabel={scopeContextLabel} onUsePrompt={onUsePrompt} /> : null}
     </aside>
+  );
+}
+
+function ChatMetadata({
+  activeChat,
+  messages,
+  scopeContextLabel,
+  workspaceTitle,
+}: {
+  activeChat?: ChatSummary;
+  messages: ChatMessage[];
+  scopeContextLabel: string;
+  workspaceTitle: string;
+}) {
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <CardTitle className="text-lg leading-6">{activeChat?.title ?? "No chat selected"}</CardTitle>
+        <CardDescription>{workspaceTitle} / {scopeContextLabel}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-4">
+        <p className="text-sm leading-6 text-muted-foreground">{activeChat?.description ?? "Select a scoped chat to load its metadata."}</p>
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-md border bg-background p-3">
+            <strong className="block">{messages.length}</strong>
+            <span className="text-xs text-muted-foreground">Messages</span>
+          </div>
+          <div className="rounded-md border bg-background p-3">
+            <strong className="block">{scopeContextLabel}</strong>
+            <span className="text-xs text-muted-foreground">Scope context</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkflowMetadata({
+  action,
+  detail,
+  icon: Icon,
+  label,
+  onClick,
+  title,
+}: {
+  action: string;
+  detail: string;
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+  title: string;
+}) {
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <div className="flex items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
+            <Icon className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <CardDescription>{label}</CardDescription>
+            <CardTitle className="mt-1 text-lg leading-6">{title}</CardTitle>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-4">
+        <p className="text-sm text-muted-foreground">{detail}</p>
+        <Button type="button" variant="outline" onClick={onClick}>
+          {action}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PromptMetadata({
+  onUsePrompt,
+  prompts,
+  scopeContextLabel,
+}: {
+  onUsePrompt: (prompt: string) => void;
+  prompts: string[];
+  scopeContextLabel: string;
+}) {
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <CardTitle className="text-lg leading-6">Prompt metadata</CardTitle>
+        <CardDescription>{scopeContextLabel}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 pt-4">
+        {prompts.slice(0, 3).map((prompt) => (
+          <button
+            className="w-full rounded-md border bg-background p-3 text-left text-sm leading-5 hover:bg-accent"
+            key={prompt}
+            type="button"
+            onClick={() => onUsePrompt(prompt)}
+          >
+            {prompt}
+          </button>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

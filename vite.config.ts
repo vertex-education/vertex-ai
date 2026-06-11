@@ -12,7 +12,7 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
 const { d1, r2 } = hostingConfig;
 
 const localBindingConfig = {
-  main: "@tanstack/react-start/server-entry",
+  main: "./src/worker.ts",
   compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
     ? [
@@ -31,6 +31,9 @@ const localBindingConfig = {
         },
       ]
     : [],
+  ai: {
+    binding: "AI",
+  },
 };
 
 export default defineConfig({
