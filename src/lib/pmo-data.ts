@@ -5,6 +5,14 @@ import { queryOptions } from "@tanstack/react-query";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/start-server-core";
 import { getAuth } from "@/lib/auth";
+import {
+  aiUnavailableMessage,
+  buildVertexAiSystemPrompt,
+  emptyAiResponseMessage,
+  modelOptions,
+  promptTemplates,
+  vertexAiModelId,
+} from "@/lib/prompts";
 
 export type IdeaStatus = "New" | "Review" | "Pilot" | "Approved" | "Implemented" | "Blocked";
 export type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
@@ -166,12 +174,7 @@ export const statusMeta: Record<IdeaStatus, { label: string; tone: "info" | "war
 export const tabs: TabName[] = ["Chat", "Ideas", "Artifacts", "Decisions", "Approvals", "Tasks", "Prompts"];
 export const workspaceModes: WorkspaceMode[] = ["Personal", "Team", "Org"];
 export const statusFilters: Array<IdeaStatus | "All"> = ["All", "New", "Review", "Pilot", "Approved", "Implemented", "Blocked"];
-export const modelOptions = ["GPT 5.5", "Claude Opus 4.6", "Gemini Flash 3.5"];
-export const promptTemplates = [
-  "Summarize improvement ideas by impact, effort, and status for the active workspace.",
-  "Draft a concise nudge for owners of decisions older than seven days.",
-  "Create a RAID summary from the current project chats and artifacts.",
-];
+export { modelOptions, promptTemplates };
 
 const scopeByMode: Record<WorkspaceMode, WorkspaceScope> = {
   Personal: "personal",
@@ -180,7 +183,6 @@ const scopeByMode: Record<WorkspaceMode, WorkspaceScope> = {
 };
 
 const assistantName = "VertexAI";
-const gemmaModelId = "@cf/google/gemma-4-26b-a4b-it";
 
 type CloudflareContext = {
   cloudflare?: {
@@ -191,13 +193,55 @@ type CloudflareContext = {
 };
 
 type WorkersAiTextResponse = {
+  text?: string;
+  content?: unknown;
+  output?: unknown;
+  output_text?: string;
   response?: string;
   result?: {
+    text?: string;
+    content?: unknown;
+    output?: unknown;
+    output_text?: string;
     response?: string;
   };
 };
 
 type WorkersAiChatResponse = WorkersAiTextResponse & Partial<ChatCompletionsOutput>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function extractTextFromContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractTextFromContent(item))
+      .filter(Boolean)
+      .join("");
+  }
+  if (!isRecord(value)) return "";
+
+  for (const key of ["text", "content", "response", "output_text", "value"]) {
+    const text = extractTextFromContent(value[key]);
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function summarizeAiResponseShape(value: unknown): unknown {
+  if (typeof value === "string") return "string";
+  if (Array.isArray(value)) return value.slice(0, 3).map((item) => summarizeAiResponseShape(item));
+  if (!isRecord(value)) return typeof value;
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .slice(0, 12)
+      .map(([key, nestedValue]) => [key, Array.isArray(nestedValue) ? `array(${nestedValue.length})` : isRecord(nestedValue) ? Object.keys(nestedValue).slice(0, 8) : typeof nestedValue]),
+  );
+}
 
 function getDb() {
   const db = (env as Env).DB;
@@ -594,16 +638,25 @@ function extractAiResponse(result: unknown) {
   if (typeof result === "string") return result;
   if (result && typeof result === "object") {
     const response = result as WorkersAiChatResponse;
-    return response.response ?? response.result?.response ?? response.choices?.[0]?.message?.content ?? "";
+    const firstChoice = response.choices?.[0] as { delta?: { content?: unknown }; message?: { content?: unknown; text?: unknown } } | undefined;
+    const candidates = [
+      response.response,
+      response.text,
+      response.output_text,
+      extractTextFromContent(response.content),
+      response.result?.response,
+      response.result?.text,
+      response.result?.output_text,
+      extractTextFromContent(response.result?.content),
+      extractTextFromContent(response.output),
+      extractTextFromContent(response.result?.output),
+      extractTextFromContent(firstChoice?.message?.content),
+      extractTextFromContent(firstChoice?.message?.text),
+      extractTextFromContent(firstChoice?.delta?.content),
+    ];
+    return candidates.find((candidate) => Boolean(candidate)) ?? "";
   }
   return "";
-}
-
-function fallbackAssistantText(mode: WorkspaceMode, chatTitle: string, scope: WorkspaceScope) {
-  return (
-    `I do not have enough real ${scope} context in ${workspaceModeLabel(mode)} / ${chatTitle} yet. ` +
-    "Tell me what you want to work on and I will help from there."
-  );
 }
 
 async function runGemmaChat({
@@ -619,7 +672,7 @@ async function runGemmaChat({
 }) {
   const ai = (context as CloudflareContext).cloudflare?.env?.AI;
   if (!ai) {
-    return `${fallbackAssistantText(data.mode, data.chatTitle, workspace.scope)} Workers AI is not available in this runtime yet.`;
+    return aiUnavailableMessage;
   }
 
   const project = data.projectId
@@ -635,10 +688,11 @@ async function runGemmaChat({
 
   const scopeContext = [
     `Workspace scope: ${workspaceModeLabel(data.mode)} (${workspace.scope})`,
-    `Project scope: ${project?.name ?? workspace.unassignedProjectLabel}`,
+    `Selected scope: ${project?.name ?? workspaceModeLabel(data.mode)}`,
     project?.description ? `Project description: ${project.description}` : null,
     `Active chat: ${data.chatTitle}`,
-    "Use this scoped context only when it is relevant to the user's request. Otherwise answer the user's general question directly.",
+    "This is routing metadata for command-center record questions, not a limit on general conversation.",
+    "Use this scoped context only when it is relevant to the user's request. Otherwise answer the user's request directly.",
   ].filter(Boolean).join("\n");
 
   console.info("[VertexAI] Workers AI request started", {
@@ -646,16 +700,15 @@ async function runGemmaChat({
     mode: data.mode,
     projectId: data.projectId,
     messageCount: recentMessages.length + 3,
-    model: gemmaModelId,
+    model: vertexAiModelId,
   });
 
   try {
-    const result = await withAiTimeout(ai.run(gemmaModelId, {
+    const result = await withAiTimeout(ai.run(vertexAiModelId, {
       messages: [
         {
           role: "system",
-          content:
-            "You are VertexAI, the AI Command Center assistant. Answer the user's latest message directly and be useful. You may answer general knowledge, technical, planning, writing, and analysis questions even when there is no workspace context. Do not introduce yourself or restate your role unless asked. When the user asks about workspace, team, org, project, or personal command-center records, use only the provided scoped context and do not infer or expose higher-scope or unrelated workspace data. If scoped workspace context is missing, say that plainly and continue helping with the user's request.",
+          content: buildVertexAiSystemPrompt(),
         },
         {
           role: "user",
@@ -667,7 +720,7 @@ async function runGemmaChat({
           content: data.text,
         },
       ],
-      max_tokens: 650,
+      max_completion_tokens: 650,
       temperature: 0.3,
     }));
 
@@ -676,7 +729,14 @@ async function runGemmaChat({
       chatId: data.chatId,
       responseLength: responseText.length,
     });
-    return responseText || fallbackAssistantText(data.mode, data.chatTitle, workspace.scope);
+    if (!responseText) {
+      console.warn("[VertexAI] Workers AI returned an empty response", {
+        chatId: data.chatId,
+        model: vertexAiModelId,
+        responseShape: summarizeAiResponseShape(result),
+      });
+    }
+    return responseText || emptyAiResponseMessage;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Workers AI request failed.";
     console.error("[VertexAI] Workers AI request failed", {

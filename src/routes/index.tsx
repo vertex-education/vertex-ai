@@ -302,7 +302,7 @@ function PMOCommandCenter() {
         ...createEmptyWorkspace(activeWorkspace, {
         projectsHeading: "Personal Projects",
         workspaceChatsHeading: "Personal Chats",
-        unassignedProjectLabel: "No personal project",
+        unassignedProjectLabel: "Personal",
         }),
         projects: scopedProjects,
         workspaceChats: scopedWorkspaceChats,
@@ -325,7 +325,7 @@ function PMOCommandCenter() {
       ...createEmptyWorkspace(activeWorkspace, {
         projectsHeading: "Org Projects",
         workspaceChatsHeading: "Org Chats",
-        unassignedProjectLabel: "No assigned org project",
+        unassignedProjectLabel: "Org",
       }),
       projects: scopedProjects,
       workspaceChats: scopedWorkspaceChats,
