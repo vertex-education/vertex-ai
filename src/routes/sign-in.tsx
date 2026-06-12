@@ -41,13 +41,14 @@ function SignInPage() {
     setMessage("Signing in...");
 
     const slowSignInTimer = window.setTimeout(() => {
-      setMessage("Still signing in. Localhost is using remote Cloudflare services, so this can take a few seconds.");
+      setMessage("Still signing in. Cloudflare services can take a few seconds to respond.");
     }, 5000);
 
     try {
       const { error } = await authClient.signIn.email({
         email,
         password,
+        rememberMe: true,
       });
 
       if (error) {

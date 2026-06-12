@@ -1012,7 +1012,7 @@ function PMOCommandCenter() {
                   {canEdit ? (
                     <form
                       ref={chatFormRef}
-                      className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px]"
+                      className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42/0.22)] backdrop-blur lg:left-92 lg:right-104 xl:left-97 xl:right-106.5"
                       onSubmit={handleSendMessage}
                     >
                       <Input
@@ -1035,7 +1035,7 @@ function PMOCommandCenter() {
                       </Button>
                     </form>
                   ) : (
-                    <div className="fixed inset-x-3 bottom-3 z-50 rounded-xl border bg-card/95 p-3 text-sm text-muted-foreground shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px]">
+                    <div className="fixed inset-x-3 bottom-3 z-50 rounded-xl border bg-card/95 p-3 text-sm text-muted-foreground shadow-[0_18px_60px_rgb(15_23_42/0.22)] backdrop-blur lg:left-92 lg:right-104 xl:left-97 xl:right-106.5">
                       Viewer access is read-only.
                     </div>
                   )}
@@ -1156,8 +1156,8 @@ function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [activePane, setActivePane] = useState<LlmDevtoolsPane>("request");
-  const [devtoolsSize, setDevtoolsSize] = useState({ width: 760, height: 520 });
   const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const devtoolsPanelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!selectedTraceId && traces[0]) setSelectedTraceId(traces[0].id);
@@ -1173,26 +1173,27 @@ function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
     { id: "thinking", label: "Thinking" },
     { id: "raw", label: "Raw" },
   ];
-  const clampDevtoolsSize = (width: number, height: number) => ({
-    width: Math.min(Math.max(width, 340), Math.max(340, window.innerWidth - 32)),
-    height: Math.min(Math.max(height, 320), Math.max(320, window.innerHeight - 32)),
-  });
-
   function handleResizeStart(event: PointerEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    const panel = devtoolsPanelRef.current;
     resizeStartRef.current = {
       x: event.clientX,
       y: event.clientY,
-      width: devtoolsSize.width,
-      height: devtoolsSize.height,
+      width: panel?.offsetWidth ?? 760,
+      height: panel?.offsetHeight ?? 520,
     };
   }
 
   function handleResizeMove(event: PointerEvent<HTMLButtonElement>) {
     const start = resizeStartRef.current;
     if (!start) return;
-    setDevtoolsSize(clampDevtoolsSize(start.width + start.x - event.clientX, start.height + start.y - event.clientY));
+    const panel = devtoolsPanelRef.current;
+    if (!panel) return;
+    const width = Math.min(Math.max(start.width + start.x - event.clientX, 340), Math.max(340, window.innerWidth - 32));
+    const height = Math.min(Math.max(start.height + start.y - event.clientY, 320), Math.max(320, window.innerHeight - 32));
+    panel.style.width = `${width}px`;
+    panel.style.height = `${height}px`;
   }
 
   function handleResizeEnd(event: PointerEvent<HTMLButtonElement>) {
@@ -1236,9 +1237,9 @@ function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
 
   return (
     <section
+      ref={devtoolsPanelRef}
       aria-label="LLM devtools"
-      className="fixed right-4 bottom-4 z-50 flex max-h-[calc(100vh-2rem)] min-h-[320px] max-w-[calc(100vw-2rem)] min-w-[340px] flex-col overflow-hidden rounded-md border bg-card text-card-foreground shadow-2xl"
-      style={{ height: devtoolsSize.height, width: devtoolsSize.width }}
+      className="fixed right-4 bottom-4 z-50 flex h-[520px] max-h-[calc(100vh-2rem)] min-h-80 w-[760px] max-w-[calc(100vw-2rem)] min-w-85 flex-col overflow-hidden rounded-md border bg-card text-card-foreground shadow-2xl"
     >
       <button
         aria-label="Resize LLM devtools"
@@ -1325,7 +1326,7 @@ function LlmDevtoolsPaneContent({ pane, trace }: { pane: LlmDevtoolsPane; trace:
               <span className="rounded bg-muted px-2 py-1 text-xs font-semibold uppercase text-muted-foreground">{message.role}</span>
               <span className="text-xs text-muted-foreground">{message.content.length.toLocaleString()} chars</span>
             </div>
-            <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{message.content}</pre>
+            <pre className="whitespace-pre-wrap wrap-break-word font-mono text-xs leading-relaxed">{message.content}</pre>
           </article>
         ))}
         <pre className="rounded-md border bg-muted/30 p-3 font-mono text-xs">{JSON.stringify({
@@ -1340,7 +1341,7 @@ function LlmDevtoolsPaneContent({ pane, trace }: { pane: LlmDevtoolsPane; trace:
     return (
       <div className="space-y-3">
         <LlmTraceDiagnostics trace={trace} />
-        <pre className="whitespace-pre-wrap break-words rounded-md border bg-background p-3 font-mono text-xs leading-relaxed">{trace.responseText}</pre>
+        <pre className="whitespace-pre-wrap wrap-break-word rounded-md border bg-background p-3 font-mono text-xs leading-relaxed">{trace.responseText}</pre>
       </div>
     );
   }
@@ -1350,7 +1351,7 @@ function LlmDevtoolsPaneContent({ pane, trace }: { pane: LlmDevtoolsPane; trace:
       <div className="space-y-3">
         <LlmTraceDiagnostics trace={trace} />
         {trace.thinkingText ? (
-          <pre className="whitespace-pre-wrap break-words rounded-md border bg-background p-3 font-mono text-xs italic leading-relaxed">{trace.thinkingText}</pre>
+          <pre className="whitespace-pre-wrap wrap-break-word rounded-md border bg-background p-3 font-mono text-xs italic leading-relaxed">{trace.thinkingText}</pre>
         ) : (
           <p className="rounded-md border border-dashed p-3 text-sm italic text-muted-foreground">No thinking or reasoning field was returned by this model response.</p>
         )}
@@ -1361,7 +1362,7 @@ function LlmDevtoolsPaneContent({ pane, trace }: { pane: LlmDevtoolsPane; trace:
   return (
     <div className="space-y-3">
       <LlmTraceDiagnostics trace={trace} />
-      <pre className="whitespace-pre-wrap break-words rounded-md border bg-background p-3 font-mono text-xs leading-relaxed">{JSON.stringify(trace.rawResponse, null, 2)}</pre>
+      <pre className="whitespace-pre-wrap wrap-break-word rounded-md border bg-background p-3 font-mono text-xs leading-relaxed">{JSON.stringify(trace.rawResponse, null, 2)}</pre>
     </div>
   );
 }
@@ -1388,7 +1389,7 @@ function LlmTraceDiagnostics({ trace }: { trace: LlmDevTrace }) {
       <span className="sm:col-span-2">
         <strong className="block text-muted-foreground">Usage</strong>
         {trace.diagnostics.usage ? (
-          <code className="break-words">{JSON.stringify(trace.diagnostics.usage)}</code>
+          <code className="wrap-break-word">{JSON.stringify(trace.diagnostics.usage)}</code>
         ) : (
           "Not returned"
         )}
@@ -1490,7 +1491,7 @@ function Topbar({
   onSignOut: () => void;
 }) {
   return (
-    <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b bg-card px-3 lg:min-h-[78px] lg:grid-cols-[minmax(220px,1fr)_minmax(260px,360px)_auto] lg:px-5">
+    <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b bg-card px-3 lg:min-h-19.5 lg:grid-cols-[minmax(220px,1fr)_minmax(260px,360px)_auto] lg:px-5">
       <div className="flex min-w-0 items-center gap-3">
         <Button className="lg:hidden" type="button" variant="outline" size="icon" aria-label="Open menu" onClick={onMobileMenu}>
           <Menu />
@@ -1569,7 +1570,6 @@ function AccountMenu({
             ? "border-white/30 bg-white/10 text-white hover:bg-white/20"
             : "border-input bg-background text-foreground shadow-xs hover:bg-accent",
         )}
-        aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-label="Open user menu"
         title={userEmail}
@@ -1625,17 +1625,17 @@ function AccountMenu({
             </button>
           ) : null}
           <div className="my-2 border-t" />
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-            role="menuitemcheckbox"
-            aria-checked={showTokenUsage}
-            onClick={() => onShowTokenUsageChange(!showTokenUsage)}
-          >
+          <label className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent">
             <span className="flex items-center gap-2">
               <Zap className="size-4" />
               Show token usage
             </span>
+            <input
+              checked={showTokenUsage}
+              className="sr-only"
+              type="checkbox"
+              onChange={(event) => onShowTokenUsageChange(event.target.checked)}
+            />
             <span
               className={cn(
                 "flex h-5 w-9 items-center rounded-full border p-0.5 transition-colors",
@@ -1649,7 +1649,7 @@ function AccountMenu({
                 )}
               />
             </span>
-          </button>
+          </label>
           <div className="my-2 border-t" />
           <button
             type="button"
@@ -1716,6 +1716,8 @@ function Contextbar({
             </Label>
             <select
               id="team-select"
+              aria-label="Select team"
+              title="Select team"
               className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm"
               value={activeTeamId}
               onChange={(event) => onTeamChange(event.target.value)}
@@ -2346,7 +2348,7 @@ function IdeasView({
         accessorKey: "title",
         header: "Idea",
         cell: ({ row }) => (
-          <div className="max-w-[360px]">
+          <div className="max-w-90">
             <strong className="block truncate">{row.original.title}</strong>
             <span className="line-clamp-2 text-xs text-muted-foreground">{row.original.summary}</span>
           </div>
@@ -2523,7 +2525,7 @@ function ArtifactsView({
               </Button>
             ) : null}
             <Button asChild variant="ghost" size="icon" aria-label={`Download ${row.original.title}`}>
-              <a href={row.original.href} download onClick={(event) => event.stopPropagation()}>
+              <a href={row.original.href} download aria-label={`Download ${row.original.title}`} title={`Download ${row.original.title}`} onClick={(event) => event.stopPropagation()}>
                 <Download />
               </a>
             </Button>
@@ -3215,6 +3217,8 @@ function IdeaDetail({
         <label className="grid gap-2">
           <span className="text-sm font-medium">Status</span>
           <select
+            aria-label="Idea status"
+            title="Idea status"
             className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={idea.status}
             disabled={!canEdit}
@@ -3371,6 +3375,8 @@ function AddIdeaDialog({
               children={(field) => (
                 <FieldBlock label="Category">
                   <select
+                    aria-label="Idea category"
+                    title="Idea category"
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     name={field.name}
                     value={field.state.value}
@@ -3393,6 +3399,8 @@ function AddIdeaDialog({
               children={(field) => (
                 <FieldBlock label="Status">
                   <select
+                    aria-label="Idea status"
+                    title="Idea status"
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     name={field.name}
                     value={field.state.value}
@@ -3415,6 +3423,8 @@ function AddIdeaDialog({
             children={(field) => (
               <FieldBlock label="Expected impact">
                 <select
+                  aria-label="Expected impact"
+                  title="Expected impact"
                   className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   name={field.name}
                   value={field.state.value}

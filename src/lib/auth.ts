@@ -28,6 +28,8 @@ type AuthEnv = Env & {
 const internalSignupHeader = "x-ai-command-center-invite-flow";
 const localDevSecret = "ai-command-center-local-dev-secret-change-before-production";
 const sender = { email: "noreply@rcormier.dev", name: "Vertex AI Command Center" };
+const sessionExpiresInSeconds = 60 * 60 * 24 * 30;
+const sessionUpdateAgeSeconds = 60 * 60 * 24;
 const localDevTrustedOrigins = Array.from({ length: 11 }, (_value, index) => {
   const port = 3000 + index;
   return [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
@@ -54,6 +56,10 @@ export function getAuth(request?: Request) {
     secret: getAuthSecret(),
     baseURL: origin,
     trustedOrigins: origin ? Array.from(new Set([origin, ...localDevTrustedOrigins])) : localDevTrustedOrigins,
+    session: {
+      expiresIn: sessionExpiresInSeconds,
+      updateAge: sessionUpdateAgeSeconds,
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
