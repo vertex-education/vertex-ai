@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
@@ -16,6 +16,7 @@ import {
   ArrowUpDown,
   BarChart3,
   Bell,
+  Bug,
   CheckCircle2,
   ClipboardList,
   Download,
@@ -26,7 +27,9 @@ import {
   KeyRound,
   Lightbulb,
   LogOut,
+  Maximize2,
   Menu,
+  Minimize2,
   MessageCircle,
   MoreHorizontal,
   Paperclip,
@@ -84,6 +87,7 @@ import {
   type Decision,
   type Idea,
   type IdeaStatus,
+  type LlmDevTrace,
   type ProjectSummary,
   type RailName,
   type ScopedWorkspaceState,
@@ -125,10 +129,9 @@ import {
 } from "@/lib/team-workflow";
 
 export const Route = createFileRoute("/")({
-  loader: async ({ context }) => {
+  loader: async () => {
     const session = await getSessionSnapshot();
     if (!session) throw redirect({ to: "/sign-in" });
-    await context.queryClient.ensureQueryData(pmoWorkspaceQueryOptions());
     return { session };
   },
   head: () => ({
@@ -349,8 +352,13 @@ function PMOCommandCenter() {
   const [createChatState, setCreateChatState] = useState<CreateChatDialogState>(null);
   const [previewArtifact, setPreviewArtifact] = useState<Artifact | null>(null);
   const [rightOpen, setRightOpen] = useState(true);
-  const [toast, setToast] = useState("SSR workspace hydrated");
+  const [toast, setToast] = useState<string | null>(null);
   const [toastLink, setToastLink] = useState<ToastLink | null>(null);
+  const [llmTraces, setLlmTraces] = useState<LlmDevTrace[]>([]);
+  const [showTokenUsage, setShowTokenUsage] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem("vertex-show-token-usage") !== "0";
+  });
   const canEdit = session.user.role === "admin" || session.user.role === "user";
 
   const invalidateWorkspace = () =>
@@ -366,7 +374,11 @@ function PMOCommandCenter() {
   const sendMessageMutation = useMutation({
     mutationFn: (input: { mode: WorkspaceMode; teamId?: string | null; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) =>
       sendChatMessage({ data: input }),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      const llmTrace = (result as { llmTrace?: LlmDevTrace | null } | undefined)?.llmTrace;
+      if (llmTrace) {
+        setLlmTraces((traces) => [llmTrace, ...traces].slice(0, 20));
+      }
       await invalidateWorkspace();
       await invalidateChats();
     },
@@ -518,11 +530,15 @@ function PMOCommandCenter() {
     }
   }, [activeMode, activeTeamId, teams]);
 
+  useEffect(() => {
+    window.localStorage.setItem("vertex-show-token-usage", showTokenUsage ? "1" : "0");
+  }, [showTokenUsage]);
+
   function updateToast(message: string, link?: ToastLink) {
     setToast(message);
     setToastLink(link ?? null);
     window.setTimeout(() => {
-      setToast("SSR workspace hydrated");
+      setToast(null);
       setToastLink(null);
     }, 4200);
   }
@@ -842,9 +858,11 @@ function PMOCommandCenter() {
         <PrimaryRail
           activeRail={activeRail}
           canAdmin={session.user.role === "admin"}
+          showTokenUsage={showTokenUsage}
           userEmail={session.user.email}
           userName={session.user.name}
           onRailClick={handleRailClick}
+          onShowTokenUsageChange={setShowTokenUsage}
           onSignOut={handleSignOut}
         />
 
@@ -854,7 +872,9 @@ function PMOCommandCenter() {
             searchTerm={searchTerm}
             userEmail={session.user.email}
             userName={session.user.name}
+            showTokenUsage={showTokenUsage}
             onSearchTerm={setSearchTerm}
+            onShowTokenUsageChange={setShowTokenUsage}
             onSignOut={handleSignOut}
             onMobileMenu={() => handleRailClick("Workspaces")}
             onNotify={() => updateToast("Decision taxonomy is still blocked")}
@@ -932,7 +952,7 @@ function PMOCommandCenter() {
                   </div>
 
                   <section className="scrollbar-thin min-h-0 flex-1 overflow-auto p-4 pb-32">
-                    {activeTab === "Chat" ? <ChatView isTyping={sendMessageMutation.isPending} messages={currentMessages} /> : null}
+                    {activeTab === "Chat" ? <ChatView isTyping={sendMessageMutation.isPending} llmTraces={llmTraces} messages={currentMessages} showTokenUsage={showTokenUsage} /> : null}
                     {activeTab === "Ideas" ? (
                       <IdeasView
                         canEdit={canEdit}
@@ -1078,15 +1098,17 @@ function PMOCommandCenter() {
           </div>
         </section>
 
-        <div className="fixed right-4 bottom-24 z-40 flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs font-medium shadow-lg">
-          <span className="size-2 rounded-full bg-success" />
-          {toast}
-          {toastLink ? (
-            <a className="font-semibold text-primary underline-offset-4 hover:underline" href={toastLink.href}>
-              {toastLink.label}
-            </a>
-          ) : null}
-        </div>
+        {toast ? (
+          <div className="fixed right-4 bottom-24 z-40 flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs font-medium shadow-lg">
+            <span className="size-2 rounded-full bg-success" />
+            {toast}
+            {toastLink ? (
+              <a className="font-semibold text-primary underline-offset-4 hover:underline" href={toastLink.href}>
+                {toastLink.label}
+              </a>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {canEdit ? (
@@ -1122,23 +1144,283 @@ function PMOCommandCenter() {
         </>
       ) : null}
       <ArtifactPreviewDialog artifact={previewArtifact} onOpenChange={(open) => !open && setPreviewArtifact(null)} />
+      {import.meta.env.DEV ? <LlmDevtools traces={llmTraces} /> : null}
     </main>
+  );
+}
+
+type LlmDevtoolsPane = "request" | "response" | "thinking" | "raw";
+
+function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
+  const [activePane, setActivePane] = useState<LlmDevtoolsPane>("request");
+  const [devtoolsSize, setDevtoolsSize] = useState({ width: 760, height: 520 });
+  const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (!selectedTraceId && traces[0]) setSelectedTraceId(traces[0].id);
+    if (selectedTraceId && traces.length > 0 && !traces.some((trace) => trace.id === selectedTraceId)) {
+      setSelectedTraceId(traces[0].id);
+    }
+  }, [selectedTraceId, traces]);
+
+  const selectedTrace = traces.find((trace) => trace.id === selectedTraceId) ?? traces[0] ?? null;
+  const panes: Array<{ id: LlmDevtoolsPane; label: string }> = [
+    { id: "request", label: "Request" },
+    { id: "response", label: "Response" },
+    { id: "thinking", label: "Thinking" },
+    { id: "raw", label: "Raw" },
+  ];
+  const clampDevtoolsSize = (width: number, height: number) => ({
+    width: Math.min(Math.max(width, 340), Math.max(340, window.innerWidth - 32)),
+    height: Math.min(Math.max(height, 320), Math.max(320, window.innerHeight - 32)),
+  });
+
+  function handleResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      width: devtoolsSize.width,
+      height: devtoolsSize.height,
+    };
+  }
+
+  function handleResizeMove(event: PointerEvent<HTMLButtonElement>) {
+    const start = resizeStartRef.current;
+    if (!start) return;
+    setDevtoolsSize(clampDevtoolsSize(start.width + start.x - event.clientX, start.height + start.y - event.clientY));
+  }
+
+  function handleResizeEnd(event: PointerEvent<HTMLButtonElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resizeStartRef.current = null;
+  }
+
+  if (!isOpen) {
+    return (
+      <button
+        aria-label="Open LLM devtools"
+        className="fixed right-4 bottom-4 z-50 grid size-11 place-items-center rounded-md border bg-card text-foreground shadow-lg transition-colors hover:bg-accent"
+        type="button"
+        onClick={() => {
+          setIsOpen(true);
+          setIsMinimized(false);
+        }}
+      >
+        <Bug className="size-5" />
+      </button>
+    );
+  }
+
+  if (isMinimized) {
+    return (
+      <div className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs font-semibold shadow-lg">
+        <Bug className="size-4" />
+        <span>LLM Devtools</span>
+        {traces.length ? <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{traces.length}</span> : null}
+        <Button type="button" variant="ghost" size="icon" aria-label="Restore LLM devtools" onClick={() => setIsMinimized(false)}>
+          <Maximize2 className="size-4" />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="Close LLM devtools" onClick={() => setIsOpen(false)}>
+          <X className="size-4" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <section
+      aria-label="LLM devtools"
+      className="fixed right-4 bottom-4 z-50 flex max-h-[calc(100vh-2rem)] min-h-[320px] max-w-[calc(100vw-2rem)] min-w-[340px] flex-col overflow-hidden rounded-md border bg-card text-card-foreground shadow-2xl"
+      style={{ height: devtoolsSize.height, width: devtoolsSize.width }}
+    >
+      <button
+        aria-label="Resize LLM devtools"
+        className="absolute left-0 top-0 z-10 grid size-7 cursor-nwse-resize place-items-center rounded-br-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+        type="button"
+        onPointerDown={handleResizeStart}
+        onPointerMove={handleResizeMove}
+        onPointerUp={handleResizeEnd}
+        onPointerCancel={handleResizeEnd}
+      >
+        <Maximize2 className="size-3 -rotate-90" />
+      </button>
+      <header className="flex items-center gap-3 border-b bg-muted/60 py-2 pl-8 pr-3">
+        <Bug className="size-4 text-primary" />
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-semibold">LLM Devtools</h2>
+          <p className="truncate text-xs text-muted-foreground">
+            {selectedTrace ? `${selectedTrace.model} / ${selectedTrace.chatTitle} / ${selectedTrace.durationMs}ms` : "No LLM calls captured yet"}
+          </p>
+        </div>
+        <Button type="button" variant="ghost" size="icon" aria-label="Minimize LLM devtools" onClick={() => setIsMinimized(true)}>
+          <Minimize2 className="size-4" />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="Close LLM devtools" onClick={() => setIsOpen(false)}>
+          <X className="size-4" />
+        </Button>
+      </header>
+
+      <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="min-h-0 overflow-y-auto border-r bg-muted/25 p-2">
+          {traces.length ? (
+            traces.map((trace) => (
+              <button
+                className={cn(
+                  "mb-2 block w-full rounded-md border bg-background p-2 text-left text-xs transition-colors hover:border-primary/50",
+                  selectedTrace?.id === trace.id && "border-primary bg-accent/60",
+                )}
+                key={trace.id}
+                type="button"
+                onClick={() => setSelectedTraceId(trace.id)}
+              >
+                <span className="block truncate font-semibold">{trace.chatTitle}</span>
+                <span className="block truncate text-muted-foreground">{new Date(trace.timestamp).toLocaleTimeString()} / {trace.durationMs}ms</span>
+                {trace.error ? <span className="mt-1 block truncate text-destructive">{trace.error}</span> : null}
+              </button>
+            ))
+          ) : (
+            <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">Send a chat message to capture the Gemma request and response.</p>
+          )}
+        </aside>
+
+        <div className="flex min-h-0 flex-col">
+          <div className="flex flex-wrap gap-1 border-b p-2">
+            {panes.map((pane) => (
+              <button
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  activePane === pane.id && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
+                )}
+                key={pane.id}
+                type="button"
+                onClick={() => setActivePane(pane.id)}
+              >
+                {pane.label}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto p-3">
+            {selectedTrace ? <LlmDevtoolsPaneContent pane={activePane} trace={selectedTrace} /> : <p className="text-sm text-muted-foreground">No trace selected.</p>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LlmDevtoolsPaneContent({ pane, trace }: { pane: LlmDevtoolsPane; trace: LlmDevTrace }) {
+  if (pane === "request") {
+    return (
+      <div className="space-y-3">
+        {trace.request.messages.map((message, index) => (
+          <article className="rounded-md border bg-background p-3" key={`${message.role}-${index}`}>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="rounded bg-muted px-2 py-1 text-xs font-semibold uppercase text-muted-foreground">{message.role}</span>
+              <span className="text-xs text-muted-foreground">{message.content.length.toLocaleString()} chars</span>
+            </div>
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{message.content}</pre>
+          </article>
+        ))}
+        <pre className="rounded-md border bg-muted/30 p-3 font-mono text-xs">{JSON.stringify({
+          max_completion_tokens: trace.request.max_completion_tokens,
+          temperature: trace.request.temperature,
+        }, null, 2)}</pre>
+      </div>
+    );
+  }
+
+  if (pane === "response") {
+    return (
+      <div className="space-y-3">
+        <LlmTraceDiagnostics trace={trace} />
+        <pre className="whitespace-pre-wrap break-words rounded-md border bg-background p-3 font-mono text-xs leading-relaxed">{trace.responseText}</pre>
+      </div>
+    );
+  }
+
+  if (pane === "thinking") {
+    return (
+      <div className="space-y-3">
+        <LlmTraceDiagnostics trace={trace} />
+        {trace.thinkingText ? (
+          <pre className="whitespace-pre-wrap break-words rounded-md border bg-background p-3 font-mono text-xs italic leading-relaxed">{trace.thinkingText}</pre>
+        ) : (
+          <p className="rounded-md border border-dashed p-3 text-sm italic text-muted-foreground">No thinking or reasoning field was returned by this model response.</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <LlmTraceDiagnostics trace={trace} />
+      <pre className="whitespace-pre-wrap break-words rounded-md border bg-background p-3 font-mono text-xs leading-relaxed">{JSON.stringify(trace.rawResponse, null, 2)}</pre>
+    </div>
+  );
+}
+
+function LlmTraceDiagnostics({ trace }: { trace: LlmDevTrace }) {
+  return (
+    <div className="grid gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:grid-cols-2">
+      <span>
+        <strong className="block text-muted-foreground">Finish reason</strong>
+        {trace.diagnostics.finishReason ?? "Not returned"}
+      </span>
+      <span>
+        <strong className="block text-muted-foreground">Duration</strong>
+        {trace.durationMs}ms
+      </span>
+      <span>
+        <strong className="block text-muted-foreground">Response chars</strong>
+        {trace.diagnostics.responseTextChars.toLocaleString()}
+      </span>
+      <span>
+        <strong className="block text-muted-foreground">Thinking chars</strong>
+        {trace.diagnostics.thinkingTextChars.toLocaleString()}
+      </span>
+      <span className="sm:col-span-2">
+        <strong className="block text-muted-foreground">Usage</strong>
+        {trace.diagnostics.usage ? (
+          <code className="break-words">{JSON.stringify(trace.diagnostics.usage)}</code>
+        ) : (
+          "Not returned"
+        )}
+      </span>
+      {trace.diagnostics.finishReason === "length" ? (
+        <span className="rounded-md border border-warning/40 bg-warning/10 p-2 text-warning sm:col-span-2">
+          The model stopped because the completion token limit was reached.
+        </span>
+      ) : (
+        null
+      )}
+    </div>
   );
 }
 
 function PrimaryRail({
   activeRail,
   canAdmin,
+  showTokenUsage,
   userEmail,
   userName,
   onRailClick,
+  onShowTokenUsageChange,
   onSignOut,
 }: {
   activeRail: RailName;
   canAdmin: boolean;
+  showTokenUsage: boolean;
   userEmail: string;
   userName: string;
   onRailClick: (rail: RailName) => void;
+  onShowTokenUsageChange: (value: boolean) => void;
   onSignOut: () => void;
 }) {
   const items: Array<{ label: RailName; icon: ComponentType<{ className?: string }> }> = [
@@ -1174,8 +1456,10 @@ function PrimaryRail({
       <AccountMenu
         align="rail"
         canAdmin={canAdmin}
+        showTokenUsage={showTokenUsage}
         userEmail={userEmail}
         userName={userName}
+        onShowTokenUsageChange={onShowTokenUsageChange}
         onSignOut={onSignOut}
       />
     </aside>
@@ -1185,20 +1469,24 @@ function PrimaryRail({
 function Topbar({
   canAdmin,
   searchTerm,
+  showTokenUsage,
   userEmail,
   userName,
   onMobileMenu,
   onNotify,
   onSearchTerm,
+  onShowTokenUsageChange,
   onSignOut,
 }: {
   canAdmin: boolean;
   searchTerm: string;
+  showTokenUsage: boolean;
   userEmail: string;
   userName: string;
   onMobileMenu: () => void;
   onNotify: () => void;
   onSearchTerm: (value: string) => void;
+  onShowTokenUsageChange: (value: boolean) => void;
   onSignOut: () => void;
 }) {
   return (
@@ -1233,8 +1521,10 @@ function Topbar({
           <AccountMenu
             align="topbar"
             canAdmin={canAdmin}
+            showTokenUsage={showTokenUsage}
             userEmail={userEmail}
             userName={userName}
+            onShowTokenUsageChange={onShowTokenUsageChange}
             onSignOut={onSignOut}
           />
         </div>
@@ -1246,14 +1536,18 @@ function Topbar({
 function AccountMenu({
   align,
   canAdmin,
+  showTokenUsage,
   userEmail,
   userName,
+  onShowTokenUsageChange,
   onSignOut,
 }: {
   align: "rail" | "topbar";
   canAdmin: boolean;
+  showTokenUsage: boolean;
   userEmail: string;
   userName: string;
+  onShowTokenUsageChange: (value: boolean) => void;
   onSignOut: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -1330,6 +1624,32 @@ function AccountMenu({
               Admin
             </button>
           ) : null}
+          <div className="my-2 border-t" />
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+            role="menuitemcheckbox"
+            aria-checked={showTokenUsage}
+            onClick={() => onShowTokenUsageChange(!showTokenUsage)}
+          >
+            <span className="flex items-center gap-2">
+              <Zap className="size-4" />
+              Show token usage
+            </span>
+            <span
+              className={cn(
+                "flex h-5 w-9 items-center rounded-full border p-0.5 transition-colors",
+                showTokenUsage ? "border-primary bg-primary" : "border-input bg-muted",
+              )}
+            >
+              <span
+                className={cn(
+                  "size-3.5 rounded-full bg-background shadow-sm transition-transform",
+                  showTokenUsage && "translate-x-4",
+                )}
+              />
+            </span>
+          </button>
           <div className="my-2 border-t" />
           <button
             type="button"
@@ -1661,11 +1981,23 @@ function PinnedStrip({
   );
 }
 
-function ChatView({ isTyping, messages }: { isTyping: boolean; messages: ChatMessage[] }) {
+function ChatView({
+  isTyping,
+  llmTraces,
+  messages,
+  showTokenUsage,
+}: {
+  isTyping: boolean;
+  llmTraces: LlmDevTrace[];
+  messages: ChatMessage[];
+  showTokenUsage: boolean;
+}) {
   return (
     <div className="space-y-4">
-      {messages.map((message) => {
+      {messages.map((message, index) => {
         const isUser = message.role === "user";
+        const previousUserMessage = [...messages.slice(0, index)].reverse().find((item) => item.role === "user");
+        const tokenUsage = !isUser ? getTokenUsageForMessage(message, llmTraces) : null;
         return (
           <article className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")} key={message.id}>
             {!isUser ? (
@@ -1675,6 +2007,7 @@ function ChatView({ isTyping, messages }: { isTyping: boolean; messages: ChatMes
               <div className={cn("flex flex-wrap items-center gap-2 text-xs text-muted-foreground", isUser && "justify-end")}>
                 <strong className="text-sm text-foreground">{isUser ? "You" : "VertexAI"}</strong>
                 <span>{message.time}</span>
+                {!isUser && showTokenUsage && tokenUsage ? <TokenUsageBadge usage={tokenUsage} /> : null}
               </div>
               <div
                 className={cn(
@@ -1684,7 +2017,7 @@ function ChatView({ isTyping, messages }: { isTyping: boolean; messages: ChatMes
                     : "rounded-bl-sm border bg-muted/60 text-foreground",
                 )}
               >
-                {message.text}
+                {isUser ? message.text : <AssistantResponseContent requestedJson={wasJsonRequested(previousUserMessage?.text ?? "")} text={message.text} />}
               </div>
               {message.artifact ? (
                 <button className="mt-2 grid min-h-14 max-w-lg grid-cols-[34px_minmax(0,1fr)_24px] items-center gap-2 rounded-md border bg-card p-2 text-left">
@@ -1715,6 +2048,271 @@ function ChatView({ isTyping, messages }: { isTyping: boolean; messages: ChatMes
       ) : null}
     </div>
   );
+}
+
+type MessageTokenUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+};
+
+function getTokenUsageForMessage(message: ChatMessage, traces: LlmDevTrace[]): MessageTokenUsage | null {
+  const trace = traces.find((item) => item.responseText === message.text);
+  if (!trace) return null;
+  const usage = trace.diagnostics.tokenUsage;
+  if (usage.inputTokens === null && usage.outputTokens === null && usage.totalTokens === null) return null;
+  return usage;
+}
+
+function TokenUsageBadge({ usage }: { usage: MessageTokenUsage }) {
+  const input = usage.inputTokens !== null ? usage.inputTokens.toLocaleString() : "?";
+  const output = usage.outputTokens !== null ? usage.outputTokens.toLocaleString() : "?";
+  const total = usage.totalTokens !== null ? usage.totalTokens.toLocaleString() : "?";
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground" title={`Input ${input}, output ${output}, total ${total} tokens`}>
+      <Zap className="size-3" />
+      <span>in {input}</span>
+      <span>/</span>
+      <span>out {output}</span>
+      <span>/</span>
+      <span>total {total}</span>
+    </span>
+  );
+}
+
+type ParsedAssistantResponse =
+  | { kind: "json"; content: string }
+  | { kind: "markdown"; content: string }
+  | { kind: "text"; content: string };
+
+function wasJsonRequested(prompt: string) {
+  return /\b(json|schema|object|array)\b/i.test(prompt) && /\b(return|respond|output|format|give|as|in)\b/i.test(prompt);
+}
+
+function parseAssistantResponse(text: string, requestedJson: boolean): ParsedAssistantResponse {
+  const trimmed = text.trim();
+  const jsonCandidate = extractJsonCandidate(trimmed);
+  if (jsonCandidate) {
+    try {
+      const parsed = JSON.parse(jsonCandidate);
+      if (requestedJson) {
+        return { kind: "json", content: JSON.stringify(parsed, null, 2) };
+      }
+      const extracted = extractReadableJson(parsed);
+      return {
+        kind: looksLikeMarkdown(extracted) ? "markdown" : "text",
+        content: extracted,
+      };
+    } catch {
+      // Fall through to normal markdown/text detection.
+    }
+  }
+
+  return looksLikeMarkdown(trimmed)
+    ? { kind: "markdown", content: trimmed }
+    : { kind: "text", content: trimmed };
+}
+
+function extractJsonCandidate(text: string) {
+  const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced?.[1]) return fenced[1].trim();
+  if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) return text;
+  return "";
+}
+
+function extractReadableJson(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value === null) return "";
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractReadableJson(item))
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (!value || typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["answer", "response", "message", "text", "content", "output", "summary", "result"]) {
+    const extracted = extractReadableJson(record[key]);
+    if (extracted) return extracted;
+  }
+
+  return Object.entries(record)
+    .map(([key, nestedValue]) => {
+      const extracted = extractReadableJson(nestedValue);
+      return extracted ? `${titleCase(key)}: ${extracted}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function titleCase(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function looksLikeMarkdown(text: string) {
+  return [
+    /^#{1,6}\s+/m,
+    /^\s*[-*+]\s+/m,
+    /^\s*\d+\.\s+/m,
+    /```[\s\S]*?```/,
+    /`[^`]+`/,
+    /\*\*[^*]+\*\*/,
+    /\[[^\]]+\]\([^)]+\)/,
+    /^\|.+\|$/m,
+  ].some((pattern) => pattern.test(text));
+}
+
+function AssistantResponseContent({ requestedJson, text }: { requestedJson: boolean; text: string }) {
+  const parsed = parseAssistantResponse(text, requestedJson);
+  if (parsed.kind === "json") {
+    return (
+      <pre className="overflow-x-auto rounded-md bg-background/80 p-3 font-mono text-xs leading-relaxed">
+        <code>{parsed.content}</code>
+      </pre>
+    );
+  }
+  if (parsed.kind === "markdown") {
+    return <MarkdownContent text={parsed.content} />;
+  }
+  return <p className="whitespace-pre-wrap">{parsed.content}</p>;
+}
+
+function MarkdownContent({ text }: { text: string }) {
+  const blocks = splitMarkdownBlocks(text);
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, index) => (
+        <MarkdownBlock block={block} key={`${block.type}-${index}`} />
+      ))}
+    </div>
+  );
+}
+
+type MarkdownBlockShape =
+  | { type: "code"; language: string; content: string }
+  | { type: "heading"; level: number; content: string }
+  | { type: "list"; ordered: boolean; items: string[] }
+  | { type: "paragraph"; content: string };
+
+function splitMarkdownBlocks(text: string): MarkdownBlockShape[] {
+  const lines = text.split(/\r?\n/);
+  const blocks: MarkdownBlockShape[] = [];
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push({ type: "paragraph", content: paragraph.join("\n").trim() });
+    paragraph = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fence = line.match(/^```(\w+)?\s*$/);
+    if (fence) {
+      flushParagraph();
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !/^```\s*$/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      blocks.push({ type: "code", language: fence[1] ?? "", content: codeLines.join("\n") });
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      blocks.push({ type: "heading", level: heading[1].length, content: heading[2] });
+      continue;
+    }
+
+    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+    if (unordered || ordered) {
+      flushParagraph();
+      const items = [(unordered ?? ordered)?.[1] ?? ""];
+      const isOrdered = Boolean(ordered);
+      while (index + 1 < lines.length) {
+        const nextMatch = isOrdered ? lines[index + 1].match(/^\s*\d+\.\s+(.+)$/) : lines[index + 1].match(/^\s*[-*+]\s+(.+)$/);
+        if (!nextMatch) break;
+        items.push(nextMatch[1]);
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered: isOrdered, items });
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  return blocks;
+}
+
+function MarkdownBlock({ block }: { block: MarkdownBlockShape }) {
+  if (block.type === "code") {
+    return (
+      <pre className="overflow-x-auto rounded-md bg-background/80 p-3 font-mono text-xs leading-relaxed">
+        <code>{block.content}</code>
+      </pre>
+    );
+  }
+  if (block.type === "heading") {
+    const className = block.level <= 2 ? "text-base font-semibold" : "text-sm font-semibold";
+    return <p className={className}>{renderInlineMarkdown(block.content)}</p>;
+  }
+  if (block.type === "list") {
+    const ListTag = block.ordered ? "ol" : "ul";
+    return (
+      <ListTag className={cn("space-y-1 pl-5", block.ordered ? "list-decimal" : "list-disc")}>
+        {block.items.map((item, index) => (
+          <li key={`${item}-${index}`}>{renderInlineMarkdown(item)}</li>
+        ))}
+      </ListTag>
+    );
+  }
+  return <p className="whitespace-pre-wrap">{renderInlineMarkdown(block.content)}</p>;
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    const key = `${token}-${match.index}`;
+    if (token.startsWith("`")) {
+      nodes.push(<code className="rounded bg-background/80 px-1 py-0.5 font-mono text-xs" key={key}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith("**")) {
+      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("*")) {
+      nodes.push(<em key={key}>{token.slice(1, -1)}</em>);
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      nodes.push(
+        <a className="font-medium text-primary underline-offset-4 hover:underline" href={link?.[2] ?? "#"} key={key} rel="noreferrer" target="_blank">
+          {link?.[1] ?? token}
+        </a>,
+      );
+    }
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
 }
 
 function IdeasView({

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ export const Route = createFileRoute("/sign-in")({
 });
 
 function SignInPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -47,7 +48,6 @@ function SignInPage() {
       const { error } = await authClient.signIn.email({
         email,
         password,
-        callbackURL: "/",
       });
 
       if (error) {
@@ -56,7 +56,16 @@ function SignInPage() {
       }
 
       setMessage("Signed in. Opening Vertex AI Command Center...");
-      window.location.href = "/";
+      window.setTimeout(() => {
+        if (window.location.pathname === "/sign-in") window.location.replace("/");
+      }, 750);
+
+      try {
+        await router.invalidate();
+        await router.navigate({ to: "/", replace: true });
+      } catch {
+        window.location.replace("/");
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sign in failed. Try again.");
     } finally {

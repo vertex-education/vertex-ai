@@ -143,6 +143,44 @@ export type PmoWorkspaceState = {
   workspaces: Record<WorkspaceMode, ScopedWorkspaceState>;
 };
 
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+export type LlmDevTrace = {
+  id: string;
+  timestamp: string;
+  durationMs: number;
+  model: string;
+  chatId: string;
+  chatTitle: string;
+  mode: WorkspaceMode;
+  projectId: string | null;
+  request: {
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    max_completion_tokens: number;
+    temperature: number;
+  };
+  responseText: string;
+  thinkingText: string;
+  diagnostics: {
+    finishReason: string | null;
+    usage: JsonValue | null;
+    tokenUsage: {
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+    };
+    responseTextChars: number;
+    thinkingTextChars: number;
+  };
+  rawResponse: JsonValue;
+  error?: string;
+};
+
+type SendChatMessageResult = {
+  workspace: PmoWorkspaceState;
+  llmTrace: LlmDevTrace | null;
+};
+
 export type AddIdeaInput = {
   title: string;
   category: string;
@@ -183,6 +221,7 @@ const scopeByMode: Record<WorkspaceMode, WorkspaceScope> = {
 };
 
 const assistantName = "VertexAI";
+const gemmaMaxCompletionTokens = 16_384;
 
 type CloudflareContext = {
   cloudflare?: {
@@ -241,6 +280,87 @@ function summarizeAiResponseShape(value: unknown): unknown {
       .slice(0, 12)
       .map(([key, nestedValue]) => [key, Array.isArray(nestedValue) ? `array(${nestedValue.length})` : isRecord(nestedValue) ? Object.keys(nestedValue).slice(0, 8) : typeof nestedValue]),
   );
+}
+
+function cloneJsonValue(value: unknown): JsonValue {
+  try {
+    return JSON.parse(JSON.stringify(value)) as JsonValue;
+  } catch {
+    return JSON.parse(JSON.stringify(summarizeAiResponseShape(value))) as JsonValue;
+  }
+}
+
+function extractThinkingFromResponse(value: unknown, depth = 0): string {
+  if (depth > 8) return "";
+  if (typeof value === "string") {
+    const match = value.match(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/i);
+    return match?.[1]?.trim() ?? "";
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractThinkingFromResponse(item, depth + 1))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (!isRecord(value)) return "";
+
+  const thinkingKeys = ["thinking", "reasoning", "reasoning_content", "thought", "thoughts"];
+  const direct = thinkingKeys
+    .map((key) => extractTextFromContent(value[key]))
+    .filter(Boolean)
+    .join("\n\n");
+  if (direct) return direct;
+
+  return Object.values(value)
+    .map((nestedValue) => extractThinkingFromResponse(nestedValue, depth + 1))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function findFirstByKey(value: unknown, keys: string[], depth = 0): unknown {
+  if (depth > 8 || !value) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findFirstByKey(item, keys, depth + 1);
+      if (nested !== null && nested !== undefined) return nested;
+    }
+    return null;
+  }
+  if (!isRecord(value)) return null;
+
+  for (const key of keys) {
+    if (value[key] !== undefined && value[key] !== null) return value[key];
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    const nested = findFirstByKey(nestedValue, keys, depth + 1);
+    if (nested !== null && nested !== undefined) return nested;
+  }
+  return null;
+}
+
+function getAiDiagnostics(result: unknown, responseText: string, thinkingText: string): LlmDevTrace["diagnostics"] {
+  const finishReason = findFirstByKey(result, ["finish_reason", "finishReason"]);
+  const usage = findFirstByKey(result, ["usage"]);
+  const usageRecord = isRecord(usage) ? usage : {};
+  const inputTokens = numberFromUnknown(usageRecord.prompt_tokens ?? usageRecord.input_tokens);
+  const outputTokens = numberFromUnknown(usageRecord.completion_tokens ?? usageRecord.output_tokens);
+  const totalTokens = numberFromUnknown(usageRecord.total_tokens);
+  return {
+    finishReason: typeof finishReason === "string" ? finishReason : null,
+    usage: usage ? cloneJsonValue(usage) : null,
+    tokenUsage: {
+      inputTokens,
+      outputTokens,
+      totalTokens: totalTokens ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null),
+    },
+    responseTextChars: responseText.length,
+    thinkingTextChars: thinkingText.length,
+  };
+}
+
+function numberFromUnknown(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function getDb() {
@@ -669,19 +789,14 @@ async function runGemmaChat({
   data: { mode: WorkspaceMode; projectId: string | null; chatId: string; chatTitle: string; text: string };
   existingMessages: ChatMessage[];
   workspace: ScopedWorkspaceState;
-}) {
-  const ai = (context as CloudflareContext).cloudflare?.env?.AI;
-  if (!ai) {
-    return aiUnavailableMessage;
-  }
-
+}): Promise<{ text: string; trace: LlmDevTrace }> {
   const project = data.projectId
     ? await getDb()
       .prepare("SELECT name, description FROM projects WHERE id = ? LIMIT 1")
       .bind(data.projectId)
       .first<{ name: string; description: string }>()
     : null;
-  const recentMessages = existingMessages.slice(-8).map((message) => ({
+  const recentMessages: Array<{ role: "user" | "assistant"; content: string }> = existingMessages.slice(-8).map((message) => ({
     role: message.role === "assistant" ? "assistant" : "user",
     content: `${message.author}: ${message.text}`,
   }));
@@ -695,36 +810,76 @@ async function runGemmaChat({
     "Use this scoped context only when it is relevant to the user's request. Otherwise answer the user's request directly.",
   ].filter(Boolean).join("\n");
 
+  const requestPayload = {
+    messages: [
+      {
+        role: "system" as const,
+        content: buildVertexAiSystemPrompt(),
+      },
+      {
+        role: "user" as const,
+        content: `Current scoped context:\n${scopeContext}`,
+      },
+      ...recentMessages,
+      {
+        role: "user" as const,
+        content: data.text,
+      },
+    ],
+    max_completion_tokens: gemmaMaxCompletionTokens,
+    temperature: 0.3,
+  };
+  const traceBase = {
+    id: `llm-trace-${crypto.randomUUID()}`,
+    timestamp: new Date().toISOString(),
+    model: vertexAiModelId,
+    chatId: data.chatId,
+    chatTitle: data.chatTitle,
+    mode: data.mode,
+    projectId: data.projectId,
+    request: requestPayload,
+  };
+  const ai = (context as CloudflareContext).cloudflare?.env?.AI;
+  if (!ai) {
+    return {
+      text: aiUnavailableMessage,
+      trace: {
+        ...traceBase,
+        durationMs: 0,
+        responseText: aiUnavailableMessage,
+        thinkingText: "",
+        diagnostics: {
+          finishReason: null,
+          usage: null,
+          tokenUsage: {
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+          },
+          responseTextChars: aiUnavailableMessage.length,
+          thinkingTextChars: 0,
+        },
+        rawResponse: null,
+        error: aiUnavailableMessage,
+      },
+    };
+  }
+
   console.info("[VertexAI] Workers AI request started", {
     chatId: data.chatId,
     mode: data.mode,
     projectId: data.projectId,
-    messageCount: recentMessages.length + 3,
+    messageCount: requestPayload.messages.length,
     model: vertexAiModelId,
   });
 
+  const startedAt = Date.now();
   try {
-    const result = await withAiTimeout(ai.run(vertexAiModelId, {
-      messages: [
-        {
-          role: "system",
-          content: buildVertexAiSystemPrompt(),
-        },
-        {
-          role: "user",
-          content: `Current scoped context:\n${scopeContext}`,
-        },
-        ...recentMessages,
-        {
-          role: "user",
-          content: data.text,
-        },
-      ],
-      max_completion_tokens: 650,
-      temperature: 0.3,
-    }));
+    const result = await withAiTimeout(ai.run(vertexAiModelId, requestPayload));
 
     const responseText = extractAiResponse(result).trim();
+    const thinkingText = extractThinkingFromResponse(result);
+    const text = responseText || (thinkingText ? "The model returned reasoning output but did not return a final answer. It may have exhausted the completion budget before finishing. Please try again or shorten the prompt." : emptyAiResponseMessage);
     console.info("[VertexAI] Workers AI request completed", {
       chatId: data.chatId,
       responseLength: responseText.length,
@@ -736,14 +891,46 @@ async function runGemmaChat({
         responseShape: summarizeAiResponseShape(result),
       });
     }
-    return responseText || emptyAiResponseMessage;
+    return {
+      text,
+      trace: {
+        ...traceBase,
+        durationMs: Date.now() - startedAt,
+        responseText: text,
+        thinkingText,
+        diagnostics: getAiDiagnostics(result, responseText, thinkingText),
+        rawResponse: cloneJsonValue(result),
+      },
+    };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Workers AI request failed.";
     console.error("[VertexAI] Workers AI request failed", {
       chatId: data.chatId,
       message: detail,
     });
-    return `I could not complete the Workers AI request. ${detail}`;
+    const text = `I could not complete the Workers AI request. ${detail}`;
+    return {
+      text,
+      trace: {
+        ...traceBase,
+        durationMs: Date.now() - startedAt,
+        responseText: text,
+        thinkingText: "",
+        diagnostics: {
+          finishReason: null,
+          usage: null,
+          tokenUsage: {
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+          },
+          responseTextChars: text.length,
+          thinkingTextChars: 0,
+        },
+        rawResponse: null,
+        error: detail,
+      },
+    };
   }
 }
 
@@ -859,7 +1046,7 @@ async function requireChatContributor({
 
 export const sendChatMessage = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; teamId?: string | null; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) => data)
-  .handler(async ({ context, data }) => {
+  .handler(async ({ context, data }): Promise<SendChatMessageResult> => {
     const user = await requireWorkspaceEditor();
     await requireChatContributor({
       chatId: data.chatId,
@@ -871,7 +1058,7 @@ export const sendChatMessage = createServerFn({ method: "POST" })
     const workspace = getMutableWorkspace(data.mode);
     const conversationKey = getConversationKey(data.mode, data.projectId, data.chatId);
     const text = data.text.trim();
-    if (!text) return clone(getMutableRoot());
+    if (!text) return { workspace: clone(getMutableRoot()), llmTrace: null };
     const existingMessages = await listPersistedChatMessages(data.chatId);
 
     const userMessage: ChatMessage = {
@@ -882,7 +1069,7 @@ export const sendChatMessage = createServerFn({ method: "POST" })
       time: nowLabel(),
       text,
     };
-    const aiText = await runGemmaChat({
+    const aiResult = await runGemmaChat({
       context,
       data: { ...data, text },
       existingMessages,
@@ -893,7 +1080,7 @@ export const sendChatMessage = createServerFn({ method: "POST" })
       author: assistantName,
       role: "assistant",
       time: nowLabel(),
-      text: aiText,
+      text: aiResult.text,
     };
 
     const workspaceId = await getChatWorkspaceId(data.chatId);
@@ -901,7 +1088,7 @@ export const sendChatMessage = createServerFn({ method: "POST" })
     await persistChatMessage(data.chatId, workspaceId, response);
     workspace.conversations[conversationKey] = [...existingMessages, userMessage, response];
     recordActivity(workspace, "Chat response generated", `${data.chatTitle} updated in ${workspaceModeLabel(data.mode)}.`);
-    return clone(getMutableRoot());
+    return { workspace: clone(getMutableRoot()), llmTrace: aiResult.trace };
   });
 
 export const addIdea = createServerFn({ method: "POST" })
