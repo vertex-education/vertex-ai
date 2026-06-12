@@ -9,7 +9,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { DefaultCatchBoundary } from "@/components/DefaultCatchBoundary";
 import { NotFound } from "@/components/NotFound";
-import appCss from "@/styles/app.css?url";
+import "@/styles/app.css";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -25,10 +25,7 @@ export const Route = createRootRouteWithContext<{
           "SSR PMO chatbot workspace powered by TanStack Start, Query, Table, shadcn/ui, and Tailwind CSS.",
       },
     ],
-    links: [
-      { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/favicon.svg" },
-    ],
+    links: [{ rel: "icon", href: "/favicon.svg" }],
   }),
   errorComponent: (props) => (
     <RootDocument>

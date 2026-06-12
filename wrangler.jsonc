@@ -1,29 +1,48 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "ai-command-center",
-  "main": "./dist/server/index.js",
-  "compatibility_date": "2026-06-11",
-  "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": "./dist/client"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "ai-command-center-db",
-      "database_id": "e2df7e4e-5fa5-4d64-9882-f82ab7cf69be"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "ARTIFACTS_BUCKET",
-      "bucket_name": "ai-command-center-artifacts"
-    }
-  ],
-  "ai": {
-    "binding": "AI"
-  },
-  "observability": {
-    "enabled": true
-  }
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"account_id": "101ae2c39c8dda6574c201e123edf24f",
+	"name": "ai-command-center",
+	"main": "./dist/server/index.js",
+	"workers_dev": true,
+	"preview_urls": true,
+	"compatibility_date": "2026-05-22",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"directory": "./dist/client"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "ai-command-center-db",
+			"database_id": "b92787ed-58b0-429a-b6f3-7539c0a5e201",
+			"remote": true
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "ARTIFACTS_BUCKET",
+			"bucket_name": "ai-command-center-artifacts",
+			"remote": true
+		},
+		{
+			"bucket_name": "ai-command-center-artifacts",
+			"binding": "ai_command_center_artifacts",
+			"remote": true
+		}
+	],
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+	"send_email": [
+		{
+			"name": "EMAIL",
+			"remote": true
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
 }

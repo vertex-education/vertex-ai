@@ -11,6 +11,15 @@ const eslintConfig = defineConfig([
     ".wrangler/**",
     "node_modules/**",
   ]),
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+  },
 ]);
 
 export default eslintConfig;

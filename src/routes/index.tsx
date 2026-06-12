@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import {
   type ColumnDef,
@@ -24,6 +24,7 @@ import {
   Folder,
   FolderOpen,
   Lightbulb,
+  LogOut,
   Menu,
   MessageCircle,
   Paperclip,
@@ -34,6 +35,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  UserRound,
   Users,
   X,
   Zap,
@@ -67,6 +69,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { authClient } from "@/lib/auth-client";
+import { getSessionSnapshot } from "@/lib/auth-workflow";
 import { cn } from "@/lib/utils";
 import {
   type AddIdeaInput,
@@ -109,7 +113,10 @@ import {
 
 export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
+    const session = await getSessionSnapshot();
+    if (!session) throw redirect({ to: "/sign-in" });
     await context.queryClient.ensureQueryData(pmoWorkspaceQueryOptions());
+    return { session };
   },
   head: () => ({
     meta: [{ title: "AI Command Center" }],
@@ -214,6 +221,7 @@ function getDetailMetrics({
 }
 
 function PMOCommandCenter() {
+  const { session } = Route.useLoaderData();
   const queryClient = useQueryClient();
   const workspaceQuery = useSuspenseQuery(pmoWorkspaceQueryOptions());
   const workspace = workspaceQuery.data;
@@ -438,15 +446,31 @@ function PMOCommandCenter() {
     updateToast("Idea added through TanStack Form");
   }
 
+  async function handleSignOut() {
+    await authClient.signOut();
+    window.location.href = "/sign-in";
+  }
+
   return (
     <main className="min-h-svh bg-[linear-gradient(135deg,oklch(0.985_0.006_247),oklch(0.955_0.015_240))] p-0 text-foreground lg:p-5">
       <div className="workspace-shadow relative grid min-h-svh overflow-hidden border bg-card lg:min-h-[calc(100vh-40px)] lg:grid-cols-[72px_minmax(0,1fr)] lg:rounded-xl">
-        <PrimaryRail activeRail={activeRail} onRailClick={handleRailClick} />
+        <PrimaryRail
+          activeRail={activeRail}
+          canAdmin={session.user.role === "admin"}
+          userEmail={session.user.email}
+          userName={session.user.name}
+          onRailClick={handleRailClick}
+          onSignOut={handleSignOut}
+        />
 
         <section className="flex min-w-0 flex-col overflow-hidden bg-background">
           <Topbar
+            canAdmin={session.user.role === "admin"}
             searchTerm={searchTerm}
+            userEmail={session.user.email}
+            userName={session.user.name}
             onSearchTerm={setSearchTerm}
+            onSignOut={handleSignOut}
             onMobileMenu={() => handleRailClick("Workspaces")}
             onNotify={() => updateToast("Decision taxonomy is still blocked")}
           />
@@ -675,10 +699,18 @@ function PMOCommandCenter() {
 
 function PrimaryRail({
   activeRail,
+  canAdmin,
+  userEmail,
+  userName,
   onRailClick,
+  onSignOut,
 }: {
   activeRail: RailName;
+  canAdmin: boolean;
+  userEmail: string;
+  userName: string;
   onRailClick: (rail: RailName) => void;
+  onSignOut: () => void;
 }) {
   const items: Array<{ label: RailName; icon: ComponentType<{ className?: string }> }> = [
     { label: "Workspaces", icon: FolderOpen },
@@ -710,21 +742,35 @@ function PrimaryRail({
         </button>
       ))}
       <div className="flex-1" />
-      <img alt="Alex Morgan" className="size-9 rounded-full border-2 border-white/30 object-cover" src={avatarAlex} />
+      <AccountMenu
+        align="rail"
+        canAdmin={canAdmin}
+        userEmail={userEmail}
+        userName={userName}
+        onSignOut={onSignOut}
+      />
     </aside>
   );
 }
 
 function Topbar({
+  canAdmin,
   searchTerm,
+  userEmail,
+  userName,
   onMobileMenu,
   onNotify,
   onSearchTerm,
+  onSignOut,
 }: {
+  canAdmin: boolean;
   searchTerm: string;
+  userEmail: string;
+  userName: string;
   onMobileMenu: () => void;
   onNotify: () => void;
   onSearchTerm: (value: string) => void;
+  onSignOut: () => void;
 }) {
   return (
     <header className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b bg-card px-3 lg:min-h-[78px] lg:grid-cols-[minmax(220px,1fr)_minmax(260px,360px)_auto] lg:px-5">
@@ -754,8 +800,119 @@ function Topbar({
           <Users />
           AI Ops
         </Button>
+        <div className="lg:hidden">
+          <AccountMenu
+            align="topbar"
+            canAdmin={canAdmin}
+            userEmail={userEmail}
+            userName={userName}
+            onSignOut={onSignOut}
+          />
+        </div>
       </div>
     </header>
+  );
+}
+
+function AccountMenu({
+  align,
+  canAdmin,
+  userEmail,
+  userName,
+  onSignOut,
+}: {
+  align: "rail" | "topbar";
+  canAdmin: boolean;
+  userEmail: string;
+  userName: string;
+  onSignOut: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const displayName = userName || userEmail;
+  const userInitials = initials(displayName || userEmail);
+
+  function runMenuAction(action: () => void) {
+    setIsOpen(false);
+    action();
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className={cn(
+          "grid size-10 place-items-center rounded-full border text-sm font-semibold transition-colors",
+          align === "rail"
+            ? "border-white/30 bg-white/10 text-white hover:bg-white/20"
+            : "border-input bg-background text-foreground shadow-xs hover:bg-accent",
+        )}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label="Open user menu"
+        title={userEmail}
+        onClick={() => setIsOpen((value) => !value)}
+      >
+        {userInitials}
+      </button>
+
+      {isOpen ? (
+        <div
+          className={cn(
+            "absolute z-50 w-72 rounded-md border bg-popover p-2 text-popover-foreground shadow-lg",
+            align === "rail" ? "bottom-0 left-[calc(100%+12px)]" : "right-0 top-[calc(100%+8px)]",
+          )}
+          role="menu"
+        >
+          <div className="mb-2 flex items-center gap-3 rounded-md bg-muted/60 p-3">
+            <div className="grid size-10 place-items-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+              {userInitials}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{displayName}</p>
+              <p className="truncate text-xs text-muted-foreground">{userEmail}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+            role="menuitem"
+            onClick={() => runMenuAction(() => (window.location.href = "/profile"))}
+          >
+            <UserRound className="size-4" />
+            User profile
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+            role="menuitem"
+            onClick={() => runMenuAction(() => (window.location.href = "/profile/password"))}
+          >
+            Reset password
+          </button>
+          {canAdmin ? (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+              role="menuitem"
+              onClick={() => runMenuAction(() => (window.location.href = "/admin/users"))}
+            >
+              <ShieldCheck className="size-4" />
+              Admin
+            </button>
+          ) : null}
+          <div className="my-2 border-t" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+            role="menuitem"
+            onClick={() => runMenuAction(onSignOut)}
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

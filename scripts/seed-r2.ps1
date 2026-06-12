@@ -22,10 +22,10 @@ foreach ($object in $objects) {
     throw "Missing R2 seed file: $($object.Path)"
   }
 
-  $args = @("wrangler", "r2", "object", "put", "$Bucket/$($object.Key)", "--file", $object.Path)
+  $args = @("./scripts/run-wrangler.mjs", "r2", "object", "put", "$Bucket/$($object.Key)", "--file", $object.Path)
   if ($Remote) {
     $args += "--remote"
   }
 
-  npx @args
+  node @args
 }

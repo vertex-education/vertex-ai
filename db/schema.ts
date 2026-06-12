@@ -1,5 +1,119 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export const user = sqliteTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    emailVerified: integer("emailVerified", { mode: "boolean" }).notNull().default(false),
+    image: text("image"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+    role: text("role").notNull().default("user"),
+    banned: integer("banned", { mode: "boolean" }).notNull().default(false),
+    banReason: text("banReason"),
+    banExpires: integer("banExpires", { mode: "timestamp_ms" }),
+  },
+  (table) => ({
+    emailIdx: uniqueIndex("user_email_idx").on(table.email),
+    roleIdx: index("user_role_idx").on(table.role),
+  }),
+);
+
+export const session = sqliteTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+    token: text("token").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+    ipAddress: text("ipAddress"),
+    userAgent: text("userAgent"),
+    userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+    impersonatedBy: text("impersonatedBy"),
+  },
+  (table) => ({
+    tokenIdx: uniqueIndex("session_token_idx").on(table.token),
+    userIdx: index("session_user_idx").on(table.userId),
+  }),
+);
+
+export const account = sqliteTable(
+  "account",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("accountId").notNull(),
+    providerId: text("providerId").notNull(),
+    userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+    accessToken: text("accessToken"),
+    refreshToken: text("refreshToken"),
+    idToken: text("idToken"),
+    accessTokenExpiresAt: integer("accessTokenExpiresAt", { mode: "timestamp_ms" }),
+    refreshTokenExpiresAt: integer("refreshTokenExpiresAt", { mode: "timestamp_ms" }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    userIdx: index("account_user_idx").on(table.userId),
+    providerIdx: index("account_provider_idx").on(table.providerId, table.accountId),
+  }),
+);
+
+export const verification = sqliteTable(
+  "verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
+  },
+  (table) => ({
+    identifierIdx: index("verification_identifier_idx").on(table.identifier),
+  }),
+);
+
+export const authInvites = sqliteTable(
+  "auth_invites",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
+    tokenHash: text("token_hash").notNull(),
+    invitedByUserId: text("invited_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    emailIdx: index("auth_invites_email_idx").on(table.email),
+    tokenHashIdx: uniqueIndex("auth_invites_token_hash_idx").on(table.tokenHash),
+  }),
+);
+
+export const authEmailEvents = sqliteTable(
+  "auth_email_events",
+  {
+    id: text("id").primaryKey(),
+    recipient: text("recipient").notNull(),
+    subject: text("subject").notNull(),
+    actionUrl: text("action_url"),
+    sent: integer("sent", { mode: "boolean" }).notNull().default(false),
+    failureReason: text("failure_reason"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    recipientIdx: index("auth_email_events_recipient_idx").on(table.recipient, table.createdAt),
+  }),
+);
+
 export const workspaces = sqliteTable(
   "workspaces",
   {

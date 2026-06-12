@@ -1,0 +1,107 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { Eye, EyeOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { authClient } from "@/lib/auth-client";
+import { getSessionSnapshot } from "@/lib/auth-workflow";
+
+export const Route = createFileRoute("/sign-in")({
+  loader: async () => {
+    const session = await getSessionSnapshot();
+    if (session) throw redirect({ to: "/" });
+  },
+  head: () => ({
+    meta: [{ title: "Sign in | AI Command Center" }],
+  }),
+  component: SignInPage,
+});
+
+function SignInPage() {
+  const [email, setEmail] = useState("roger.cormier@vertexeducation.com");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [message, setMessage] = useState(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("verified") === "1"
+      ? "Email verified. Sign in to continue."
+      : "",
+  );
+  const [isPending, setIsPending] = useState(false);
+
+  useEffect(() => {
+    setShowPassword(false);
+  }, []);
+
+  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsPending(true);
+    setMessage("Signing in...");
+
+    const slowSignInTimer = window.setTimeout(() => {
+      setMessage("Still signing in. Localhost is using remote Cloudflare services, so this can take a few seconds.");
+    }, 5000);
+
+    try {
+      const { error } = await authClient.signIn.email({
+        email,
+        password,
+        callbackURL: "/",
+      });
+
+      if (error) {
+        setMessage(error.message || "Sign in failed. Verify your email and try again.");
+        return;
+      }
+
+      setMessage("Signed in. Opening AI Command Center...");
+      window.location.href = "/";
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Sign in failed. Try again.");
+    } finally {
+      window.clearTimeout(slowSignInTimer);
+      setIsPending(false);
+    }
+  }
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-muted/30 p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <img className="mb-3 h-10 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
+          <CardTitle>AI Command Center</CardTitle>
+          <CardDescription>Sign in with your invited account.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <form className="space-y-4" onSubmit={handleSignIn}>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input id="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="password"
+                  autoComplete="current-password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <Button type="button" variant="outline" size="icon" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+              </div>
+            </div>
+            <Button className="w-full" type="submit" disabled={isPending}>
+              {isPending ? "Signing in..." : "Sign in"}
+            </Button>
+          </form>
+
+          {message ? <p className="rounded-md border bg-background p-3 text-sm text-muted-foreground">{message}</p> : null}
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
