@@ -15,6 +15,7 @@ import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProfileIndexRouteImport } from './routes/profile/index'
 import { Route as ProfilePasswordRouteImport } from './routes/profile/password'
+import { Route as ProfileInvitesRouteImport } from './routes/profile/invites'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -48,6 +49,11 @@ const ProfilePasswordRoute = ProfilePasswordRouteImport.update({
   path: '/password',
   getParentRoute: () => ProfileRoute,
 } as any)
+const ProfileInvitesRoute = ProfileInvitesRouteImport.update({
+  id: '/invites',
+  path: '/invites',
+  getParentRoute: () => ProfileRoute,
+} as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/admin/users',
   path: '/admin/users',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRouteWithChildren
   '/sign-in': typeof SignInRoute
   '/admin/users': typeof AdminUsersRoute
+  '/profile/invites': typeof ProfileInvitesRoute
   '/profile/password': typeof ProfilePasswordRoute
   '/profile/': typeof ProfileIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
   '/accept-invite': typeof AcceptInviteRoute
   '/sign-in': typeof SignInRoute
   '/admin/users': typeof AdminUsersRoute
+  '/profile/invites': typeof ProfileInvitesRoute
   '/profile/password': typeof ProfilePasswordRoute
   '/profile': typeof ProfileIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -85,6 +93,7 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRouteWithChildren
   '/sign-in': typeof SignInRoute
   '/admin/users': typeof AdminUsersRoute
+  '/profile/invites': typeof ProfileInvitesRoute
   '/profile/password': typeof ProfilePasswordRoute
   '/profile/': typeof ProfileIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/sign-in'
     | '/admin/users'
+    | '/profile/invites'
     | '/profile/password'
     | '/profile/'
     | '/api/auth/$'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/accept-invite'
     | '/sign-in'
     | '/admin/users'
+    | '/profile/invites'
     | '/profile/password'
     | '/profile'
     | '/api/auth/$'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/sign-in'
     | '/admin/users'
+    | '/profile/invites'
     | '/profile/password'
     | '/profile/'
     | '/api/auth/$'
@@ -174,6 +186,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProfilePasswordRouteImport
       parentRoute: typeof ProfileRoute
     }
+    '/profile/invites': {
+      id: '/profile/invites'
+      path: '/invites'
+      fullPath: '/profile/invites'
+      preLoaderRoute: typeof ProfileInvitesRouteImport
+      parentRoute: typeof ProfileRoute
+    }
     '/admin/users': {
       id: '/admin/users'
       path: '/admin/users'
@@ -192,11 +211,13 @@ declare module '@tanstack/react-router' {
 }
 
 interface ProfileRouteChildren {
+  ProfileInvitesRoute: typeof ProfileInvitesRoute
   ProfilePasswordRoute: typeof ProfilePasswordRoute
   ProfileIndexRoute: typeof ProfileIndexRoute
 }
 
 const ProfileRouteChildren: ProfileRouteChildren = {
+  ProfileInvitesRoute: ProfileInvitesRoute,
   ProfilePasswordRoute: ProfilePasswordRoute,
   ProfileIndexRoute: ProfileIndexRoute,
 }

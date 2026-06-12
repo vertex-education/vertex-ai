@@ -14,7 +14,7 @@ export const Route = createFileRoute("/sign-in")({
     if (session) throw redirect({ to: "/" });
   },
   head: () => ({
-    meta: [{ title: "Sign in | AI Command Center" }],
+    meta: [{ title: "Sign in | Vertex AI Command Center" }],
   }),
   component: SignInPage,
 });
@@ -55,7 +55,7 @@ function SignInPage() {
         return;
       }
 
-      setMessage("Signed in. Opening AI Command Center...");
+      setMessage("Signed in. Opening Vertex AI Command Center...");
       window.location.href = "/";
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sign in failed. Try again.");
@@ -70,7 +70,7 @@ function SignInPage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <img className="mb-3 h-10 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
-          <CardTitle>AI Command Center</CardTitle>
+          <CardTitle>Vertex AI Command Center</CardTitle>
           <CardDescription>Sign in with your invited account.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">

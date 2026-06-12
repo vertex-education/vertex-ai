@@ -15,7 +15,7 @@ export const Route = createFileRoute("/profile/password")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Reset password | AI Command Center" }],
+    meta: [{ title: "Reset password | Vertex AI Command Center" }],
   }),
   component: ResetPasswordPage,
 });

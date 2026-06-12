@@ -27,7 +27,7 @@ type AuthEnv = Env & {
 
 const internalSignupHeader = "x-ai-command-center-invite-flow";
 const localDevSecret = "ai-command-center-local-dev-secret-change-before-production";
-const sender = { email: "noreply@rcormier.dev", name: "AI Command Center" };
+const sender = { email: "noreply@rcormier.dev", name: "Vertex AI Command Center" };
 const localDevTrustedOrigins = Array.from({ length: 11 }, (_value, index) => {
   const port = 3000 + index;
   return [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
@@ -65,9 +65,9 @@ export function getAuth(request?: Request) {
         await sendAuthEmail({
           actionUrl: url,
           to: user.email,
-          subject: "Verify your AI Command Center email",
-          text: `Verify your email address to finish creating your AI Command Center account: ${url}`,
-          html: `<p>Verify your email address to finish creating your AI Command Center account.</p><p><a href="${url}">Verify email</a></p>`,
+          subject: "Verify your Vertex AI Command Center email",
+          text: `Verify your email address to finish creating your Vertex AI Command Center account: ${url}`,
+          html: `<p>Verify your email address to finish creating your Vertex AI Command Center account.</p><p><a href="${url}">Verify email</a></p>`,
         });
       },
     },

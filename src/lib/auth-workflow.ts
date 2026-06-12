@@ -20,9 +20,9 @@ type AuthSession = {
   };
 };
 
-export type InviteRole = "admin" | "user";
+export type InviteRole = "admin" | "user" | "viewer";
 
-export type ManagedUserRole = "admin" | "user";
+export type ManagedUserRole = "admin" | "user" | "viewer";
 
 export type ManagedUserRecord = {
   id: string;
@@ -164,9 +164,9 @@ async function createInviteRecord({
   const emailResult = await sendAuthEmail({
     actionUrl: link,
     to: normalizedEmail,
-    subject: "Your AI Command Center invite",
-    text: `You have been invited to AI Command Center. Create your account here: ${link}`,
-    html: `<p>You have been invited to AI Command Center.</p><p><a href="${link}">Create your account</a></p><p>This link expires in 7 days.</p>`,
+    subject: "Your Vertex AI Command Center invite",
+    text: `You have been invited to Vertex AI Command Center. Create your account here: ${link}`,
+    html: `<p>You have been invited to Vertex AI Command Center.</p><p><a href="${link}">Create your account</a></p><p>This link expires in 7 days.</p>`,
   });
 
   return { id, email: normalizedEmail, role, inviteLink: link, emailResult };
@@ -239,7 +239,7 @@ export const acceptInvite = createServerFn({ method: "POST" })
       .bind(Date.now(), invite.id)
       .run();
 
-    const verificationEmail = await latestAuthActionUrl(invite.email, "Verify your AI Command Center email");
+    const verificationEmail = await latestAuthActionUrl(invite.email, "Verify your Vertex AI Command Center email");
 
     return {
       email: invite.email,
@@ -299,7 +299,7 @@ export const listManagedUsers = createServerFn({ method: "GET" }).handler(async 
 
   return (result.results ?? []).map((user) => ({
     ...user,
-    role: user.role === "admin" ? "admin" : "user",
+    role: user.role === "admin" ? "admin" : user.role === "viewer" ? "viewer" : "user",
     emailVerified: Boolean(user.emailVerified),
     createdLabel: new Date(user.createdAt).toLocaleString(),
     updatedLabel: new Date(user.updatedAt).toLocaleString(),
@@ -311,7 +311,7 @@ export const updateManagedUser = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await requireAdmin();
     const name = data.name.trim();
-    const role = data.role === "admin" ? "admin" : "user";
+    const role = data.role === "admin" ? "admin" : data.role === "viewer" ? "viewer" : "user";
     if (!name) throw new Error("Name is required.");
 
     const result = await getDb()

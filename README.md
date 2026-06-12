@@ -1,6 +1,6 @@
-# AI Command Center
+# Vertex AI Command Center
 
-AI Command Center is a TanStack Start workspace app for PMO-style chat, project, idea, task, decision, approval, and artifact workflows.
+Vertex AI Command Center is a TanStack Start workspace app for AI-assisted chat, project, idea, task, decision, approval, and artifact workflows.
 
 The app is organized around three explicit workspace scopes:
 

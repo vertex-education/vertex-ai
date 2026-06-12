@@ -1,0 +1,465 @@
+import { createServerFn } from "@tanstack/react-start";
+import { env } from "cloudflare:workers";
+import { getAuth } from "@/lib/auth";
+import { getConversationKey, type ChatMessage, type ChatSection, type ChatSummary, type ProjectSummary, type WorkspaceMode } from "@/lib/pmo-data";
+import { getRequest } from "@tanstack/start-server-core";
+
+type SessionUser = {
+  id: string;
+  email: string;
+  role?: string | null;
+};
+
+type AuthSession = {
+  user: SessionUser;
+};
+
+export type ScopedInviteScope = "team" | "project";
+export type TeamSummary = {
+  id: string;
+  name: string;
+  description: string;
+  role: "owner" | "member";
+};
+
+export type CreateProjectInput = {
+  mode: WorkspaceMode;
+  teamId?: string | null;
+  name: string;
+  description: string;
+  status: ProjectSummary["status"];
+};
+
+export type ScopedChatsResult = {
+  workspaceChats: ChatSummary[];
+  projectChatsByProjectId: Record<string, ChatSummary[]>;
+  conversations: Record<string, ChatMessage[]>;
+};
+
+export type CreateChatInput = {
+  mode: WorkspaceMode;
+  teamId?: string | null;
+  projectId?: string | null;
+  section: ChatSection;
+  title: string;
+  description: string;
+};
+
+function getDb() {
+  const db = (env as Env).DB;
+  if (!db) throw new Error("D1 binding DB is required.");
+  return db;
+}
+
+async function currentUser() {
+  const request = getRequest();
+  const session = await getAuth(request).api.getSession({ headers: request.headers });
+  const user = (session as AuthSession | null)?.user;
+  if (!user) throw new Error("Sign in is required.");
+  return user;
+}
+
+function canManage(user: SessionUser) {
+  return user.role === "admin" || user.role === "user";
+}
+
+async function requireManager() {
+  const user = await currentUser();
+  if (!canManage(user)) throw new Error("Viewer accounts cannot create invites.");
+  return user;
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function scopeForMode(mode: WorkspaceMode) {
+  return mode.toLowerCase();
+}
+
+function projectId(name: string) {
+  return `project-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 44) || "untitled"}-${crypto.randomUUID()}`;
+}
+
+function chatId(title: string) {
+  return `chat-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 44) || "untitled"}-${crypto.randomUUID()}`;
+}
+
+async function getWorkspaceId(mode: WorkspaceMode) {
+  const workspace = await getDb()
+    .prepare("SELECT id FROM workspaces WHERE scope = ? LIMIT 1")
+    .bind(scopeForMode(mode))
+    .first<{ id: string }>();
+  if (!workspace) throw new Error(`${mode} workspace was not found.`);
+  return workspace.id;
+}
+
+async function requireTeamMember(userId: string, teamId: string) {
+  const membership = await getDb()
+    .prepare("SELECT team_id FROM team_members WHERE team_id = ? AND user_id = ? LIMIT 1")
+    .bind(teamId, userId)
+    .first<{ team_id: string }>();
+  if (!membership) throw new Error("You are not a member of this team.");
+}
+
+async function requireProjectMember(userId: string, projectId: string, teamId?: string | null) {
+  const membership = await getDb()
+    .prepare(
+      `SELECT project_id
+       FROM project_members
+       WHERE project_id = ?
+         AND user_id = ?
+         AND ((? IS NULL AND team_id IS NULL) OR team_id = ?)
+       LIMIT 1`,
+    )
+    .bind(projectId, userId, teamId ?? null, teamId ?? null)
+    .first<{ project_id: string }>();
+  if (!membership) throw new Error("You are not assigned to this project.");
+}
+
+export const listMyTeams = createServerFn({ method: "GET" }).handler(async () => {
+  const user = await currentUser();
+  const result = await getDb()
+    .prepare(
+      `SELECT t.id, t.name, t.description, tm.role
+       FROM teams t
+       INNER JOIN team_members tm ON tm.team_id = t.id
+       WHERE tm.user_id = ?
+       ORDER BY t.name ASC`,
+    )
+    .bind(user.id)
+    .all<TeamSummary>();
+
+  return result.results ?? [];
+});
+
+export const createTeam = createServerFn({ method: "POST" })
+  .validator((data: { name: string; description?: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireManager();
+    const name = data.name.trim();
+    if (!name) throw new Error("Team name is required.");
+    const id = `team-${crypto.randomUUID()}`;
+    const now = Date.now();
+    await getDb()
+      .prepare("INSERT INTO teams (id, name, description, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, name, data.description?.trim() ?? "", user.id, now)
+      .run();
+    await getDb()
+      .prepare("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, ?, ?)")
+      .bind(id, user.id, "owner", now)
+      .run();
+    return { id, name };
+  });
+
+export const listMyScopedProjects = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; teamId?: string | null }) => data)
+  .handler(async ({ data }) => {
+    const user = await currentUser();
+    const scope = scopeForMode(data.mode);
+    const teamId = data.mode === "Team" ? data.teamId ?? "" : null;
+    const result = await getDb()
+      .prepare(
+        `SELECT p.id, p.name, p.description, p.status
+         FROM projects p
+         INNER JOIN workspaces w ON w.id = p.workspace_id
+         INNER JOIN project_members pm ON pm.project_id = p.id
+         WHERE w.scope = ?
+           AND pm.user_id = ?
+           AND (
+             (? = 'team' AND pm.team_id = ?)
+             OR (? <> 'team' AND pm.team_id IS NULL)
+           )
+         ORDER BY p.sort_order ASC, p.name ASC`,
+      )
+      .bind(scope, user.id, scope, teamId, scope)
+      .all<Omit<ProjectSummary, "projectChats">>();
+
+    const projects = result.results ?? [];
+    const projectChatsByProjectId = await listProjectChatsForUser(user.id, data.mode, data.teamId ?? null);
+    return projects.map((project) => ({
+      ...project,
+      projectChats: projectChatsByProjectId[project.id] ?? [],
+    }));
+  });
+
+export const createScopedProject = createServerFn({ method: "POST" })
+  .validator((data: CreateProjectInput) => data)
+  .handler(async ({ data }) => {
+    const user = await requireManager();
+    const name = data.name.trim();
+    const description = data.description.trim();
+    if (!name) throw new Error("Project name is required.");
+    if (data.mode === "Team" && !data.teamId) throw new Error("Select a team before creating a team project.");
+
+    const scope = scopeForMode(data.mode);
+    const workspace = await getDb()
+      .prepare("SELECT id FROM workspaces WHERE scope = ? LIMIT 1")
+      .bind(scope)
+      .first<{ id: string }>();
+    if (!workspace) throw new Error(`${data.mode} workspace was not found.`);
+
+    const sort = await getDb()
+      .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 as sortOrder FROM projects WHERE workspace_id = ?")
+      .bind(workspace.id)
+      .first<{ sortOrder: number }>();
+
+    const id = projectId(name);
+    await getDb()
+      .prepare("INSERT INTO projects (id, workspace_id, name, description, status, sort_order) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(id, workspace.id, name, description, data.status, sort?.sortOrder ?? 1)
+      .run();
+    await getDb()
+      .prepare("INSERT OR IGNORE INTO project_members (project_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
+      .bind(id, user.id, data.mode === "Team" ? data.teamId : null, Date.now())
+      .run();
+
+    return {
+      id,
+      name,
+      description,
+      status: data.status,
+      projectChats: [],
+    } satisfies ProjectSummary;
+  });
+
+async function listProjectChatsForUser(userId: string, mode: WorkspaceMode, teamId?: string | null) {
+  const scope = scopeForMode(mode);
+  const result = await getDb()
+    .prepare(
+      `SELECT c.id, c.title, c.description, c.project_id as projectId
+       FROM chats c
+       INNER JOIN workspaces w ON w.id = c.workspace_id
+       INNER JOIN project_members pm ON pm.project_id = c.project_id
+       WHERE w.scope = ?
+         AND c.section = 'project'
+         AND pm.user_id = ?
+         AND (
+           (? = 'team' AND pm.team_id = ?)
+           OR (? <> 'team' AND pm.team_id IS NULL)
+         )
+       ORDER BY c.sort_order ASC, c.title ASC`,
+    )
+    .bind(scope, userId, scope, mode === "Team" ? teamId ?? "" : null, scope)
+    .all<ChatSummary & { projectId: string }>();
+
+  return (result.results ?? []).reduce<Record<string, ChatSummary[]>>((groups, chat) => {
+    groups[chat.projectId] ??= [];
+    groups[chat.projectId].push({ id: chat.id, title: chat.title, description: chat.description });
+    return groups;
+  }, {});
+}
+
+async function listMessagesForChats({
+  mode,
+  projectChatsByProjectId,
+  workspaceChats,
+}: {
+  mode: WorkspaceMode;
+  projectChatsByProjectId: Record<string, ChatSummary[]>;
+  workspaceChats: ChatSummary[];
+}) {
+  const chatScopes = [
+    ...workspaceChats.map((chat) => ({ chatId: chat.id, key: getConversationKey(mode, null, chat.id) })),
+    ...Object.entries(projectChatsByProjectId).flatMap(([projectId, chats]) =>
+      chats.map((chat) => ({ chatId: chat.id, key: getConversationKey(mode, projectId, chat.id) })),
+    ),
+  ];
+  if (chatScopes.length === 0) return {};
+
+  const placeholders = chatScopes.map(() => "?").join(", ");
+  const result = await getDb()
+    .prepare(
+      `SELECT chat_id as chatId, id, author, role, avatar, message_time as time, body as text, artifact_title as artifactTitle, artifact_type as artifactType, artifact_meta as artifactMeta
+       FROM chat_messages
+       WHERE chat_id IN (${placeholders})
+       ORDER BY created_at ASC`,
+    )
+    .bind(...chatScopes.map((chat) => chat.chatId))
+    .all<{
+      chatId: string;
+      id: string;
+      author: string;
+      role: "user" | "assistant" | "system";
+      avatar: string | null;
+      time: string;
+      text: string;
+      artifactTitle: string | null;
+      artifactType: "doc" | "ppt" | "sheet" | null;
+      artifactMeta: string | null;
+    }>();
+
+  const keyByChatId = new Map(chatScopes.map((chat) => [chat.chatId, chat.key]));
+  return (result.results ?? []).reduce<Record<string, ChatMessage[]>>((groups, message) => {
+    const key = keyByChatId.get(message.chatId);
+    if (!key) return groups;
+    groups[key] ??= [];
+    groups[key].push({
+      id: message.id,
+      author: message.author,
+      role: message.role,
+      avatar: message.avatar ?? undefined,
+      time: message.time,
+      text: message.text,
+      artifact: message.artifactTitle && message.artifactType && message.artifactMeta
+        ? { title: message.artifactTitle, type: message.artifactType, meta: message.artifactMeta }
+        : undefined,
+    });
+    return groups;
+  }, {});
+}
+
+export const listMyScopedChats = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; teamId?: string | null }) => data)
+  .handler(async ({ data }) => {
+    const user = await currentUser();
+    const scope = scopeForMode(data.mode);
+    let workspaceChats: ChatSummary[] = [];
+
+    if (data.mode === "Team") {
+      if (data.teamId) {
+        await requireTeamMember(user.id, data.teamId);
+        const result = await getDb()
+          .prepare(
+            `SELECT c.id, c.title, c.description
+             FROM chats c
+             INNER JOIN workspaces w ON w.id = c.workspace_id
+             INNER JOIN chat_members cm ON cm.chat_id = c.id
+             WHERE w.scope = 'team'
+               AND c.section = 'workspace'
+               AND c.project_id IS NULL
+               AND cm.team_id = ?
+             ORDER BY c.sort_order ASC, c.title ASC`,
+          )
+          .bind(data.teamId)
+          .all<ChatSummary>();
+        workspaceChats = result.results ?? [];
+      }
+    } else {
+      const result = await getDb()
+        .prepare(
+          `SELECT c.id, c.title, c.description
+           FROM chats c
+           INNER JOIN workspaces w ON w.id = c.workspace_id
+           INNER JOIN chat_members cm ON cm.chat_id = c.id
+           WHERE w.scope = ?
+             AND c.section = 'workspace'
+             AND c.project_id IS NULL
+             AND cm.user_id = ?
+             AND cm.team_id IS NULL
+           ORDER BY c.sort_order ASC, c.title ASC`,
+        )
+        .bind(scope, user.id)
+        .all<ChatSummary>();
+      workspaceChats = result.results ?? [];
+    }
+
+    const projectChatsByProjectId = await listProjectChatsForUser(user.id, data.mode, data.teamId ?? null);
+
+    return {
+      workspaceChats,
+      projectChatsByProjectId,
+      conversations: await listMessagesForChats({ mode: data.mode, projectChatsByProjectId, workspaceChats }),
+    } satisfies ScopedChatsResult;
+  });
+
+export const createScopedChat = createServerFn({ method: "POST" })
+  .validator((data: CreateChatInput) => data)
+  .handler(async ({ data }) => {
+    const user = await requireManager();
+    const title = data.title.trim();
+    const description = data.description.trim();
+    if (!title) throw new Error("Chat name is required.");
+    if (data.section === "project" && !data.projectId) throw new Error("Select a project before creating a project chat.");
+    if (data.mode === "Team" && !data.teamId) throw new Error("Select a team before creating a team chat.");
+    if (data.section === "workspace" && data.mode === "Team") await requireTeamMember(user.id, data.teamId ?? "");
+    if (data.section === "project") await requireProjectMember(user.id, data.projectId ?? "", data.mode === "Team" ? data.teamId ?? null : null);
+
+    const workspaceId = await getWorkspaceId(data.mode);
+    const sort = await getDb()
+      .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 as sortOrder FROM chats WHERE workspace_id = ? AND section = ? AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)")
+      .bind(workspaceId, data.section, data.projectId ?? null, data.projectId ?? null)
+      .first<{ sortOrder: number }>();
+
+    const id = chatId(title);
+    await getDb()
+      .prepare("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, workspaceId, data.section === "project" ? data.projectId : null, data.section, title, description, sort?.sortOrder ?? 1)
+      .run();
+
+    if (data.section === "workspace") {
+      await getDb()
+        .prepare("INSERT INTO chat_members (chat_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
+        .bind(id, data.mode === "Team" ? null : user.id, data.mode === "Team" ? data.teamId ?? null : null, Date.now())
+        .run();
+    }
+
+    return { id, title, description } satisfies ChatSummary;
+  });
+
+export const createScopedInvite = createServerFn({ method: "POST" })
+  .validator((data: { scope: ScopedInviteScope; targetId: string; targetName: string; email: string; targetTeamId?: string | null }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireManager();
+    const email = normalizeEmail(data.email);
+    if (!email) throw new Error("Email is required.");
+    const id = `scoped-invite-${crypto.randomUUID()}`;
+    await getDb()
+      .prepare(
+        "INSERT INTO scoped_invites (id, scope, target_id, target_team_id, target_name, email, invited_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind(id, data.scope, data.targetId, data.targetTeamId ?? null, data.targetName, email, user.id, Date.now())
+      .run();
+    return { id, scope: data.scope, targetName: data.targetName, email };
+  });
+
+export const listMyScopedInvites = createServerFn({ method: "GET" }).handler(async () => {
+  const user = await currentUser();
+  const result = await getDb()
+    .prepare(
+      `SELECT id, scope, target_id as targetId, target_team_id as targetTeamId, target_name as targetName, email, accepted_at as acceptedAt, revoked_at as revokedAt, created_at as createdAt
+       FROM scoped_invites
+       WHERE email = ?
+       ORDER BY created_at DESC`,
+    )
+    .bind(normalizeEmail(user.email))
+    .all<{ id: string; scope: ScopedInviteScope; targetId: string; targetName: string; email: string; acceptedAt: number | null; revokedAt: number | null; createdAt: number }>();
+
+  return (result.results ?? []).map((invite) => ({
+    ...invite,
+    status: invite.revokedAt ? "Revoked" : invite.acceptedAt ? "Accepted" : "Pending",
+    createdLabel: new Date(invite.createdAt).toLocaleString(),
+  }));
+});
+
+export const acceptScopedInvite = createServerFn({ method: "POST" })
+  .validator((data: { inviteId: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await currentUser();
+    const invite = await getDb()
+      .prepare(
+        "SELECT id, scope, target_id as targetId, target_team_id as targetTeamId, target_name as targetName, email, accepted_at as acceptedAt, revoked_at as revokedAt FROM scoped_invites WHERE id = ? LIMIT 1",
+      )
+      .bind(data.inviteId)
+      .first<{ id: string; scope: ScopedInviteScope; targetId: string; targetTeamId: string | null; targetName: string; email: string; acceptedAt: number | null; revokedAt: number | null }>();
+
+    if (!invite) throw new Error("Invite was not found.");
+    if (normalizeEmail(invite.email) !== normalizeEmail(user.email)) throw new Error("This invite belongs to another email address.");
+    if (invite.revokedAt) throw new Error("This invite has been revoked.");
+    const now = Date.now();
+    if (!invite.acceptedAt) {
+      if (invite.scope === "team") {
+        await getDb()
+          .prepare("INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, ?, ?)")
+          .bind(invite.targetId, user.id, "member", now)
+          .run();
+      } else {
+        await getDb()
+          .prepare("INSERT OR IGNORE INTO project_members (project_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
+          .bind(invite.targetId, user.id, invite.targetTeamId, now)
+          .run();
+      }
+      await getDb().prepare("UPDATE scoped_invites SET accepted_at = ? WHERE id = ?").bind(now, invite.id).run();
+    }
+    return { id: invite.id, scope: invite.scope, targetName: invite.targetName };
+  });

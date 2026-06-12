@@ -1,7 +1,10 @@
 /// <reference path="../../worker-configuration.d.ts" />
 
+import { env } from "cloudflare:workers";
 import { queryOptions } from "@tanstack/react-query";
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/start-server-core";
+import { getAuth } from "@/lib/auth";
 
 export type IdeaStatus = "New" | "Review" | "Pilot" | "Approved" | "Implemented" | "Blocked";
 export type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
@@ -176,7 +179,7 @@ const scopeByMode: Record<WorkspaceMode, WorkspaceScope> = {
   Org: "org",
 };
 
-const assistantName = "AI Command Center";
+const assistantName = "VertexAI";
 const gemmaModelId = "@cf/google/gemma-4-26b-a4b-it";
 
 type CloudflareContext = {
@@ -195,6 +198,26 @@ type WorkersAiTextResponse = {
 };
 
 type WorkersAiChatResponse = WorkersAiTextResponse & Partial<ChatCompletionsOutput>;
+
+function getDb() {
+  const db = (env as Env).DB;
+  if (!db) throw new Error("D1 binding DB is required.");
+  return db;
+}
+
+async function withAiTimeout<T>(operation: Promise<T>, timeoutMs = 20_000): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Workers AI did not respond before the timeout.")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 const workspaceSeed = {
   Personal: {
@@ -315,7 +338,7 @@ function buildIdea(
     tags: [workspaceModeLabel(mode), project?.name ?? "No project", category, status],
     metrics: [`${mode} metric ${index}`, "Scoped evidence only", "No lower-scope exposure"],
     thread: [
-      `${workspaceModeLabel(mode)} idea captured in AI Command Center.`,
+      `${workspaceModeLabel(mode)} idea captured in Vertex AI Command Center.`,
       "Assistant linked only same-scope chats, artifacts, and decisions.",
     ],
   };
@@ -479,7 +502,7 @@ function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
 }
 
 const initialWorkspaceState: PmoWorkspaceState = {
-  productName: "AI Command Center",
+  productName: "Vertex AI Command Center",
   workspaces: {
     Personal: buildWorkspace("Personal"),
     Team: buildWorkspace("Team"),
@@ -524,6 +547,49 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.round(Math.random() * 1000)}`;
 }
 
+async function getChatWorkspaceId(chatId: string) {
+  const chat = await getDb()
+    .prepare("SELECT workspace_id as workspaceId FROM chats WHERE id = ? LIMIT 1")
+    .bind(chatId)
+    .first<{ workspaceId: string }>();
+  if (!chat) throw new Error("Chat was not found.");
+  return chat.workspaceId;
+}
+
+async function persistChatMessage(chatId: string, workspaceId: string, message: ChatMessage) {
+  await getDb()
+    .prepare(
+      "INSERT INTO chat_messages (id, chat_id, workspace_id, author, role, avatar, message_time, body, artifact_title, artifact_type, artifact_meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(
+      message.id,
+      chatId,
+      workspaceId,
+      message.author,
+      message.role,
+      message.avatar ?? null,
+      message.time,
+      message.text,
+      message.artifact?.title ?? null,
+      message.artifact?.type ?? null,
+      message.artifact?.meta ?? null,
+      new Date().toISOString(),
+    )
+    .run();
+}
+
+async function listPersistedChatMessages(chatId: string) {
+  const result = await getDb()
+    .prepare("SELECT id, author, role, avatar, message_time as time, body as text FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC")
+    .bind(chatId)
+    .all<{ id: string; author: string; role: "user" | "assistant" | "system"; avatar: string | null; time: string; text: string }>();
+
+  return (result.results ?? []).map((message) => ({
+    ...message,
+    avatar: message.avatar ?? undefined,
+  })) satisfies ChatMessage[];
+}
+
 function extractAiResponse(result: unknown) {
   if (typeof result === "string") return result;
   if (result && typeof result === "object") {
@@ -535,8 +601,8 @@ function extractAiResponse(result: unknown) {
 
 function fallbackAssistantText(mode: WorkspaceMode, chatTitle: string, scope: WorkspaceScope) {
   return (
-    `I reviewed ${workspaceModeLabel(mode)} / ${chatTitle}. ` +
-    `Only ${scope} scoped records were considered, including same-scope artifacts in R2.`
+    `I do not have enough real ${scope} context in ${workspaceModeLabel(mode)} / ${chatTitle} yet. ` +
+    "Tell me what you want to work on and I will help from there."
   );
 }
 
@@ -547,7 +613,7 @@ async function runGemmaChat({
   workspace,
 }: {
   context: unknown;
-  data: { mode: WorkspaceMode; projectId: string | null; chatTitle: string; text: string };
+  data: { mode: WorkspaceMode; projectId: string | null; chatId: string; chatTitle: string; text: string };
   existingMessages: ChatMessage[];
   workspace: ScopedWorkspaceState;
 }) {
@@ -556,12 +622,12 @@ async function runGemmaChat({
     return `${fallbackAssistantText(data.mode, data.chatTitle, workspace.scope)} Workers AI is not available in this runtime yet.`;
   }
 
-  const project = workspace.projects.find((item) => item.id === data.projectId);
-  const scopedIdeas = workspace.ideas.filter((idea) => idea.projectId === data.projectId);
-  const scopedArtifacts = workspace.artifacts.filter((artifact) => artifact.projectId === data.projectId);
-  const scopedDecisions = workspace.decisions.filter((decision) => decision.projectId === data.projectId);
-  const scopedApprovals = workspace.approvals.filter((approval) => approval.projectId === data.projectId);
-  const scopedTasks = workspace.tasks.filter((task) => task.projectId === data.projectId);
+  const project = data.projectId
+    ? await getDb()
+      .prepare("SELECT name, description FROM projects WHERE id = ? LIMIT 1")
+      .bind(data.projectId)
+      .first<{ name: string; description: string }>()
+    : null;
   const recentMessages = existingMessages.slice(-8).map((message) => ({
     role: message.role === "assistant" ? "assistant" : "user",
     content: `${message.author}: ${message.text}`,
@@ -570,37 +636,55 @@ async function runGemmaChat({
   const scopeContext = [
     `Workspace scope: ${workspaceModeLabel(data.mode)} (${workspace.scope})`,
     `Project scope: ${project?.name ?? workspace.unassignedProjectLabel}`,
+    project?.description ? `Project description: ${project.description}` : null,
     `Active chat: ${data.chatTitle}`,
-    `Ideas: ${scopedIdeas.map((idea) => `${idea.title} [${idea.status}]`).join("; ") || "none"}`,
-    `Artifacts: ${scopedArtifacts.map((artifact) => `${artifact.title} (${artifact.type}, ${artifact.status})`).join("; ") || "none"}`,
-    `Decisions: ${scopedDecisions.map((decision) => `${decision.title} [${decision.status}]`).join("; ") || "none"}`,
-    `Approvals: ${scopedApprovals.map((approval) => `${approval.title} [${approval.status}]`).join("; ") || "none"}`,
-    `Tasks: ${scopedTasks.map((task) => `${task.title} [${task.status}]`).join("; ") || "none"}`,
-  ].join("\n");
+    "Use this scoped context only when it is relevant to the user's request. Otherwise answer the user's general question directly.",
+  ].filter(Boolean).join("\n");
 
-  const result = await ai.run(gemmaModelId, {
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are AI Command Center, a concise PMO assistant. Use only the provided workspace/project context. Do not infer or expose higher-scope or unrelated workspace data. Return practical next actions. If the user asks for a specific prefix or response format, follow it exactly.",
-      },
-      {
-        role: "user",
-        content: `Current scoped context:\n${scopeContext}`,
-      },
-      ...recentMessages,
-      {
-        role: "user",
-        content: data.text,
-      },
-    ],
-    max_tokens: 650,
-    temperature: 0.3,
+  console.info("[VertexAI] Workers AI request started", {
+    chatId: data.chatId,
+    mode: data.mode,
+    projectId: data.projectId,
+    messageCount: recentMessages.length + 3,
+    model: gemmaModelId,
   });
 
-  const responseText = extractAiResponse(result).trim();
-  return responseText || fallbackAssistantText(data.mode, data.chatTitle, workspace.scope);
+  try {
+    const result = await withAiTimeout(ai.run(gemmaModelId, {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are VertexAI, the AI Command Center assistant. Answer the user's latest message directly and be useful. You may answer general knowledge, technical, planning, writing, and analysis questions even when there is no workspace context. Do not introduce yourself or restate your role unless asked. When the user asks about workspace, team, org, project, or personal command-center records, use only the provided scoped context and do not infer or expose higher-scope or unrelated workspace data. If scoped workspace context is missing, say that plainly and continue helping with the user's request.",
+        },
+        {
+          role: "user",
+          content: `Current scoped context:\n${scopeContext}`,
+        },
+        ...recentMessages,
+        {
+          role: "user",
+          content: data.text,
+        },
+      ],
+      max_tokens: 650,
+      temperature: 0.3,
+    }));
+
+    const responseText = extractAiResponse(result).trim();
+    console.info("[VertexAI] Workers AI request completed", {
+      chatId: data.chatId,
+      responseLength: responseText.length,
+    });
+    return responseText || fallbackAssistantText(data.mode, data.chatTitle, workspace.scope);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Workers AI request failed.";
+    console.error("[VertexAI] Workers AI request failed", {
+      chatId: data.chatId,
+      message: detail,
+    });
+    return `I could not complete the Workers AI request. ${detail}`;
+  }
 }
 
 function cycleDecisionStatus(status: Decision["status"]): Decision["status"] {
@@ -648,18 +732,91 @@ export const fetchPmoWorkspace = createServerFn({ method: "GET" }).handler(async
   return clone(getMutableRoot());
 });
 
+async function requireWorkspaceEditor() {
+  const request = getRequest();
+  const session = await getAuth(request).api.getSession({ headers: request.headers });
+  const user = (session as { user?: { id?: string; role?: string | null } } | null)?.user;
+  if (user?.role !== "admin" && user?.role !== "user" || !user.id) {
+    throw new Error("Viewer accounts have view-only access.");
+  }
+  return { id: user.id };
+}
+
+async function requireChatContributor({
+  chatId,
+  mode,
+  projectId,
+  teamId,
+  userId,
+}: {
+  chatId: string;
+  mode: WorkspaceMode;
+  projectId: string | null;
+  teamId?: string | null;
+  userId: string;
+}) {
+  if (projectId) {
+    const membership = await getDb()
+      .prepare(
+        `SELECT pm.project_id
+         FROM project_members pm
+         INNER JOIN chats c ON c.project_id = pm.project_id
+         WHERE c.id = ?
+           AND pm.project_id = ?
+           AND pm.user_id = ?
+           AND ((? IS NULL AND pm.team_id IS NULL) OR pm.team_id = ?)
+         LIMIT 1`,
+      )
+      .bind(chatId, projectId, userId, mode === "Team" ? teamId ?? null : null, mode === "Team" ? teamId ?? null : null)
+      .first<{ project_id: string }>();
+    if (!membership) throw new Error("You are not assigned to this project chat.");
+    return;
+  }
+
+  if (mode === "Team") {
+    const membership = await getDb()
+      .prepare(
+        `SELECT cm.chat_id
+         FROM chat_members cm
+         INNER JOIN team_members tm ON tm.team_id = cm.team_id
+         WHERE cm.chat_id = ?
+           AND cm.team_id = ?
+           AND tm.user_id = ?
+         LIMIT 1`,
+      )
+      .bind(chatId, teamId ?? "", userId)
+      .first<{ chat_id: string }>();
+    if (!membership) throw new Error("You are not a member of this team chat.");
+    return;
+  }
+
+  const membership = await getDb()
+    .prepare("SELECT chat_id FROM chat_members WHERE chat_id = ? AND user_id = ? AND team_id IS NULL LIMIT 1")
+    .bind(chatId, userId)
+    .first<{ chat_id: string }>();
+  if (!membership) throw new Error("You are not a member of this chat.");
+}
+
 export const sendChatMessage = createServerFn({ method: "POST" })
-  .validator((data: { mode: WorkspaceMode; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) => data)
+  .validator((data: { mode: WorkspaceMode; teamId?: string | null; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) => data)
   .handler(async ({ context, data }) => {
+    const user = await requireWorkspaceEditor();
+    await requireChatContributor({
+      chatId: data.chatId,
+      mode: data.mode,
+      projectId: data.projectId,
+      teamId: data.teamId,
+      userId: user.id,
+    });
     const workspace = getMutableWorkspace(data.mode);
     const conversationKey = getConversationKey(data.mode, data.projectId, data.chatId);
     const text = data.text.trim();
     if (!text) return clone(getMutableRoot());
-    const existingMessages = workspace.conversations[conversationKey] ?? [];
+    const existingMessages = await listPersistedChatMessages(data.chatId);
 
     const userMessage: ChatMessage = {
       id: createId("msg-user"),
-      author: "Alex Morgan",
+      author: "You",
       role: "user",
       avatar: avatarAlex,
       time: nowLabel(),
@@ -677,13 +834,11 @@ export const sendChatMessage = createServerFn({ method: "POST" })
       role: "assistant",
       time: nowLabel(),
       text: aiText,
-      artifact: {
-        title: `${workspaceModeLabel(data.mode)} Action Snapshot`,
-        meta: `DOCX - Generated by Gemma 4`,
-        type: "doc",
-      },
     };
 
+    const workspaceId = await getChatWorkspaceId(data.chatId);
+    await persistChatMessage(data.chatId, workspaceId, userMessage);
+    await persistChatMessage(data.chatId, workspaceId, response);
     workspace.conversations[conversationKey] = [...existingMessages, userMessage, response];
     recordActivity(workspace, "Chat response generated", `${data.chatTitle} updated in ${workspaceModeLabel(data.mode)}.`);
     return clone(getMutableRoot());
@@ -692,6 +847,7 @@ export const sendChatMessage = createServerFn({ method: "POST" })
 export const addIdea = createServerFn({ method: "POST" })
   .validator((data: AddIdeaInput & { mode?: WorkspaceMode; projectId?: string | null }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const mode = data.mode ?? "Personal";
     const workspace = getMutableWorkspace(mode);
     const project = workspace.projects.find((item) => item.id === data.projectId);
@@ -715,7 +871,7 @@ export const addIdea = createServerFn({ method: "POST" })
       nextStep: "Confirm owner, evidence source, and governance fit.",
       tags: [data.category, data.impact, workspaceModeLabel(mode), project?.name ?? "No project"],
       metrics: ["Owner confirmation needed", "Evidence source pending", "Governance review pending"],
-      thread: ["Idea captured through AI Command Center.", "Assistant prepared initial impact and follow-up fields."],
+      thread: ["Idea captured through Vertex AI Command Center.", "Assistant prepared initial impact and follow-up fields."],
     };
 
     workspace.ideas = [nextIdea, ...workspace.ideas];
@@ -727,6 +883,7 @@ export const addIdea = createServerFn({ method: "POST" })
 export const updateIdeaStatus = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; id: string; status: IdeaStatus }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     workspace.ideas = workspace.ideas.map((idea) => (idea.id === data.id ? { ...idea, status: data.status } : idea));
     const idea = workspace.ideas.find((item) => item.id === data.id);
@@ -737,6 +894,7 @@ export const updateIdeaStatus = createServerFn({ method: "POST" })
 export const voteIdea = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; id: string }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     workspace.ideas = workspace.ideas.map((idea) => (idea.id === data.id ? { ...idea, votes: idea.votes + 1 } : idea));
     const idea = workspace.ideas.find((item) => item.id === data.id);
@@ -747,6 +905,7 @@ export const voteIdea = createServerFn({ method: "POST" })
 export const toggleIdeaPin = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; id: string }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     const isPinned = workspace.pinnedIdeaIds.includes(data.id);
     workspace.pinnedIdeaIds = isPinned ? workspace.pinnedIdeaIds.filter((id) => id !== data.id) : [data.id, ...workspace.pinnedIdeaIds];
@@ -758,6 +917,7 @@ export const toggleIdeaPin = createServerFn({ method: "POST" })
 export const toggleArtifactPin = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; title: string }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     workspace.artifacts = workspace.artifacts.map((artifact) => {
       if (artifact.title !== data.title) return artifact;
@@ -771,6 +931,7 @@ export const toggleArtifactPin = createServerFn({ method: "POST" })
 export const toggleDecisionStatus = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; id: string }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     workspace.decisions = workspace.decisions.map((decision) => (decision.id === data.id ? { ...decision, status: cycleDecisionStatus(decision.status) } : decision));
     const decision = workspace.decisions.find((item) => item.id === data.id);
@@ -781,6 +942,7 @@ export const toggleDecisionStatus = createServerFn({ method: "POST" })
 export const toggleApprovalStatus = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; id: string }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     workspace.approvals = workspace.approvals.map((approval) => (approval.id === data.id ? { ...approval, status: cycleApprovalStatus(approval.status) } : approval));
     const approval = workspace.approvals.find((item) => item.id === data.id);
@@ -791,6 +953,7 @@ export const toggleApprovalStatus = createServerFn({ method: "POST" })
 export const toggleTaskStatus = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; id: string }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     workspace.tasks = workspace.tasks.map((task) => (task.id === data.id ? { ...task, status: cycleTaskStatus(task.status) } : task));
     const task = workspace.tasks.find((item) => item.id === data.id);
@@ -801,6 +964,7 @@ export const toggleTaskStatus = createServerFn({ method: "POST" })
 export const updateAccessLevel = createServerFn({ method: "POST" })
   .validator((data: { mode: WorkspaceMode; accessLevel: ScopedWorkspaceState["accessLevel"] }) => data)
   .handler(async ({ data }) => {
+    await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     workspace.accessLevel = data.accessLevel;
     recordActivity(workspace, "Workspace access updated", `${workspaceModeLabel(data.mode)} access set to ${data.accessLevel}.`);

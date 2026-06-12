@@ -84,7 +84,7 @@ export const authInvites = sqliteTable(
     id: text("id").primaryKey(),
     email: text("email").notNull(),
     name: text("name").notNull(),
-    role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
+    role: text("role", { enum: ["admin", "user", "viewer"] }).notNull().default("user"),
     tokenHash: text("token_hash").notNull(),
     invitedByUserId: text("invited_by_user_id").references(() => user.id, { onDelete: "set null" }),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
@@ -111,6 +111,82 @@ export const authEmailEvents = sqliteTable(
   },
   (table) => ({
     recipientIdx: index("auth_email_events_recipient_idx").on(table.recipient, table.createdAt),
+  }),
+);
+
+export const teams = sqliteTable(
+  "teams",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    nameIdx: index("teams_name_idx").on(table.name),
+  }),
+);
+
+export const teamMembers = sqliteTable(
+  "team_members",
+  {
+    teamId: text("team_id").notNull().references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["owner", "member"] }).notNull().default("member"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    userIdx: index("team_members_user_idx").on(table.userId),
+    teamUserIdx: uniqueIndex("team_members_team_user_idx").on(table.teamId, table.userId),
+  }),
+);
+
+export const projectMembers = sqliteTable(
+  "project_members",
+  {
+    projectId: text("project_id").notNull(),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    userIdx: index("project_members_user_idx").on(table.userId),
+    projectUserIdx: uniqueIndex("project_members_project_user_idx").on(table.projectId, table.userId),
+  }),
+);
+
+export const scopedInvites = sqliteTable(
+  "scoped_invites",
+  {
+    id: text("id").primaryKey(),
+    scope: text("scope", { enum: ["team", "project"] }).notNull(),
+    targetId: text("target_id").notNull(),
+    targetTeamId: text("target_team_id").references(() => teams.id, { onDelete: "cascade" }),
+    targetName: text("target_name").notNull(),
+    email: text("email").notNull(),
+    invitedByUserId: text("invited_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    emailIdx: index("scoped_invites_email_idx").on(table.email, table.createdAt),
+    targetIdx: index("scoped_invites_target_idx").on(table.scope, table.targetId),
+  }),
+);
+
+export const chatMembers = sqliteTable(
+  "chat_members",
+  {
+    chatId: text("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    userIdx: index("chat_members_user_idx").on(table.userId, table.chatId),
+    teamIdx: index("chat_members_team_idx").on(table.teamId, table.chatId),
   }),
 );
 

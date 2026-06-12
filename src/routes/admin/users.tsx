@@ -27,7 +27,7 @@ export const Route = createFileRoute("/admin/users")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Users | AI Command Center" }],
+    meta: [{ title: "Users | Vertex AI Command Center" }],
   }),
   component: AdminUsersPage,
 });
@@ -163,7 +163,7 @@ function AdminUsersPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Users</h1>
-            <p className="text-sm text-muted-foreground">Manage user accounts, roles, and account invitations for AI Command Center.</p>
+            <p className="text-sm text-muted-foreground">Manage user accounts, roles, and account invitations for Vertex AI Command Center.</p>
           </div>
           <Button type="button" variant="outline" onClick={() => (window.location.href = "/")}>
             Back to workspace
@@ -221,6 +221,7 @@ function AdminUsersPage() {
                           value={userDrafts[user.id]?.role ?? user.role}
                           onChange={(event) => updateUserDraft(user.id, { role: event.target.value as ManagedUserRole })}
                         >
+                          <option value="viewer">Viewer</option>
                           <option value="user">User</option>
                           <option value="admin">Admin</option>
                         </select>
@@ -283,6 +284,7 @@ function AdminUsersPage() {
                       value={role}
                       onChange={(event) => setRole(event.target.value as InviteRole)}
                     >
+                      <option value="viewer">Viewer</option>
                       <option value="user">User</option>
                       <option value="admin">Admin</option>
                     </select>

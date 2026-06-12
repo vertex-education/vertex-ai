@@ -8,7 +8,7 @@ import { acceptInvite, getInvitePreview } from "@/lib/auth-workflow";
 
 export const Route = createFileRoute("/accept-invite")({
   head: () => ({
-    meta: [{ title: "Accept invite | AI Command Center" }],
+    meta: [{ title: "Accept invite | Vertex AI Command Center" }],
   }),
   component: AcceptInvitePage,
 });

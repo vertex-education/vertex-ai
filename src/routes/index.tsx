@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
@@ -23,10 +23,12 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  KeyRound,
   Lightbulb,
   LogOut,
   Menu,
   MessageCircle,
+  MoreHorizontal,
   Paperclip,
   Plus,
   Search,
@@ -104,12 +106,23 @@ import {
   toggleDecisionStatus,
   toggleIdeaPin,
   toggleTaskStatus,
-  updateAccessLevel,
   updateIdeaStatus,
   voteIdea,
   workspaceModeLabel,
   workspaceModes,
 } from "@/lib/pmo-data";
+import {
+  createScopedProject,
+  createScopedChat,
+  createScopedInvite,
+  createTeam,
+  listMyScopedChats,
+  listMyScopedProjects,
+  listMyTeams,
+  type CreateChatInput,
+  type CreateProjectInput,
+  type TeamSummary,
+} from "@/lib/team-workflow";
 
 export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
@@ -119,7 +132,7 @@ export const Route = createFileRoute("/")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "AI Command Center" }],
+    meta: [{ title: "Vertex AI Command Center" }],
   }),
   component: PMOCommandCenter,
 });
@@ -131,6 +144,41 @@ const emptyIdeaForm: AddIdeaInput = {
   impact: "High",
   summary: "",
 };
+
+type ToastLink = {
+  href: string;
+  label: string;
+};
+
+type CreateTeamInput = {
+  name: string;
+  description: string;
+};
+
+type CreateChatDialogState = {
+  section: ChatSection;
+  projectId: string | null;
+  projectName?: string;
+} | null;
+
+function createEmptyWorkspace(
+  workspace: ScopedWorkspaceState,
+  headings?: Partial<Pick<ScopedWorkspaceState, "projectsHeading" | "workspaceChatsHeading" | "unassignedProjectLabel">>,
+): ScopedWorkspaceState {
+  return {
+    ...workspace,
+    ...headings,
+    projects: [],
+    workspaceChats: [],
+    ideas: [],
+    artifacts: [],
+    decisions: [],
+    approvals: [],
+    tasks: [],
+    pinnedIdeaIds: [],
+    activity: [],
+  };
+}
 
 type DetailMetric = {
   icon: ComponentType<{ className?: string }>;
@@ -224,37 +272,104 @@ function PMOCommandCenter() {
   const { session } = Route.useLoaderData();
   const queryClient = useQueryClient();
   const workspaceQuery = useSuspenseQuery(pmoWorkspaceQueryOptions());
+  const teamsQuery = useSuspenseQuery({
+    queryKey: ["my-teams"],
+    queryFn: () => listMyTeams(),
+  });
   const workspace = workspaceQuery.data;
+  const teams = teamsQuery.data;
 
   const [activeRail, setActiveRail] = useState<RailName>("Workspaces");
   const [activeTab, setActiveTab] = useState<TabName>("Chat");
   const [activeMode, setActiveMode] = useState<WorkspaceMode>("Personal");
+  const [activeTeamId, setActiveTeamId] = useState("");
   const activeWorkspace = workspace.workspaces[activeMode];
-  const [activeProjectId, setActiveProjectId] = useState(activeWorkspace.projects[0]?.id ?? "");
+  const selectedTeam = teams.find((team) => team.id === activeTeamId) ?? teams[0];
+  const scopedProjectsQuery = useSuspenseQuery({
+    queryKey: ["scoped-projects", activeMode, selectedTeam?.id ?? ""],
+    queryFn: () => listMyScopedProjects({ data: { mode: activeMode, teamId: selectedTeam?.id ?? null } }),
+  });
+  const scopedChatsQuery = useSuspenseQuery({
+    queryKey: ["scoped-chats", activeMode, selectedTeam?.id ?? ""],
+    queryFn: () => listMyScopedChats({ data: { mode: activeMode, teamId: selectedTeam?.id ?? null } }),
+  });
+  const scopedProjects: ProjectSummary[] = scopedProjectsQuery.data;
+  const scopedWorkspaceChats = scopedChatsQuery.data.workspaceChats;
+  const scopedConversations = scopedChatsQuery.data.conversations;
+  const visibleWorkspace = useMemo(() => {
+    if (activeMode === "Personal") {
+      return {
+        ...createEmptyWorkspace(activeWorkspace, {
+        projectsHeading: "Personal Projects",
+        workspaceChatsHeading: "Personal Chats",
+        unassignedProjectLabel: "No personal project",
+        }),
+        projects: scopedProjects,
+        workspaceChats: scopedWorkspaceChats,
+        conversations: scopedConversations,
+      };
+    }
+    if (activeMode === "Team") {
+      return {
+        ...createEmptyWorkspace(activeWorkspace, {
+        projectsHeading: selectedTeam ? `${selectedTeam.name} Projects` : "Team Projects",
+        workspaceChatsHeading: selectedTeam ? `${selectedTeam.name} Chats` : "Team Chats",
+        unassignedProjectLabel: selectedTeam ? selectedTeam.name : "No team selected",
+        }),
+        projects: scopedProjects,
+        workspaceChats: scopedWorkspaceChats,
+        conversations: scopedConversations,
+      };
+    }
+    return {
+      ...createEmptyWorkspace(activeWorkspace, {
+        projectsHeading: "Org Projects",
+        workspaceChatsHeading: "Org Chats",
+        unassignedProjectLabel: "No assigned org project",
+      }),
+      projects: scopedProjects,
+      workspaceChats: scopedWorkspaceChats,
+      conversations: scopedConversations,
+    };
+  }, [activeMode, activeWorkspace, scopedConversations, scopedProjects, scopedWorkspaceChats, selectedTeam]);
+  const [activeProjectId, setActiveProjectId] = useState(visibleWorkspace.projects[0]?.id ?? "");
   const [activeChatSection, setActiveChatSection] = useState<ChatSection>("workspace");
-  const [activeChatId, setActiveChatId] = useState(activeWorkspace.workspaceChats[0]?.id ?? "");
-  const [selectedIdeaId, setSelectedIdeaId] = useState(activeWorkspace.ideas[0]?.id ?? "");
-  const [selectedArtifactTitle, setSelectedArtifactTitle] = useState(activeWorkspace.artifacts[1]?.title ?? activeWorkspace.artifacts[0]?.title ?? "");
+  const [activeChatId, setActiveChatId] = useState(visibleWorkspace.workspaceChats[0]?.id ?? "");
+  const [selectedIdeaId, setSelectedIdeaId] = useState(visibleWorkspace.ideas[0]?.id ?? "");
+  const [selectedArtifactTitle, setSelectedArtifactTitle] = useState(visibleWorkspace.artifacts[1]?.title ?? visibleWorkspace.artifacts[0]?.title ?? "");
   const [statusFilter, setStatusFilter] = useState<IdeaStatus | "All">("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [chatInput, setChatInput] = useState("");
+  const [optimisticMessages, setOptimisticMessages] = useState<Record<string, ChatMessage[]>>({});
+  const chatFormRef = useRef<HTMLFormElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isAccessOpen, setIsAccessOpen] = useState(false);
+  const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [createChatState, setCreateChatState] = useState<CreateChatDialogState>(null);
   const [previewArtifact, setPreviewArtifact] = useState<Artifact | null>(null);
   const [rightOpen, setRightOpen] = useState(true);
   const [toast, setToast] = useState("SSR workspace hydrated");
+  const [toastLink, setToastLink] = useState<ToastLink | null>(null);
+  const canEdit = session.user.role === "admin" || session.user.role === "user";
 
   const invalidateWorkspace = () =>
     queryClient.invalidateQueries({ queryKey: pmoWorkspaceQueryKey });
+  const invalidateTeams = () => queryClient.invalidateQueries({ queryKey: ["my-teams"] });
+  const invalidateProjects = () => queryClient.invalidateQueries({ queryKey: ["scoped-projects"] });
+  const invalidateChats = () => queryClient.invalidateQueries({ queryKey: ["scoped-chats"] });
 
   const addIdeaMutation = useMutation({
     mutationFn: (input: AddIdeaInput) => addIdea({ data: { ...input, mode: activeMode, projectId: scopedProjectId } }),
     onSuccess: invalidateWorkspace,
   });
   const sendMessageMutation = useMutation({
-    mutationFn: (input: { mode: WorkspaceMode; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) =>
+    mutationFn: (input: { mode: WorkspaceMode; teamId?: string | null; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string }) =>
       sendChatMessage({ data: input }),
-    onSuccess: invalidateWorkspace,
+    onSuccess: async () => {
+      await invalidateWorkspace();
+      await invalidateChats();
+    },
   });
   const updateStatusMutation = useMutation({
     mutationFn: (input: { id: string; status: IdeaStatus }) => updateIdeaStatus({ data: { ...input, mode: activeMode } }),
@@ -284,37 +399,57 @@ function PMOCommandCenter() {
     mutationFn: (id: string) => toggleTaskStatus({ data: { id, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
-  const updateAccessMutation = useMutation({
-    mutationFn: (accessLevel: ScopedWorkspaceState["accessLevel"]) => updateAccessLevel({ data: { accessLevel, mode: activeMode } }),
-    onSuccess: invalidateWorkspace,
+  const createTeamMutation = useMutation({
+    mutationFn: (input: { name: string; description?: string }) => createTeam({ data: input }),
+    onSuccess: invalidateTeams,
   });
-
-  const activeProject = activeWorkspace.projects.find((project) => project.id === activeProjectId) ?? activeWorkspace.projects[0];
+  const createProjectMutation = useMutation({
+    mutationFn: (input: CreateProjectInput) => createScopedProject({ data: input }),
+    onSuccess: invalidateProjects,
+  });
+  const createChatMutation = useMutation({
+    mutationFn: (input: CreateChatInput) => createScopedChat({ data: input }),
+    onSuccess: async () => {
+      await invalidateChats();
+      await invalidateProjects();
+    },
+  });
+  const scopedInviteMutation = useMutation({
+    mutationFn: (input: { scope: "team" | "project"; targetId: string; targetName: string; email: string; targetTeamId?: string | null }) =>
+      createScopedInvite({ data: input }),
+  });
+  const activeProject = visibleWorkspace.projects.find((project) => project.id === activeProjectId) ?? visibleWorkspace.projects[0];
   const projectChats = activeProject?.projectChats ?? [];
   const activeChat =
     activeChatSection === "project"
       ? projectChats.find((chat) => chat.id === activeChatId) ?? projectChats[0]
-      : activeWorkspace.workspaceChats.find((chat) => chat.id === activeChatId) ?? activeWorkspace.workspaceChats[0];
+      : visibleWorkspace.workspaceChats.find((chat) => chat.id === activeChatId) ?? visibleWorkspace.workspaceChats[0];
   const scopedProjectId = activeChatSection === "project" ? activeProject?.id ?? null : null;
   const conversationKey = activeChat ? getConversationKey(activeMode, scopedProjectId, activeChat.id) : "";
   const workspaceTitle = `${workspaceModeLabel(activeMode)} workspace`;
   const isWorkspaceRail = activeRail === "Workspaces";
-  const scopeContextLabel = activeProject && scopedProjectId ? activeProject.name : activeWorkspace.unassignedProjectLabel;
-  const scopedIdeas = activeWorkspace.ideas.filter((idea) => idea.projectId === scopedProjectId);
-  const scopedArtifacts = activeWorkspace.artifacts.filter((artifact) => artifact.projectId === scopedProjectId);
-  const scopedDecisions = activeWorkspace.decisions.filter((decision) => decision.projectId === scopedProjectId);
-  const scopedApprovals = activeWorkspace.approvals.filter((approval) => approval.projectId === scopedProjectId);
-  const scopedTasks = activeWorkspace.tasks.filter((task) => task.projectId === scopedProjectId);
+  const scopeContextLabel = activeProject && scopedProjectId ? activeProject.name : visibleWorkspace.unassignedProjectLabel;
+  const scopedIdeas = visibleWorkspace.ideas.filter((idea) => idea.projectId === scopedProjectId);
+  const scopedArtifacts = visibleWorkspace.artifacts.filter((artifact) => artifact.projectId === scopedProjectId);
+  const scopedDecisions = visibleWorkspace.decisions.filter((decision) => decision.projectId === scopedProjectId);
+  const scopedApprovals = visibleWorkspace.approvals.filter((approval) => approval.projectId === scopedProjectId);
+  const scopedTasks = visibleWorkspace.tasks.filter((task) => task.projectId === scopedProjectId);
   const scopedPrompts = promptTemplates.map((prompt) => `${scopeContextLabel}: ${prompt}`);
-  const currentMessages = activeChat ? activeWorkspace.conversations[conversationKey] ?? [
-    {
-      id: `${conversationKey}-empty`,
-      author: "AI Command Center",
-      role: "system" as const,
-      time: "Now",
-      text: "No messages in this scoped workspace yet. Ask the assistant to summarize decisions, risks, or artifacts.",
-    },
-  ] : [];
+  const persistedMessages = activeChat ? visibleWorkspace.conversations[conversationKey] ?? [] : [];
+  const pendingMessages = activeChat ? optimisticMessages[conversationKey] ?? [] : [];
+  const currentMessages = activeChat
+    ? persistedMessages.length > 0 || pendingMessages.length > 0
+      ? [...persistedMessages, ...pendingMessages]
+      : [
+          {
+            id: `${conversationKey}-empty`,
+            author: "Vertex AI Command Center",
+            role: "system" as const,
+            time: "Now",
+            text: "No messages in this scoped workspace yet. Ask the assistant to summarize decisions, risks, or artifacts.",
+          },
+        ]
+    : [];
 
   const selectedIdea = scopedIdeas.find((idea) => idea.id === selectedIdeaId) ?? scopedIdeas[0];
   const selectedArtifact =
@@ -323,7 +458,7 @@ function PMOCommandCenter() {
   const selectedApproval = scopedApprovals.find((approval) => approval.status !== "Approved") ?? scopedApprovals[0];
   const selectedTask = scopedTasks.find((task) => task.status !== "Done") ?? scopedTasks[0];
 
-  const pinnedIdeas = activeWorkspace.pinnedIdeaIds
+  const pinnedIdeas = visibleWorkspace.pinnedIdeaIds
     .map((id) => scopedIdeas.find((idea) => idea.id === id))
     .filter((idea): idea is Idea => Boolean(idea));
   const pinnedArtifacts = scopedArtifacts.filter((artifact) => artifact.pinnedTo.includes(activeMode));
@@ -353,7 +488,7 @@ function PMOCommandCenter() {
     queryState: workspaceQuery.isFetching ? "Syncing" : "Fresh",
     scopeContextLabel,
     tasks: scopedTasks,
-    updatedAt: activeWorkspace.updatedAt,
+    updatedAt: visibleWorkspace.updatedAt,
   });
 
   useEffect(() => {
@@ -368,19 +503,28 @@ function PMOCommandCenter() {
   }, [scopedProjectId, scopedIdeas, scopedArtifacts]);
 
   useEffect(() => {
-    const nextWorkspace = workspace.workspaces[activeMode];
-    const nextProject = nextWorkspace.projects[0];
-    const nextChat = nextWorkspace.workspaceChats[0];
+    const nextProject = visibleWorkspace.projects[0];
+    const nextChat = visibleWorkspace.workspaceChats[0];
     setActiveProjectId(nextProject?.id ?? "");
     setActiveChatSection("workspace");
     setActiveChatId(nextChat?.id ?? "");
-    setSelectedIdeaId(nextWorkspace.ideas[0]?.id ?? "");
-    setSelectedArtifactTitle(nextWorkspace.artifacts.find((artifact) => artifact.projectId === null)?.title ?? "");
-  }, [activeMode, workspace.workspaces]);
+    setSelectedIdeaId(visibleWorkspace.ideas[0]?.id ?? "");
+    setSelectedArtifactTitle(visibleWorkspace.artifacts.find((artifact) => artifact.projectId === null)?.title ?? "");
+  }, [visibleWorkspace]);
 
-  function updateToast(message: string) {
+  useEffect(() => {
+    if (activeMode === "Team" && teams.length > 0 && !teams.some((team) => team.id === activeTeamId)) {
+      setActiveTeamId(teams[0].id);
+    }
+  }, [activeMode, activeTeamId, teams]);
+
+  function updateToast(message: string, link?: ToastLink) {
     setToast(message);
-    window.setTimeout(() => setToast("SSR workspace hydrated"), 2600);
+    setToastLink(link ?? null);
+    window.setTimeout(() => {
+      setToast("SSR workspace hydrated");
+      setToastLink(null);
+    }, 4200);
   }
 
   function handleRailClick(label: RailName) {
@@ -414,31 +558,272 @@ function PMOCommandCenter() {
   function handleChatSelect(section: ChatSection, chatId: string) {
     setActiveChatSection(section);
     setActiveChatId(chatId);
-    const chatTitle =
-      section === "project"
-        ? projectChats.find((chat) => chat.id === chatId)?.title
-        : activeWorkspace.workspaceChats.find((chat) => chat.id === chatId)?.title;
     setActiveTab("Chat");
+  }
+
+  function clientTimeLabel() {
+    return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+
+  function appendOptimisticMessage(key: string, text: string) {
+    const message: ChatMessage = {
+      id: `optimistic-${Date.now()}`,
+      author: "You",
+      role: "user",
+      avatar: avatarAlex,
+      time: clientTimeLabel(),
+      text,
+    };
+    setOptimisticMessages((messages) => ({
+      ...messages,
+      [key]: [...(messages[key] ?? []), message],
+    }));
+  }
+
+  function clearOptimisticMessages(key: string) {
+    setOptimisticMessages((messages) => {
+      if (!messages[key]) return messages;
+      const nextMessages = { ...messages };
+      delete nextMessages[key];
+      return nextMessages;
+    });
+  }
+
+  function handleCreateTeam() {
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
+    setIsCreateTeamOpen(true);
+  }
+
+  async function handleCreateTeamSubmit(value: CreateTeamInput) {
+    const team = await createTeamMutation.mutateAsync(value);
+    await invalidateTeams();
+    setActiveTeamId(team.id);
+    setIsCreateTeamOpen(false);
+    updateToast(`${team.name} team created`);
+  }
+
+  function handleCreateProject() {
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
+    if (activeMode === "Team" && !selectedTeam) {
+      updateToast("Create or select a team before adding a team project.");
+      return;
+    }
+    setIsCreateProjectOpen(true);
+  }
+
+  async function handleCreateProjectSubmit(value: Omit<CreateProjectInput, "mode" | "teamId">) {
+    const project = await createProjectMutation.mutateAsync({
+      ...value,
+      mode: activeMode,
+      teamId: activeMode === "Team" ? selectedTeam?.id ?? null : null,
+    });
+    await invalidateProjects();
+    setActiveProjectId(project.id);
+    setIsCreateProjectOpen(false);
+    updateToast(`${project.name} project created`);
+  }
+
+  function focusChatComposer() {
+    window.setTimeout(() => chatInputRef.current?.focus(), 0);
+  }
+
+  async function createFreshChat({
+    contextLabel,
+    projectId,
+    section,
+  }: {
+    contextLabel: string;
+    projectId: string | null;
+    section: ChatSection;
+  }) {
+    const chat = await createChatMutation.mutateAsync({
+      mode: activeMode,
+      teamId: activeMode === "Team" ? selectedTeam?.id ?? null : null,
+      projectId,
+      section,
+      title: `${contextLabel} AI Chat`,
+      description: `AI chatbot scoped to ${contextLabel}.`,
+    });
+    await invalidateChats();
+    await invalidateProjects();
+    setActiveChatSection(section);
+    setActiveChatId(chat.id);
+    setActiveTab("Chat");
+    setRightOpen(true);
+    setChatInput("");
+    focusChatComposer();
+    updateToast(`${chat.title} started`);
+    return chat;
+  }
+
+  async function handleOpenWorkspaceChat() {
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
+    if (activeMode === "Team" && !selectedTeam) {
+      updateToast("Create or select a team before adding a team chat.");
+      return;
+    }
+    if (activeTab === "Chat") {
+      await createFreshChat({
+        contextLabel: workspaceModeLabel(activeMode),
+        projectId: null,
+        section: "workspace",
+      });
+      return;
+    }
+    setActiveChatSection("workspace");
+    setActiveChatId(visibleWorkspace.workspaceChats[0]?.id ?? "");
+    setActiveTab("Chat");
+    setRightOpen(true);
+    focusChatComposer();
+  }
+
+  async function handleOpenProjectChat(project: ProjectSummary) {
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
+    if (activeMode === "Team" && !selectedTeam) {
+      updateToast("Create or select a team before adding a team project chat.");
+      return;
+    }
+    if (activeTab === "Chat") {
+      await createFreshChat({
+        contextLabel: project.name,
+        projectId: project.id,
+        section: "project",
+      });
+      return;
+    }
+    setActiveProjectId(project.id);
+    setActiveChatSection("project");
+    setActiveChatId(project.projectChats[0]?.id ?? "");
+    setActiveTab("Chat");
+    setRightOpen(true);
+    focusChatComposer();
+  }
+
+  async function handleCreateChatSubmit(value: Omit<CreateChatInput, "mode" | "teamId" | "projectId" | "section">) {
+    if (!createChatState) return;
+    const chat = await createChatMutation.mutateAsync({
+      ...value,
+      mode: activeMode,
+      teamId: activeMode === "Team" ? selectedTeam?.id ?? null : null,
+      projectId: createChatState.projectId,
+      section: createChatState.section,
+    });
+    setActiveChatSection(createChatState.section);
+    setActiveChatId(chat.id);
+    setCreateChatState(null);
+    setActiveTab("Chat");
+    updateToast(`${chat.title} chat created`);
+  }
+
+  async function ensureActiveChatForSubmit() {
+    if (activeChat) {
+      return {
+        chat: activeChat,
+        projectId: scopedProjectId,
+        section: activeChatSection,
+      };
+    }
+    const section = activeChatSection === "project" && activeProject ? "project" : "workspace";
+    const projectId = section === "project" ? activeProject?.id ?? null : null;
+    const contextLabel = section === "project" ? activeProject?.name ?? "Project" : workspaceModeLabel(activeMode);
+    const chat = await createFreshChat({ contextLabel, projectId, section });
+    return { chat, projectId, section };
+  }
+
+  async function handleInviteTeam(team: TeamSummary) {
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
+    const email = window.prompt(`Invite user to ${team.name}`);
+    if (!email?.trim()) return;
+    await scopedInviteMutation.mutateAsync({
+      scope: "team",
+      targetId: team.id,
+      targetName: team.name,
+      email,
+    });
+    updateToast(`Invited ${email.trim()} to ${team.name}.`, { href: "/profile/invites", label: "Manage invites" });
+  }
+
+  async function handleInviteProject(project: ProjectSummary) {
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
+    const email = window.prompt(`Invite user to ${project.name}`);
+    if (!email?.trim()) return;
+    await scopedInviteMutation.mutateAsync({
+      scope: "project",
+      targetId: project.id,
+      targetTeamId: activeMode === "Team" ? selectedTeam?.id ?? null : null,
+      targetName: project.name,
+      email,
+    });
+    updateToast(`Invited ${email.trim()} to ${project.name}.`, { href: "/profile/invites", label: "Manage invites" });
   }
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
     const text = chatInput.trim();
-    if (!text || !activeChat) return;
-    await sendMessageMutation.mutateAsync({
-      mode: activeMode,
-      projectId: scopedProjectId,
-      chatId: activeChat.id,
-      chatTitle: activeChat.title,
-      text,
-      model: "Gemma 4",
-    });
-    setChatInput("");
-    setActiveTab("Chat");
-    updateToast("Query invalidated after assistant response");
+    if (!text) return;
+    let targetConversationKey = "";
+    try {
+      const target = await ensureActiveChatForSubmit();
+      targetConversationKey = getConversationKey(activeMode, target.projectId, target.chat.id);
+      appendOptimisticMessage(targetConversationKey, text);
+      setChatInput("");
+      setActiveTab("Chat");
+      setRightOpen(true);
+      await sendMessageMutation.mutateAsync({
+        mode: activeMode,
+        teamId: activeMode === "Team" ? selectedTeam?.id ?? null : null,
+        projectId: target.projectId,
+        chatId: target.chat.id,
+        chatTitle: target.chat.title,
+        text,
+        model: "Gemma 4 26B",
+      });
+      clearOptimisticMessages(targetConversationKey);
+      updateToast("VertexAI response added");
+    } catch (error) {
+      if (targetConversationKey) clearOptimisticMessages(targetConversationKey);
+      setChatInput(text);
+      updateToast(error instanceof Error ? error.message : "Chat submission failed");
+    }
+  }
+
+  function handleChatInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    chatFormRef.current?.requestSubmit();
+  }
+
+  function handleChatSubmitButton() {
+    chatFormRef.current?.requestSubmit();
   }
 
   async function handleAddIdea(value: AddIdeaInput) {
+    if (!canEdit) {
+      updateToast("Viewer access is read-only");
+      return;
+    }
     await addIdeaMutation.mutateAsync(value);
     setIsAddOpen(false);
     setActiveTab("Ideas");
@@ -477,10 +862,14 @@ function PMOCommandCenter() {
 
           <Contextbar
             activeMode={activeMode}
-            accessLevel={activeWorkspace.accessLevel}
+            activeTeamId={selectedTeam?.id ?? ""}
+            canEdit={canEdit}
             showScopeTabs
-            onAccessOpen={() => setIsAccessOpen(true)}
+            teams={teams}
+            onCreateTeam={handleCreateTeam}
+            onInviteTeam={handleInviteTeam}
             onModeChange={handleWorkspaceMode}
+            onTeamChange={setActiveTeamId}
           />
 
           <div
@@ -498,8 +887,13 @@ function PMOCommandCenter() {
                   activeChatSection={activeChatSection}
                   activeMode={activeMode}
                   activeProjectId={activeProject?.id ?? ""}
-                  workspace={activeWorkspace}
+                  canEdit={canEdit}
+                  workspace={visibleWorkspace}
                   onChatSelect={handleChatSelect}
+                  onCreateProject={handleCreateProject}
+                  onOpenProjectChat={handleOpenProjectChat}
+                  onOpenWorkspaceChat={handleOpenWorkspaceChat}
+                  onInviteProject={handleInviteProject}
                   onProjectSelect={handleProjectSelect}
                 />
 
@@ -538,14 +932,15 @@ function PMOCommandCenter() {
                   </div>
 
                   <section className="scrollbar-thin min-h-0 flex-1 overflow-auto p-4 pb-32">
-                    {activeTab === "Chat" ? <ChatView messages={currentMessages} /> : null}
+                    {activeTab === "Chat" ? <ChatView isTyping={sendMessageMutation.isPending} messages={currentMessages} /> : null}
                     {activeTab === "Ideas" ? (
                       <IdeasView
+                        canEdit={canEdit}
                         ideas={filteredIdeas}
                         selectedIdeaId={selectedIdea?.id}
                         searchTerm={searchTerm}
                         statusFilter={statusFilter}
-                        pinnedIdeaIds={activeWorkspace.pinnedIdeaIds}
+                        pinnedIdeaIds={visibleWorkspace.pinnedIdeaIds}
                         onAddIdea={() => setIsAddOpen(true)}
                         onSearchTerm={setSearchTerm}
                         onSelectIdea={(idea) => {
@@ -559,6 +954,7 @@ function PMOCommandCenter() {
                     {activeTab === "Artifacts" ? (
                       <ArtifactsView
                         activeMode={activeMode}
+                        canEdit={canEdit}
                         artifacts={scopedArtifacts}
                         selectedArtifactTitle={selectedArtifact?.title}
                         onPreview={setPreviewArtifact}
@@ -573,16 +969,17 @@ function PMOCommandCenter() {
                       />
                     ) : null}
                     {activeTab === "Decisions" ? (
-                      <DecisionView decisions={scopedDecisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
+                      <DecisionView canEdit={canEdit} decisions={scopedDecisions} onToggle={(id) => toggleDecisionMutation.mutate(id)} />
                     ) : null}
                     {activeTab === "Approvals" ? (
-                      <ApprovalView approvals={scopedApprovals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
+                      <ApprovalView canEdit={canEdit} approvals={scopedApprovals} onToggle={(id) => toggleApprovalMutation.mutate(id)} />
                     ) : null}
                     {activeTab === "Tasks" ? (
-                      <TaskView tasks={scopedTasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
+                      <TaskView canEdit={canEdit} tasks={scopedTasks} onToggle={(id) => toggleTaskMutation.mutate(id)} />
                     ) : null}
                     {activeTab === "Prompts" ? (
                       <PromptView
+                        canEdit={canEdit}
                         prompts={scopedPrompts}
                         onUsePrompt={(prompt) => {
                           setChatInput(prompt);
@@ -592,26 +989,36 @@ function PMOCommandCenter() {
                     ) : null}
                   </section>
 
-                  <form
-                    className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px]"
-                    onSubmit={handleSendMessage}
-                  >
-                    <Input
-                      aria-label="Ask the PMO assistant"
-                      placeholder={`Ask about ${scopeContextLabel} / ${activeChat?.title ?? "chat"}`}
-                      value={chatInput}
-                      onChange={(event) => setChatInput(event.target.value)}
-                    />
-                    <Button type="button" variant="outline" size="icon" aria-label="Attach file" onClick={() => updateToast("Attachment queued")}>
-                      <Paperclip />
-                    </Button>
-                    <Button type="button" variant="outline" size="icon" aria-label="Add workspace context" onClick={() => updateToast("Workspace context added")}>
-                      <Folder />
-                    </Button>
-                    <Button type="submit" size="icon" aria-label="Send message" disabled={sendMessageMutation.isPending}>
-                      <Send />
-                    </Button>
-                  </form>
+                  {canEdit ? (
+                    <form
+                      ref={chatFormRef}
+                      className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px]"
+                      onSubmit={handleSendMessage}
+                    >
+                      <Input
+                        aria-label="Ask the PMO assistant"
+                        placeholder={`Message VertexAI about ${scopeContextLabel} / ${activeChat?.title ?? "new AI chat"}`}
+                        ref={chatInputRef}
+                        disabled={sendMessageMutation.isPending}
+                        value={chatInput}
+                        onKeyDown={handleChatInputKeyDown}
+                        onChange={(event) => setChatInput(event.target.value)}
+                      />
+                      <Button type="button" variant="outline" size="icon" aria-label="Attach file" onClick={() => updateToast("Attachment queued")}>
+                        <Paperclip />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" aria-label="Add workspace context" onClick={() => updateToast("Workspace context added")}>
+                        <Folder />
+                      </Button>
+                      <Button type="button" size="icon" aria-label="Send message" disabled={sendMessageMutation.isPending || !chatInput.trim()} onClick={handleChatSubmitButton}>
+                        <Send />
+                      </Button>
+                    </form>
+                  ) : (
+                    <div className="fixed inset-x-3 bottom-3 z-50 rounded-xl border bg-card/95 p-3 text-sm text-muted-foreground shadow-[0_18px_60px_rgb(15_23_42_/_0.22)] backdrop-blur lg:left-[368px] lg:right-[416px] xl:left-[388px] xl:right-[426px]">
+                      Viewer access is read-only.
+                    </div>
+                  )}
                 </section>
 
                 {rightOpen ? (
@@ -621,9 +1028,10 @@ function PMOCommandCenter() {
                     activeChat={activeChat}
                     artifact={selectedArtifact}
                     approval={selectedApproval}
+                    canEdit={canEdit}
                     decision={selectedDecision}
                     idea={selectedIdea}
-                    isPinned={selectedIdea ? activeWorkspace.pinnedIdeaIds.includes(selectedIdea.id) : false}
+                    isPinned={selectedIdea ? visibleWorkspace.pinnedIdeaIds.includes(selectedIdea.id) : false}
                     messages={currentMessages}
                     metrics={metrics}
                     prompts={scopedPrompts}
@@ -655,10 +1063,11 @@ function PMOCommandCenter() {
                 )}
               </>
             ) : (
-              <CategoryTablePage
-                activeMode={activeMode}
-                rail={activeRail}
-                workspace={activeWorkspace}
+                <CategoryTablePage
+                  activeMode={activeMode}
+                  canEdit={canEdit}
+                  rail={activeRail}
+                workspace={visibleWorkspace}
                 onUsePrompt={(prompt) => {
                   setChatInput(prompt);
                   setActiveRail("Workspaces");
@@ -672,26 +1081,46 @@ function PMOCommandCenter() {
         <div className="fixed right-4 bottom-24 z-40 flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs font-medium shadow-lg">
           <span className="size-2 rounded-full bg-success" />
           {toast}
+          {toastLink ? (
+            <a className="font-semibold text-primary underline-offset-4 hover:underline" href={toastLink.href}>
+              {toastLink.label}
+            </a>
+          ) : null}
         </div>
       </div>
 
-      <AddIdeaDialog
-        open={isAddOpen}
-        pending={addIdeaMutation.isPending}
-        onOpenChange={setIsAddOpen}
-        onSubmit={handleAddIdea}
-      />
-      <AccessDialog
-        accessLevel={activeWorkspace.accessLevel}
-        open={isAccessOpen}
-        pending={updateAccessMutation.isPending}
-        onOpenChange={setIsAccessOpen}
-        onSave={(accessLevel) => {
-          updateAccessMutation.mutate(accessLevel);
-          setIsAccessOpen(false);
-          updateToast("Access query updated");
-        }}
-      />
+      {canEdit ? (
+        <>
+          <AddIdeaDialog
+            open={isAddOpen}
+            pending={addIdeaMutation.isPending}
+            onOpenChange={setIsAddOpen}
+            onSubmit={handleAddIdea}
+          />
+          <CreateTeamDialog
+            open={isCreateTeamOpen}
+            pending={createTeamMutation.isPending}
+            onOpenChange={setIsCreateTeamOpen}
+            onSubmit={handleCreateTeamSubmit}
+          />
+          <CreateProjectDialog
+            mode={activeMode}
+            open={isCreateProjectOpen}
+            pending={createProjectMutation.isPending}
+            teamName={activeMode === "Team" ? selectedTeam?.name : undefined}
+            onOpenChange={setIsCreateProjectOpen}
+            onSubmit={handleCreateProjectSubmit}
+          />
+          <CreateChatDialog
+            contextLabel={createChatState?.section === "project" ? createChatState.projectName ?? "Project" : workspaceModeLabel(activeMode)}
+            open={Boolean(createChatState)}
+            pending={createChatMutation.isPending}
+            section={createChatState?.section ?? "workspace"}
+            onOpenChange={(open) => !open && setCreateChatState(null)}
+            onSubmit={handleCreateChatSubmit}
+          />
+        </>
+      ) : null}
       <ArtifactPreviewDialog artifact={previewArtifact} onOpenChange={(open) => !open && setPreviewArtifact(null)} />
     </main>
   );
@@ -887,6 +1316,7 @@ function AccountMenu({
             role="menuitem"
             onClick={() => runMenuAction(() => (window.location.href = "/profile/password"))}
           >
+            <KeyRound className="size-4" />
             Reset password
           </button>
           {canAdmin ? (
@@ -917,20 +1347,30 @@ function AccountMenu({
 }
 
 function Contextbar({
-  accessLevel,
   activeMode,
+  activeTeamId,
+  canEdit,
   showScopeTabs,
-  onAccessOpen,
+  teams,
+  onCreateTeam,
+  onInviteTeam,
   onModeChange,
+  onTeamChange,
 }: {
-  accessLevel: ScopedWorkspaceState["accessLevel"];
   activeMode: WorkspaceMode;
+  activeTeamId: string;
+  canEdit: boolean;
   showScopeTabs: boolean;
-  onAccessOpen: () => void;
+  teams: TeamSummary[];
+  onCreateTeam: () => void;
+  onInviteTeam: (team: TeamSummary) => void;
   onModeChange: (mode: WorkspaceMode) => void;
+  onTeamChange: (teamId: string) => void;
 }) {
+  const selectedTeam = teams.find((team) => team.id === activeTeamId);
+
   return (
-    <section className="grid gap-3 border-b bg-card px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:px-5">
+    <section className="border-b bg-card px-3 py-3 lg:px-5">
       <div className="min-w-0 space-y-2">
         {showScopeTabs ? (
           <div className="flex w-full overflow-hidden rounded-md border md:w-fit">
@@ -949,16 +1389,44 @@ function Contextbar({
             ))}
           </div>
         ) : null}
-      </div>
-      <div className="flex items-center gap-3">
-        <ShieldCheck className="size-5 text-success" />
-        <div className="min-w-0">
-          <strong className="block text-sm">{workspaceModeLabel(activeMode)} access</strong>
-          <span className="text-xs text-muted-foreground">{accessLevel}</span>
-        </div>
-        <Button type="button" variant="outline" onClick={onAccessOpen}>
-          Manage
-        </Button>
+        {activeMode === "Team" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-xs font-semibold uppercase text-muted-foreground" htmlFor="team-select">
+              Team
+            </Label>
+            <select
+              id="team-select"
+              className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm"
+              value={activeTeamId}
+              onChange={(event) => onTeamChange(event.target.value)}
+            >
+              {teams.length === 0 ? <option value="">No teams assigned</option> : null}
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+            {canEdit ? (
+              <>
+                <Button type="button" variant="outline" size="sm" onClick={onCreateTeam}>
+                  <Plus />
+                  New team
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!selectedTeam}
+                  onClick={() => selectedTeam && onInviteTeam(selectedTeam)}
+                >
+                  <Users />
+                  Invite user
+                </Button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -969,47 +1437,103 @@ function ProjectNav({
   activeChatSection,
   activeMode,
   activeProjectId,
+  canEdit,
   workspace,
   onChatSelect,
+  onCreateProject,
+  onInviteProject,
+  onOpenProjectChat,
+  onOpenWorkspaceChat,
   onProjectSelect,
 }: {
   activeChatId: string;
   activeChatSection: ChatSection;
   activeMode: WorkspaceMode;
   activeProjectId: string;
+  canEdit: boolean;
   workspace: ScopedWorkspaceState;
   onChatSelect: (section: ChatSection, chatId: string) => void;
+  onCreateProject: () => void;
+  onInviteProject: (project: ProjectSummary) => void;
+  onOpenProjectChat: (project: ProjectSummary) => void;
+  onOpenWorkspaceChat: () => void;
   onProjectSelect: (project: ProjectSummary) => void;
 }) {
   const activeProject = workspace.projects.find((project) => project.id === activeProjectId) ?? workspace.projects[0];
   const projectChats = activeProject?.projectChats ?? [];
+  const showProjectOptions = canEdit && (activeMode === "Team" || activeMode === "Org");
 
   return (
     <aside className="scrollbar-thin hidden min-h-0 overflow-auto border-r bg-muted/40 p-3 lg:block">
       <div className="mb-2 flex items-center justify-between px-2 text-xs font-semibold uppercase text-muted-foreground">
         <span>{workspace.projectsHeading}</span>
-        <Plus className="size-4" />
+        {canEdit ? (
+          <button
+            aria-label={`Create ${workspace.projectsHeading}`}
+            className="grid size-7 place-items-center rounded-md hover:bg-accent hover:text-accent-foreground"
+            type="button"
+            onClick={onCreateProject}
+          >
+            <Plus className="size-4" />
+          </button>
+        ) : null}
       </div>
       {workspace.projects.map((project) => (
-        <button
-          className={cn(
-            "mb-1 flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-            project.id === activeProjectId && "bg-accent text-accent-foreground font-medium",
-          )}
-          key={project.id}
-          type="button"
-          onClick={() => onProjectSelect(project)}
-        >
-          <Folder className="size-4" />
-          <span className="min-w-0 flex-1 truncate">{project.name}</span>
-          <Badge variant={project.status === "Active" ? "success" : project.status === "Watch" ? "warning" : "secondary"}>
-            {project.status}
-          </Badge>
-        </button>
+        <div className="relative mb-1 flex items-center gap-1" key={project.id}>
+          <button
+            className={cn(
+              "flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+              project.id === activeProjectId && "bg-accent text-accent-foreground font-medium",
+            )}
+            type="button"
+            onClick={() => onProjectSelect(project)}
+          >
+            <Folder className="size-4" />
+            <span className="min-w-0 flex-1 truncate">{project.name}</span>
+          </button>
+          {showProjectOptions ? (
+            <details className="group relative">
+              <summary className="grid size-8 cursor-pointer list-none place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground">
+                <MoreHorizontal className="size-4" />
+              </summary>
+              <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+                <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold uppercase text-muted-foreground">
+                  <ShieldCheck className="size-3.5" />
+                  Settings
+                </div>
+                <button
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  type="button"
+                  onClick={() => onInviteProject(project)}
+                >
+                  <Users className="size-4" />
+                  Invite user
+                </button>
+              </div>
+            </details>
+          ) : null}
+        </div>
       ))}
+      {workspace.projects.length === 0 ? (
+        <div className="rounded-md border border-dashed bg-card px-3 py-4 text-sm text-muted-foreground">
+          No assigned projects yet.
+        </div>
+      ) : null}
 
       <div className="mt-5 px-2">
-        <div className="text-xs font-semibold uppercase text-muted-foreground">{workspace.projectChatsHeading}</div>
+        <div className="flex items-center justify-between text-xs font-semibold uppercase text-muted-foreground">
+          <span>{workspace.projectChatsHeading}</span>
+          {canEdit && activeProject ? (
+            <button
+              aria-label={`Open chat composer for ${activeProject.name}`}
+              className="grid size-7 place-items-center rounded-md hover:bg-accent hover:text-accent-foreground"
+              type="button"
+              onClick={() => onOpenProjectChat(activeProject)}
+            >
+              <Plus className="size-4" />
+            </button>
+          ) : null}
+        </div>
         {activeProject ? (
           <div className="mt-1 truncate text-xs font-medium text-foreground">{activeProject.name}</div>
         ) : null}
@@ -1029,9 +1553,26 @@ function ProjectNav({
             <span className="min-w-0 flex-1 truncate">{chat.title}</span>
           </button>
         ))}
+        {activeProject && projectChats.length === 0 ? (
+          <div className="rounded-md border border-dashed bg-card px-3 py-3 text-sm text-muted-foreground">
+            No project chats yet.
+          </div>
+        ) : null}
       </div>
 
-      <div className="mt-5 px-2 text-xs font-semibold uppercase text-muted-foreground">{workspace.workspaceChatsHeading}</div>
+      <div className="mt-5 flex items-center justify-between px-2 text-xs font-semibold uppercase text-muted-foreground">
+        <span>{workspace.workspaceChatsHeading}</span>
+        {canEdit ? (
+          <button
+            aria-label={`Open ${workspace.workspaceChatsHeading} composer`}
+            className="grid size-7 place-items-center rounded-md hover:bg-accent hover:text-accent-foreground"
+            type="button"
+            onClick={onOpenWorkspaceChat}
+          >
+            <Plus className="size-4" />
+          </button>
+        ) : null}
+      </div>
       <div className="mt-2 space-y-1">
         {workspace.workspaceChats.map((chat) => (
           <button
@@ -1047,6 +1588,11 @@ function ProjectNav({
             <span className="min-w-0 flex-1 truncate">{chat.title}</span>
           </button>
         ))}
+        {workspace.workspaceChats.length === 0 ? (
+          <div className="rounded-md border border-dashed bg-card px-3 py-3 text-sm text-muted-foreground">
+            No workspace chats yet.
+          </div>
+        ) : null}
       </div>
     </aside>
   );
@@ -1115,43 +1661,64 @@ function PinnedStrip({
   );
 }
 
-function ChatView({ messages }: { messages: ChatMessage[] }) {
+function ChatView({ isTyping, messages }: { isTyping: boolean; messages: ChatMessage[] }) {
   return (
     <div className="space-y-4">
-      {messages.map((message) => (
-        <article className="grid grid-cols-[36px_minmax(0,1fr)] gap-3" key={message.id}>
-          {message.role === "assistant" || message.role === "system" ? (
-            <div className="grid size-9 place-items-center rounded-full bg-primary text-xl font-semibold text-primary-foreground">V</div>
-          ) : (
-            <img alt={message.author} className="size-9 rounded-full object-cover" src={message.avatar} />
-          )}
-          <div className="min-w-0 space-y-1">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <strong className="text-sm text-foreground">{message.author}</strong>
-              <span>{message.time}</span>
-              {message.role === "assistant" ? <Badge variant="secondary">assistant</Badge> : null}
-            </div>
-            <p className="text-sm leading-6 text-foreground/85">{message.text}</p>
-            {message.artifact ? (
-              <button className="mt-2 grid min-h-14 max-w-lg grid-cols-[34px_minmax(0,1fr)_24px] items-center gap-2 rounded-md border bg-muted/40 p-2 text-left">
-                <span className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground">
-                  {artifactIcon(message.artifact.type)}
-                </span>
-                <span className="min-w-0">
-                  <strong className="block truncate text-sm">{message.artifact.title}</strong>
-                  <em className="block text-xs not-italic text-muted-foreground">{message.artifact.meta}</em>
-                </span>
-                <Eye className="size-4 text-muted-foreground" />
-              </button>
+      {messages.map((message) => {
+        const isUser = message.role === "user";
+        return (
+          <article className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")} key={message.id}>
+            {!isUser ? (
+              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">V</div>
             ) : null}
+            <div className={cn("max-w-[78%] space-y-1", isUser && "items-end text-right")}>
+              <div className={cn("flex flex-wrap items-center gap-2 text-xs text-muted-foreground", isUser && "justify-end")}>
+                <strong className="text-sm text-foreground">{isUser ? "You" : "VertexAI"}</strong>
+                <span>{message.time}</span>
+              </div>
+              <div
+                className={cn(
+                  "rounded-2xl px-4 py-3 text-left text-sm leading-6 shadow-xs",
+                  isUser
+                    ? "rounded-br-sm bg-primary text-primary-foreground"
+                    : "rounded-bl-sm border bg-muted/60 text-foreground",
+                )}
+              >
+                {message.text}
+              </div>
+              {message.artifact ? (
+                <button className="mt-2 grid min-h-14 max-w-lg grid-cols-[34px_minmax(0,1fr)_24px] items-center gap-2 rounded-md border bg-card p-2 text-left">
+                  <span className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground">
+                    {artifactIcon(message.artifact.type)}
+                  </span>
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm">{message.artifact.title}</strong>
+                    <em className="block text-xs not-italic text-muted-foreground">{message.artifact.meta}</em>
+                  </span>
+                  <Eye className="size-4 text-muted-foreground" />
+                </button>
+              ) : null}
+            </div>
+            {isUser ? (
+              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">You</div>
+            ) : null}
+          </article>
+        );
+      })}
+      {isTyping ? (
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <div className="grid size-9 place-items-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">V</div>
+          <div className="rounded-2xl rounded-bl-sm border bg-muted/60 px-4 py-3">
+            <span className="animate-pulse">VertexAI is typing...</span>
           </div>
-        </article>
-      ))}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function IdeasView({
+  canEdit,
   ideas,
   pinnedIdeaIds,
   searchTerm,
@@ -1163,6 +1730,7 @@ function IdeasView({
   onStatusFilter,
   onTogglePin,
 }: {
+  canEdit: boolean;
   ideas: Idea[];
   pinnedIdeaIds: string[];
   searchTerm: string;
@@ -1218,7 +1786,7 @@ function IdeasView({
       {
         id: "pin",
         header: "",
-        cell: ({ row }) => (
+        cell: ({ row }) => canEdit ? (
           <Button
             type="button"
             variant="ghost"
@@ -1231,10 +1799,10 @@ function IdeasView({
           >
             <Star className={cn(pinnedIdeaIds.includes(row.original.id) && "fill-warning text-warning")} />
           </Button>
-        ),
+        ) : null,
       },
     ],
-    [onTogglePin, pinnedIdeaIds],
+    [canEdit, onTogglePin, pinnedIdeaIds],
   );
 
   return (
@@ -1244,10 +1812,12 @@ function IdeasView({
           <span className="text-xs font-semibold uppercase text-muted-foreground">Improvement queue</span>
           <h2 className="text-xl font-semibold">{ideas.length} PMO ideas in view</h2>
         </div>
-        <Button type="button" onClick={onAddIdea} data-testid="open-add-idea">
-          <Plus />
-          Add idea
-        </Button>
+        {canEdit ? (
+          <Button type="button" onClick={onAddIdea} data-testid="open-add-idea">
+            <Plus />
+            Add idea
+          </Button>
+        ) : null}
       </div>
       <div className="grid gap-2 xl:grid-cols-[280px_minmax(0,1fr)]">
         <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-muted-foreground">
@@ -1286,6 +1856,7 @@ function IdeasView({
 
 function ArtifactsView({
   activeMode,
+  canEdit,
   artifacts,
   selectedArtifactTitle,
   onPreview,
@@ -1294,6 +1865,7 @@ function ArtifactsView({
   onTogglePin,
 }: {
   activeMode: WorkspaceMode;
+  canEdit: boolean;
   artifacts: Artifact[];
   selectedArtifactTitle?: string;
   onPreview: (artifact: Artifact) => void;
@@ -1338,18 +1910,20 @@ function ArtifactsView({
             >
               <Eye />
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={`Pin ${row.original.title}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onTogglePin(row.original);
-              }}
-            >
-              <Star className={cn(row.original.pinnedTo.includes(activeMode) && "fill-warning text-warning")} />
-            </Button>
+            {canEdit ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Pin ${row.original.title}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onTogglePin(row.original);
+                }}
+              >
+                <Star className={cn(row.original.pinnedTo.includes(activeMode) && "fill-warning text-warning")} />
+              </Button>
+            ) : null}
             <Button asChild variant="ghost" size="icon" aria-label={`Download ${row.original.title}`}>
               <a href={row.original.href} download onClick={(event) => event.stopPropagation()}>
                 <Download />
@@ -1359,7 +1933,7 @@ function ArtifactsView({
         ),
       },
     ],
-    [activeMode, onPreview, onTogglePin],
+    [activeMode, canEdit, onPreview, onTogglePin],
   );
 
   return (
@@ -1369,10 +1943,12 @@ function ArtifactsView({
           <span className="text-xs font-semibold uppercase text-muted-foreground">Artifacts</span>
           <h2 className="text-xl font-semibold">Pin artifacts to {workspaceModeLabel(activeMode)}</h2>
         </div>
-        <Button type="button" variant="outline" onClick={onShare}>
-          <Share2 />
-          Share
-        </Button>
+        {canEdit ? (
+          <Button type="button" variant="outline" onClick={onShare}>
+            <Share2 />
+            Share
+          </Button>
+        ) : null}
       </div>
       <DataTable
         columns={columns}
@@ -1385,7 +1961,7 @@ function ArtifactsView({
   );
 }
 
-function DecisionView({ decisions, onToggle }: { decisions: Decision[]; onToggle: (id: string) => void }) {
+function DecisionView({ canEdit, decisions, onToggle }: { canEdit: boolean; decisions: Decision[]; onToggle: (id: string) => void }) {
   const columns = useMemo<ColumnDef<Decision>[]>(
     () => [
       { accessorKey: "title", header: "Decision" },
@@ -1399,23 +1975,23 @@ function DecisionView({ decisions, onToggle }: { decisions: Decision[]; onToggle
       {
         id: "action",
         header: "",
-        cell: ({ row }) => (
+        cell: ({ row }) => canEdit ? (
           <Button type="button" variant="outline" size="sm" onClick={(event) => {
             event.stopPropagation();
             onToggle(row.original.id);
           }}>
             Toggle
           </Button>
-        ),
+        ) : null,
       },
     ],
-    [onToggle],
+    [canEdit, onToggle],
   );
 
   return <ActionTable title="Open governance actions" subtitle={`${decisions.filter((decision) => decision.status !== "Done").length} decisions need PMO attention`} data={decisions} columns={columns} getRowId={(decision) => decision.id} />;
 }
 
-function ApprovalView({ approvals, onToggle }: { approvals: Approval[]; onToggle: (id: string) => void }) {
+function ApprovalView({ approvals, canEdit, onToggle }: { approvals: Approval[]; canEdit: boolean; onToggle: (id: string) => void }) {
   const columns = useMemo<ColumnDef<Approval>[]>(
     () => [
       { accessorKey: "title", header: "Approval" },
@@ -1429,23 +2005,23 @@ function ApprovalView({ approvals, onToggle }: { approvals: Approval[]; onToggle
       {
         id: "action",
         header: "",
-        cell: ({ row }) => (
+        cell: ({ row }) => canEdit ? (
           <Button type="button" variant="outline" size="sm" onClick={(event) => {
             event.stopPropagation();
             onToggle(row.original.id);
           }}>
             Toggle
           </Button>
-        ),
+        ) : null,
       },
     ],
-    [onToggle],
+    [canEdit, onToggle],
   );
 
   return <ActionTable title="Approval queue" subtitle={`${approvals.filter((approval) => approval.status !== "Approved").length} approvals need attention`} data={approvals} columns={columns} getRowId={(approval) => approval.id} />;
 }
 
-function TaskView({ tasks, onToggle }: { tasks: Task[]; onToggle: (id: string) => void }) {
+function TaskView({ canEdit, tasks, onToggle }: { canEdit: boolean; tasks: Task[]; onToggle: (id: string) => void }) {
   const columns = useMemo<ColumnDef<Task>[]>(
     () => [
       { accessorKey: "title", header: "Task" },
@@ -1459,17 +2035,17 @@ function TaskView({ tasks, onToggle }: { tasks: Task[]; onToggle: (id: string) =
       {
         id: "action",
         header: "",
-        cell: ({ row }) => (
+        cell: ({ row }) => canEdit ? (
           <Button type="button" variant="outline" size="sm" onClick={(event) => {
             event.stopPropagation();
             onToggle(row.original.id);
           }}>
             Toggle
           </Button>
-        ),
+        ) : null,
       },
     ],
-    [onToggle],
+    [canEdit, onToggle],
   );
 
   return <ActionTable title="Tasks surfaced from chats" subtitle={`${tasks.filter((task) => task.status !== "Done").length} open follow-ups`} data={tasks} columns={columns} getRowId={(task) => task.id} />;
@@ -1500,7 +2076,7 @@ function ActionTable<TData extends object>({
   );
 }
 
-function PromptView({ onUsePrompt, prompts }: { onUsePrompt: (value: string) => void; prompts: string[] }) {
+function PromptView({ canEdit, onUsePrompt, prompts }: { canEdit: boolean; onUsePrompt: (value: string) => void; prompts: string[] }) {
   return (
     <div className="space-y-4">
       <div>
@@ -1543,11 +2119,13 @@ type PromptTableRow = {
 
 function CategoryTablePage({
   activeMode,
+  canEdit,
   rail,
   workspace,
   onUsePrompt,
 }: {
   activeMode: WorkspaceMode;
+  canEdit: boolean;
   rail: Exclude<RailName, "Workspaces">;
   workspace: ScopedWorkspaceState;
   onUsePrompt: (prompt: string) => void;
@@ -1571,7 +2149,7 @@ function CategoryTablePage({
       {rail === "Decisions" ? <DecisionsTable decisions={workspace.decisions} /> : null}
       {rail === "Approvals" ? <ApprovalsTable approvals={workspace.approvals} /> : null}
       {rail === "Tasks" ? <TasksTable tasks={workspace.tasks} /> : null}
-      {rail === "Prompts" ? <PromptsTable scopeLabel={scopeLabel} onUsePrompt={onUsePrompt} /> : null}
+      {rail === "Prompts" ? <PromptsTable canEdit={canEdit} scopeLabel={scopeLabel} onUsePrompt={onUsePrompt} /> : null}
     </section>
   );
 }
@@ -1694,9 +2272,11 @@ function TasksTable({ tasks }: { tasks: Task[] }) {
 }
 
 function PromptsTable({
+  canEdit,
   onUsePrompt,
   scopeLabel,
 }: {
+  canEdit: boolean;
   onUsePrompt: (prompt: string) => void;
   scopeLabel: string;
 }) {
@@ -1719,13 +2299,13 @@ function PromptsTable({
         id: "action",
         header: "",
         cell: ({ row }) => (
-          <Button type="button" variant="outline" size="sm" onClick={() => onUsePrompt(row.original.prompt)}>
+          <Button type="button" variant="outline" size="sm" disabled={!canEdit} onClick={() => onUsePrompt(row.original.prompt)}>
             Use
           </Button>
         ),
       },
     ],
-    [onUsePrompt],
+    [canEdit, onUsePrompt],
   );
 
   return <DataTable columns={columns} data={data} getRowId={(prompt) => prompt.id} />;
@@ -1737,6 +2317,7 @@ function DetailPanel({
   activeChat,
   approval,
   artifact,
+  canEdit,
   decision,
   idea,
   isPinned,
@@ -1763,6 +2344,7 @@ function DetailPanel({
   activeChat?: ChatSummary;
   approval?: Approval;
   artifact?: Artifact;
+  canEdit: boolean;
   decision?: Decision;
   idea?: Idea;
   isPinned: boolean;
@@ -1808,6 +2390,7 @@ function DetailPanel({
 
       {activeTab === "Ideas" && idea ? (
         <IdeaDetail
+          canEdit={canEdit}
           idea={idea}
           isPinned={isPinned}
           onShare={onShare}
@@ -1821,6 +2404,7 @@ function DetailPanel({
         <ArtifactDetail
           activeMode={activeMode}
           artifact={artifact}
+          canEdit={canEdit}
           onPreviewArtifact={onPreviewArtifact}
           onShare={onShare}
           onToggleArtifactPin={onToggleArtifactPin}
@@ -1834,6 +2418,7 @@ function DetailPanel({
           title={decision.title}
           detail={`${decision.owner} / ${decision.status} / ${decision.due}`}
           action="Advance"
+          canEdit={canEdit}
           onClick={() => onToggleDecision(decision.id)}
         />
       ) : null}
@@ -1844,6 +2429,7 @@ function DetailPanel({
           title={approval.title}
           detail={`${approval.owner} / ${approval.status} / ${approval.due}`}
           action="Advance"
+          canEdit={canEdit}
           onClick={() => onToggleApproval(approval.id)}
         />
       ) : null}
@@ -1854,10 +2440,11 @@ function DetailPanel({
           title={task.title}
           detail={`${task.owner} / ${task.status} / ${task.source}`}
           action="Advance"
+          canEdit={canEdit}
           onClick={() => onToggleTask(task.id)}
         />
       ) : null}
-      {activeTab === "Prompts" ? <PromptMetadata prompts={prompts} scopeContextLabel={scopeContextLabel} onUsePrompt={onUsePrompt} /> : null}
+      {activeTab === "Prompts" ? <PromptMetadata canEdit={canEdit} prompts={prompts} scopeContextLabel={scopeContextLabel} onUsePrompt={onUsePrompt} /> : null}
     </aside>
   );
 }
@@ -1898,6 +2485,7 @@ function ChatMetadata({
 
 function WorkflowMetadata({
   action,
+  canEdit,
   detail,
   icon: Icon,
   label,
@@ -1905,6 +2493,7 @@ function WorkflowMetadata({
   title,
 }: {
   action: string;
+  canEdit: boolean;
   detail: string;
   icon: ComponentType<{ className?: string }>;
   label: string;
@@ -1926,19 +2515,23 @@ function WorkflowMetadata({
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
         <p className="text-sm text-muted-foreground">{detail}</p>
-        <Button type="button" variant="outline" onClick={onClick}>
-          {action}
-        </Button>
+        {canEdit ? (
+          <Button type="button" variant="outline" onClick={onClick}>
+            {action}
+          </Button>
+        ) : null}
       </CardContent>
     </Card>
   );
 }
 
 function PromptMetadata({
+  canEdit,
   onUsePrompt,
   prompts,
   scopeContextLabel,
 }: {
+  canEdit: boolean;
   onUsePrompt: (prompt: string) => void;
   prompts: string[];
   scopeContextLabel: string;
@@ -1955,7 +2548,8 @@ function PromptMetadata({
             className="w-full rounded-md border bg-background p-3 text-left text-sm leading-5 hover:bg-accent"
             key={prompt}
             type="button"
-            onClick={() => onUsePrompt(prompt)}
+            disabled={!canEdit}
+            onClick={() => canEdit && onUsePrompt(prompt)}
           >
             {prompt}
           </button>
@@ -1966,6 +2560,7 @@ function PromptMetadata({
 }
 
 function IdeaDetail({
+  canEdit,
   idea,
   isPinned,
   onShare,
@@ -1973,6 +2568,7 @@ function IdeaDetail({
   onToggleIdeaPin,
   onVoteIdea,
 }: {
+  canEdit: boolean;
   idea: Idea;
   isPinned: boolean;
   onShare: () => void;
@@ -1989,9 +2585,11 @@ function IdeaDetail({
             <CardTitle className="mt-2 text-lg leading-6">{idea.title}</CardTitle>
             <CardDescription>{idea.category}</CardDescription>
           </div>
-          <Button type="button" variant="ghost" size="icon" onClick={onToggleIdeaPin} aria-label={isPinned ? "Unpin idea" : "Pin idea"}>
-            <Star className={cn(isPinned && "fill-warning text-warning")} />
-          </Button>
+          {canEdit ? (
+            <Button type="button" variant="ghost" size="icon" onClick={onToggleIdeaPin} aria-label={isPinned ? "Unpin idea" : "Pin idea"}>
+              <Star className={cn(isPinned && "fill-warning text-warning")} />
+            </Button>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
@@ -2021,6 +2619,7 @@ function IdeaDetail({
           <select
             className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={idea.status}
+            disabled={!canEdit}
             onChange={(event) => onStatusChange(event.target.value as IdeaStatus)}
           >
             {(Object.keys(statusMeta) as IdeaStatus[]).map((status) => (
@@ -2030,20 +2629,22 @@ function IdeaDetail({
             ))}
           </select>
         </label>
-        <div className="grid grid-cols-3 gap-2">
-          <Button type="button" variant="outline" onClick={onVoteIdea}>
-            <Zap />
-            Vote
-          </Button>
-          <Button type="button" variant="outline" onClick={onShare}>
-            <Share2 />
-            Share
-          </Button>
-          <Button type="button" variant="outline" onClick={onToggleIdeaPin}>
-            <Star />
-            {isPinned ? "Unpin" : "Pin"}
-          </Button>
-        </div>
+        {canEdit ? (
+          <div className="grid grid-cols-3 gap-2">
+            <Button type="button" variant="outline" onClick={onVoteIdea}>
+              <Zap />
+              Vote
+            </Button>
+            <Button type="button" variant="outline" onClick={onShare}>
+              <Share2 />
+              Share
+            </Button>
+            <Button type="button" variant="outline" onClick={onToggleIdeaPin}>
+              <Star />
+              {isPinned ? "Unpin" : "Pin"}
+            </Button>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -2052,12 +2653,14 @@ function IdeaDetail({
 function ArtifactDetail({
   activeMode,
   artifact,
+  canEdit,
   onPreviewArtifact,
   onShare,
   onToggleArtifactPin,
 }: {
   activeMode: WorkspaceMode;
   artifact: Artifact;
+  canEdit: boolean;
   onPreviewArtifact: () => void;
   onShare: () => void;
   onToggleArtifactPin: () => void;
@@ -2083,18 +2686,22 @@ function ArtifactDetail({
           ))}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Button type="button" variant="outline" onClick={onToggleArtifactPin}>
-            <Star className={cn(isPinned && "fill-warning text-warning")} />
-            {isPinned ? "Unpin" : "Pin"}
-          </Button>
+          {canEdit ? (
+            <Button type="button" variant="outline" onClick={onToggleArtifactPin}>
+              <Star className={cn(isPinned && "fill-warning text-warning")} />
+              {isPinned ? "Unpin" : "Pin"}
+            </Button>
+          ) : null}
           <Button type="button" variant="outline" onClick={onPreviewArtifact}>
             <Eye />
             Preview
           </Button>
-          <Button type="button" variant="outline" onClick={onShare}>
-            <Share2 />
-            Share
-          </Button>
+          {canEdit ? (
+            <Button type="button" variant="outline" onClick={onShare}>
+              <Share2 />
+              Share
+            </Button>
+          ) : null}
           <Button asChild>
             <a href={artifact.href} download>
               <Download />
@@ -2253,73 +2860,169 @@ function AddIdeaDialog({
   );
 }
 
-function AccessDialog({
-  accessLevel,
+function CreateTeamDialog({
   open,
   pending,
   onOpenChange,
-  onSave,
+  onSubmit,
 }: {
-  accessLevel: ScopedWorkspaceState["accessLevel"];
   open: boolean;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (accessLevel: ScopedWorkspaceState["accessLevel"]) => void;
+  onSubmit: (value: CreateTeamInput) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState(accessLevel);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
 
-  useEffect(() => {
-    setDraft(accessLevel);
-  }, [accessLevel, open]);
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    await onSubmit({ name: trimmedName, description: description.trim() });
+    setName("");
+    setDescription("");
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Manage PMO workspace access</DialogTitle>
-          <DialogDescription>Access changes are written through a TanStack Start server function.</DialogDescription>
+          <DialogTitle>New team</DialogTitle>
+          <DialogDescription>Create a team workspace for shared projects and assigned users.</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(["Read / Write", "View only"] as const).map((level) => (
-            <button
-              className={cn(
-                "grid min-h-24 grid-cols-[28px_minmax(0,1fr)] gap-3 rounded-lg border bg-card p-3 text-left",
-                draft === level && "border-primary bg-accent/35",
-              )}
-              key={level}
-              type="button"
-              onClick={() => setDraft(level)}
-            >
-              {level === "Read / Write" ? <ShieldCheck className="size-5 text-primary" /> : <Eye className="size-5 text-primary" />}
-              <span>
-                <strong className="block text-sm">{level}</strong>
-                <em className="mt-1 block text-xs not-italic text-muted-foreground">
-                  {level === "Read / Write"
-                    ? "Team can chat, add ideas, and update statuses."
-                    : "Team can view the prototype without editing state."}
-                </em>
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="rounded-lg border bg-muted/35 p-3">
-          {["Alex Morgan", "Jordan Lee", "Taylor Kim", "Maya Chen"].map((name) => (
-            <div className="flex items-center gap-2 py-1" key={name}>
-              <span className="grid size-7 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                {initials(name)}
-              </span>
-              <span className="text-sm">{name}</span>
-            </div>
-          ))}
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" disabled={pending} onClick={() => onSave(draft)}>
-            Save access
-          </Button>
-        </DialogFooter>
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <FieldBlock label="Team name">
+            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Example: AI Operations" autoFocus />
+          </FieldBlock>
+          <FieldBlock label="Description">
+            <Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this team owns." />
+          </FieldBlock>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || !name.trim()}>
+              <Plus />
+              Create team
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreateProjectDialog({
+  mode,
+  open,
+  pending,
+  teamName,
+  onOpenChange,
+  onSubmit,
+}: {
+  mode: WorkspaceMode;
+  open: boolean;
+  pending: boolean;
+  teamName?: string;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (value: Omit<CreateProjectInput, "mode" | "teamId">) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const scopeLabel = mode === "Team" && teamName ? teamName : workspaceModeLabel(mode);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    await onSubmit({ name: trimmedName, description: description.trim(), status: "Planning" });
+    setName("");
+    setDescription("");
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New project</DialogTitle>
+          <DialogDescription>Add a project to {scopeLabel}.</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <FieldBlock label="Project name">
+            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Example: Enrollment Assistant" autoFocus />
+          </FieldBlock>
+          <FieldBlock label="Description">
+            <Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this project is responsible for." />
+          </FieldBlock>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || !name.trim()}>
+              <Plus />
+              Create project
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreateChatDialog({
+  contextLabel,
+  open,
+  pending,
+  section,
+  onOpenChange,
+  onSubmit,
+}: {
+  contextLabel: string;
+  open: boolean;
+  pending: boolean;
+  section: ChatSection;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (value: Omit<CreateChatInput, "mode" | "teamId" | "projectId" | "section">) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const chatType = section === "project" ? "project AI chat" : "scoped AI chat";
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) return;
+    await onSubmit({ title: trimmedTitle, description: description.trim() });
+    setTitle("");
+    setDescription("");
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New chat</DialogTitle>
+          <DialogDescription>
+            Create a fresh {chatType} for {contextLabel}.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <FieldBlock label="Chat name">
+            <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Example: Launch planning assistant" autoFocus />
+          </FieldBlock>
+          <FieldBlock label="Description">
+            <Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this AI chat should help with." />
+          </FieldBlock>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || !title.trim()}>
+              <Plus />
+              Create chat
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

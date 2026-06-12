@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { ShieldCheck, UserRound } from "lucide-react";
+import { Inbox, KeyRound, ShieldCheck, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,7 @@ export const Route = createFileRoute("/profile/")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "User profile | AI Command Center" }],
+    meta: [{ title: "User profile | Vertex AI Command Center" }],
   }),
   component: UserProfilePage,
 });
@@ -63,7 +63,12 @@ function UserProfilePage() {
 
             <div className="space-y-2">
               <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/password")}>
+                <KeyRound className="size-4" />
                 Reset password
+              </Button>
+              <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/invites")}>
+                <Inbox className="size-4" />
+                Invites
               </Button>
               {session.user.role === "admin" ? (
                 <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/admin/users")}>

@@ -18,11 +18,11 @@ export const Route = createRootRouteWithContext<{
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "PMO Chatbot Command Center" },
+      { title: "Vertex AI Command Center" },
       {
         name: "description",
         content:
-          "SSR PMO chatbot workspace powered by TanStack Start, Query, Table, shadcn/ui, and Tailwind CSS.",
+          "Vertex AI Command Center workspace powered by TanStack Start, Query, Table, shadcn/ui, and Tailwind CSS.",
       },
     ],
     links: [{ rel: "icon", href: "/favicon.svg" }],
