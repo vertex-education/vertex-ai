@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
-import { getSessionSnapshot } from "@/lib/auth-workflow";
+import { createBootstrapAdminInvite, getSessionSnapshot } from "@/lib/auth-workflow";
 
 export const Route = createFileRoute("/sign-in")({
   loader: async () => {
@@ -28,7 +28,9 @@ function SignInPage() {
       ? "Email verified. Sign in to continue."
       : "",
   );
+  const [bootstrapInviteLink, setBootstrapInviteLink] = useState("");
   const [isPending, setIsPending] = useState(false);
+  const [isBootstrapping, setIsBootstrapping] = useState(false);
 
   useEffect(() => {
     setShowPassword(false);
@@ -62,6 +64,22 @@ function SignInPage() {
     } finally {
       window.clearTimeout(slowSignInTimer);
       setIsPending(false);
+    }
+  }
+
+  async function handleBootstrapAdmin() {
+    setIsBootstrapping(true);
+    setBootstrapInviteLink("");
+    setMessage("Creating bootstrap admin invite...");
+
+    try {
+      const result = await createBootstrapAdminInvite();
+      setMessage(result.emailResult.sent ? `Bootstrap invite sent to ${result.email}.` : `Bootstrap invite created, but email was not sent: ${result.emailResult.reason}`);
+      if (!result.emailResult.sent) setBootstrapInviteLink(result.inviteLink);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create bootstrap admin invite.");
+    } finally {
+      setIsBootstrapping(false);
     }
   }
 
@@ -99,7 +117,16 @@ function SignInPage() {
             </Button>
           </form>
 
+          <Button className="w-full" type="button" variant="outline" disabled={isBootstrapping} onClick={handleBootstrapAdmin}>
+            {isBootstrapping ? "Creating invite..." : "Create first admin invite"}
+          </Button>
+
           {message ? <p className="rounded-md border bg-background p-3 text-sm text-muted-foreground">{message}</p> : null}
+          {bootstrapInviteLink ? (
+            <a className="block break-all rounded-md border bg-background p-3 text-sm font-medium text-primary" href={bootstrapInviteLink}>
+              {bootstrapInviteLink}
+            </a>
+          ) : null}
         </CardContent>
       </Card>
     </main>
