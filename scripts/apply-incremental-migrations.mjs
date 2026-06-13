@@ -1,0 +1,303 @@
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+
+const database = "ai-command-center-db";
+const config = "./wrangler.jsonc";
+const mode = process.argv.includes("--remote") ? "--remote" : "--local";
+const migrationTable = "app_schema_migrations";
+const minimumMajor = 22;
+const currentMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "0", 10);
+const wranglerBin = join(process.cwd(), "node_modules", "wrangler", "bin", "wrangler.js");
+const codexNode = join(
+  process.env.USERPROFILE ?? "",
+  ".cache",
+  "codex-runtimes",
+  "codex-primary-runtime",
+  "dependencies",
+  "node",
+  "bin",
+  "node.exe",
+);
+
+if (!existsSync(wranglerBin)) {
+  console.error("Wrangler is not installed. Run npm install first.");
+  process.exit(1);
+}
+
+const nodeExecutable = currentMajor >= minimumMajor ? process.execPath : codexNode;
+
+if (!existsSync(nodeExecutable)) {
+  console.error(`Wrangler requires Node.js v${minimumMajor}.0.0 or newer. Current Node.js is ${process.version}.`);
+  console.error("Run `nvm install 22` and `nvm use 22`, then try again.");
+  process.exit(1);
+}
+
+const baseArgs = ["d1", "execute", database, `--config=${config}`, mode];
+
+function sqlString(value) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function extractRows(stdout) {
+  const jsonStart = stdout.lastIndexOf("\n[");
+  const jsonText = (jsonStart >= 0 ? stdout.slice(jsonStart + 1) : stdout).trim();
+  try {
+    const payload = JSON.parse(jsonText);
+    return payload.flatMap((entry) => entry.results ?? []);
+  } catch {
+    throw new Error(`Unable to parse Wrangler JSON output:\n${stdout}`);
+  }
+}
+
+function runWrangler(args, { quiet = false } = {}) {
+  const result = spawnSync(nodeExecutable, [wranglerBin, ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    shell: false,
+  });
+
+  if (!quiet && result.stdout) {
+    process.stdout.write(result.stdout);
+  }
+  if (result.stderr) {
+    process.stderr.write(result.stderr);
+  }
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+
+  return result.stdout ?? "";
+}
+
+function queryRows(sql) {
+  return extractRows(runWrangler([...baseArgs, "--command", sql], { quiet: true }));
+}
+
+function execute(sql, { quiet = false } = {}) {
+  runWrangler([...baseArgs, "--command", sql], { quiet });
+}
+
+function tableExists(table) {
+  return queryRows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${sqlString(table)};`).length > 0;
+}
+
+function indexExists(index) {
+  return queryRows(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ${sqlString(index)};`).length > 0;
+}
+
+function columnExists(table, column) {
+  if (!tableExists(table)) {
+    return false;
+  }
+  return queryRows(`PRAGMA table_info(${table});`).some((row) => row.name === column);
+}
+
+function ensureMigrationTable() {
+  execute(
+    `CREATE TABLE IF NOT EXISTS ${migrationTable} (
+  name TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);`,
+    { quiet: true },
+  );
+}
+
+function migrationRecorded(name) {
+  return queryRows(`SELECT name FROM ${migrationTable} WHERE name = ${sqlString(name)};`).length > 0;
+}
+
+function recordMigration(name) {
+  execute(`INSERT OR IGNORE INTO ${migrationTable} (name) VALUES (${sqlString(name)});`, { quiet: true });
+}
+
+function applyMigration(migration) {
+  if (migrationRecorded(migration.name)) {
+    console.log(`Skipping ${migration.name}: already recorded.`);
+    return;
+  }
+
+  if (migration.isComplete()) {
+    console.log(`Recording ${migration.name}: schema already complete.`);
+    recordMigration(migration.name);
+    return;
+  }
+
+  console.log(`Applying ${migration.name}.`);
+  if (migration.steps) {
+    for (const step of migration.steps) {
+      if (step.isComplete()) {
+        continue;
+      }
+      execute(step.statement);
+    }
+  } else {
+    for (const statement of migration.statements) {
+      execute(statement);
+    }
+  }
+
+  if (!migration.isComplete()) {
+    console.error(`Migration ${migration.name} did not pass its completion check.`);
+    process.exit(1);
+  }
+
+  recordMigration(migration.name);
+}
+
+const migrations = [
+  {
+    name: "0005_realtime_events",
+    isComplete: () =>
+      tableExists("events") &&
+      indexExists("events_scope_idx") &&
+      indexExists("events_source_user_idx") &&
+      indexExists("events_entity_idx"),
+    statements: [
+      `CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  team_id TEXT,
+  project_id TEXT,
+  chat_id TEXT,
+  mode TEXT NOT NULL CHECK (mode IN ('Personal', 'Team', 'Org')),
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  invalidates_json TEXT NOT NULL DEFAULT '[]',
+  source_user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  source_client_id TEXT,
+  created_at INTEGER NOT NULL
+);`,
+      "CREATE INDEX IF NOT EXISTS events_scope_idx ON events (workspace_id, mode, team_id, id);",
+      "CREATE INDEX IF NOT EXISTS events_source_user_idx ON events (workspace_id, source_user_id, id);",
+      "CREATE INDEX IF NOT EXISTS events_entity_idx ON events (entity, entity_id, id);",
+    ],
+  },
+  {
+    name: "0006_admin_usage_events",
+    isComplete: () =>
+      tableExists("admin_usage_events") &&
+      indexExists("admin_usage_events_provider_idx") &&
+      indexExists("admin_usage_events_scope_idx") &&
+      indexExists("admin_usage_events_chat_idx"),
+    statements: [
+      `CREATE TABLE IF NOT EXISTS admin_usage_events (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  model TEXT,
+  credits_used REAL,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  total_tokens INTEGER,
+  duration_ms INTEGER,
+  team_id TEXT,
+  project_id TEXT,
+  chat_id TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL
+);`,
+      "CREATE INDEX IF NOT EXISTS admin_usage_events_provider_idx ON admin_usage_events (provider, created_at);",
+      "CREATE INDEX IF NOT EXISTS admin_usage_events_scope_idx ON admin_usage_events (team_id, project_id, created_at);",
+      "CREATE INDEX IF NOT EXISTS admin_usage_events_chat_idx ON admin_usage_events (chat_id, created_at);",
+    ],
+  },
+  {
+    name: "0007_chat_message_attachments",
+    isComplete: () => columnExists("chat_messages", "attachments_json"),
+    steps: [
+      {
+        isComplete: () => columnExists("chat_messages", "attachments_json"),
+        statement: 'ALTER TABLE "chat_messages" ADD COLUMN "attachments_json" text;',
+      },
+    ],
+  },
+  {
+    name: "0008_artifact_versioning",
+    isComplete: () =>
+      columnExists("artifacts", "version") &&
+      columnExists("artifacts", "parent_artifact_id") &&
+      columnExists("artifacts", "commit_message") &&
+      indexExists("artifacts_parent_idx") &&
+      indexExists("artifacts_version_idx"),
+    steps: [
+      {
+        isComplete: () => columnExists("artifacts", "version"),
+        statement: "ALTER TABLE artifacts ADD version integer DEFAULT 1 NOT NULL;",
+      },
+      {
+        isComplete: () => columnExists("artifacts", "parent_artifact_id"),
+        statement: "ALTER TABLE artifacts ADD parent_artifact_id text REFERENCES artifacts(id) ON UPDATE no action ON DELETE set null;",
+      },
+      {
+        isComplete: () => columnExists("artifacts", "commit_message"),
+        statement: "ALTER TABLE artifacts ADD commit_message text DEFAULT 'Initial artifact version' NOT NULL;",
+      },
+      {
+        isComplete: () => indexExists("artifacts_parent_idx"),
+        statement: "CREATE INDEX IF NOT EXISTS artifacts_parent_idx ON artifacts (parent_artifact_id);",
+      },
+      {
+        isComplete: () => indexExists("artifacts_version_idx"),
+        statement: "CREATE INDEX IF NOT EXISTS artifacts_version_idx ON artifacts (workspace_id, title, version);",
+      },
+    ],
+  },
+  {
+    name: "0009_rbac_inference_guardrails",
+    isComplete: () => columnExists("document_chunks", "sensitivity_label") && columnExists("document_chunks", "restricted"),
+    steps: [
+      {
+        isComplete: () => columnExists("document_chunks", "sensitivity_label"),
+        statement:
+          "ALTER TABLE document_chunks ADD COLUMN sensitivity_label TEXT NOT NULL DEFAULT 'Standard' CHECK (sensitivity_label IN ('Standard', 'Confidential'));",
+      },
+      {
+        isComplete: () => columnExists("document_chunks", "restricted"),
+        statement: "ALTER TABLE document_chunks ADD COLUMN restricted INTEGER NOT NULL DEFAULT 0;",
+      },
+    ],
+  },
+  {
+    name: "0010_workflow_persistence",
+    isComplete: () =>
+      columnExists("workspace_actions", "project_id") &&
+      columnExists("workspace_actions", "original_text") &&
+      columnExists("ideas", "project_id") &&
+      columnExists("ideas", "original_text") &&
+      indexExists("workspace_actions_project_idx") &&
+      indexExists("ideas_project_idx"),
+    steps: [
+      {
+        isComplete: () => columnExists("workspace_actions", "project_id"),
+        statement: "ALTER TABLE workspace_actions ADD COLUMN project_id text REFERENCES projects(id) ON UPDATE no action ON DELETE set null;",
+      },
+      {
+        isComplete: () => columnExists("workspace_actions", "original_text"),
+        statement: "ALTER TABLE workspace_actions ADD COLUMN original_text text DEFAULT '' NOT NULL;",
+      },
+      {
+        isComplete: () => columnExists("ideas", "project_id"),
+        statement: "ALTER TABLE ideas ADD COLUMN project_id text REFERENCES projects(id) ON UPDATE no action ON DELETE set null;",
+      },
+      {
+        isComplete: () => columnExists("ideas", "original_text"),
+        statement: "ALTER TABLE ideas ADD COLUMN original_text text DEFAULT '' NOT NULL;",
+      },
+      {
+        isComplete: () => indexExists("workspace_actions_project_idx"),
+        statement: "CREATE INDEX IF NOT EXISTS workspace_actions_project_idx ON workspace_actions (workspace_id, project_id);",
+      },
+      {
+        isComplete: () => indexExists("ideas_project_idx"),
+        statement: "CREATE INDEX IF NOT EXISTS ideas_project_idx ON ideas (workspace_id, project_id);",
+      },
+    ],
+  },
+];
+
+ensureMigrationTable();
+for (const migration of migrations) {
+  applyMigration(migration);
+}

@@ -24,7 +24,7 @@ import {
 } from "@/lib/prompts";
 import { fetchConsolidatedWebSearch } from "@/lib/rag";
 
-export type IdeaStatus = "New" | "Review" | "Pilot" | "Approved" | "Implemented" | "Blocked";
+export type IdeaStatus = "Not Started" | "Reviewing" | "Convert to Project" | "Dismiss";
 export type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
 export type RailName = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
 export type WorkspaceMode = "Personal" | "Team" | "Org";
@@ -51,6 +51,7 @@ export type Idea = {
   id: string;
   projectId: string | null;
   title: string;
+  originalText?: string;
   status: IdeaStatus;
   category: string;
   owner: string;
@@ -123,7 +124,8 @@ export type Decision = {
   id: string;
   projectId: string | null;
   title: string;
-  status: "Open" | "Blocked" | "Done";
+  originalText?: string;
+  status: "Not Completed" | "Completed";
   owner: string;
   due: string;
 };
@@ -132,9 +134,10 @@ export type Approval = {
   id: string;
   projectId: string | null;
   title: string;
+  originalText?: string;
   owner: string;
   due: string;
-  status: "Needed" | "Requested" | "Approved";
+  status: "Not Reviewed" | "Reviewing" | "Approved" | "Not Approved";
   clientStatus?: "pending";
 };
 
@@ -142,11 +145,23 @@ export type Task = {
   id: string;
   projectId: string | null;
   title: string;
+  originalText?: string;
   owner: string;
   source: string;
-  status: "Open" | "In progress" | "Done";
+  status: "Open" | "Completed";
   clientStatus?: "pending";
 };
+
+export type CreateTaskInput = {
+  mode: WorkspaceMode;
+  projectId?: string | null;
+  title: string;
+  originalText?: string;
+  owner?: string;
+  source?: string;
+};
+
+export type CreateWorkflowSuggestionInput = CreateTaskInput;
 
 export type ActivityItem = {
   id: string;
@@ -388,17 +403,15 @@ export const avatarPriya =
   "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=120&q=80";
 
 export const statusMeta: Record<IdeaStatus, { label: string; tone: "info" | "warning" | "success" | "destructive" | "secondary"; description: string }> = {
-  New: { label: "New", tone: "info", description: "Captured and ready for triage." },
-  Review: { label: "Under review", tone: "warning", description: "Sizing impact, owner, and governance fit." },
-  Pilot: { label: "In pilot", tone: "info", description: "Being tested in a live workflow." },
-  Approved: { label: "Approved", tone: "success", description: "Ready for rollout." },
-  Implemented: { label: "Implemented", tone: "success", description: "Released into the operating model." },
-  Blocked: { label: "Blocked", tone: "destructive", description: "Needs a decision, data source, or owner." },
+  "Not Started": { label: "Not Started", tone: "secondary", description: "Captured and not started." },
+  Reviewing: { label: "Reviewing", tone: "warning", description: "Being evaluated." },
+  "Convert to Project": { label: "Convert to Project", tone: "success", description: "Converted into a scoped project." },
+  Dismiss: { label: "Dismiss", tone: "destructive", description: "Dismissed from consideration." },
 };
 
 export const tabs: TabName[] = ["Chat", "Artifacts", "Ideas", "Decisions", "Approvals", "Tasks", "Prompts"];
 export const workspaceModes: WorkspaceMode[] = ["Personal", "Team", "Org"];
-export const statusFilters: Array<IdeaStatus | "All"> = ["All", "New", "Review", "Pilot", "Approved", "Implemented", "Blocked"];
+export const statusFilters: Array<IdeaStatus | "All"> = ["All", "Not Started", "Reviewing", "Convert to Project", "Dismiss"];
 export { modelOptions, promptTemplates };
 
 const scopeByMode: Record<WorkspaceMode, WorkspaceScope> = {
@@ -626,6 +639,17 @@ function getDb() {
   return db;
 }
 
+function workspaceIdForMode(mode: WorkspaceMode) {
+  return `ws-${scopeByMode[mode]}`;
+}
+
+function modeForWorkspaceId(workspaceId: string): WorkspaceMode | null {
+  if (workspaceId === "ws-personal") return "Personal";
+  if (workspaceId === "ws-team") return "Team";
+  if (workspaceId === "ws-org") return "Org";
+  return null;
+}
+
 function getArtifactsBucket() {
   const bucket = (env as Env).ARTIFACTS_BUCKET;
   if (!bucket) throw new Error("R2 binding ARTIFACTS_BUCKET is required.");
@@ -656,267 +680,28 @@ const workspaceSeed = {
     projectChatsHeading: "Project Chats",
     workspaceChatsHeading: "General Chats",
     unassignedProjectLabel: "General",
-    projects: [
-      { id: "personal-certification-plan", name: "Certification Plan", description: "Private credential and milestone tracking.", status: "Active" as const },
-      { id: "personal-weekly-reset", name: "Weekly Reset", description: "Personal planning workspace for recurring follow-up.", status: "Planning" as const },
-    ],
-    workspaceChats: [
-      { id: "personal-assistant", title: "Personal Command Chat", description: "Private planning and follow-up." },
-      { id: "personal-notes", title: "General Chats", description: "Notes that are not tied to a project." },
-      { id: "personal-ideas", title: "Idea Scratchpad", description: "Private improvement thinking." },
-    ],
-    artifacts: [
-      ["Personal Focus Plan", "DOCX", "Alex Morgan", "Jun 8, 2026", "Pinned", "/artifacts/personal-focus-plan.docx", "personal/artifacts/personal-focus-plan.docx"],
-      ["Personal Tracker", "XLSX", "Alex Morgan", "Jun 9, 2026", "Draft", "/artifacts/personal-tracker.xlsx", "personal/artifacts/personal-tracker.xlsx"],
-      ["Private Planning Brief", "PPTX", "Alex Morgan", "Jun 10, 2026", "Final", "/artifacts/personal-planning-brief.pptx", "personal/artifacts/personal-planning-brief.pptx"],
-    ],
   },
   Team: {
     projectsHeading: "Team Projects",
     projectChatsHeading: "Project Chats",
     workspaceChatsHeading: "Team Chats",
     unassignedProjectLabel: "No team project",
-    projects: [
-      { id: "team-vertex-hub", name: "Vertex Hub", description: "Shared PMO launch execution.", status: "Active" as const },
-      { id: "team-lms-next-gen", name: "LMS Next Gen", description: "Team delivery, vendor, and UAT coordination.", status: "Watch" as const },
-      { id: "team-data-migration", name: "Data Migration", description: "Cross-functional cutover and validation.", status: "Active" as const },
-    ],
-    workspaceChats: [
-      { id: "team-command", title: "Team Chats", description: "PMO team-wide working thread." },
-      { id: "team-intake", title: "Intake Council", description: "Shared intake triage and prioritization." },
-      { id: "team-risks", title: "Risk & Escalations", description: "Team-level risks outside a single project." },
-    ],
-    artifacts: [
-      ["Team Improvement Register", "XLSX", "PMO Team", "Jun 10, 2026", "Pinned", "/artifacts/team-improvement-register.xlsx", "team/artifacts/team-improvement-register.xlsx"],
-      ["Vertex Hub Roadmap Brief", "PPTX", "Taylor Kim", "Jun 7, 2026", "Final", "/artifacts/team-vertex-roadmap-brief.pptx", "team/artifacts/team-vertex-roadmap-brief.pptx"],
-      ["Team Launch Checklist", "DOCX", "Maya Chen", "Jun 6, 2026", "Draft", "/artifacts/team-launch-checklist.docx", "team/artifacts/team-launch-checklist.docx"],
-    ],
   },
   Org: {
     projectsHeading: "Org projects",
     projectChatsHeading: "Project Chats",
     workspaceChatsHeading: "Org Chats",
     unassignedProjectLabel: "No org project",
-    projects: [
-      { id: "org-enterprise-ai", name: "Enterprise AI Governance", description: "Organization-wide AI operating model.", status: "Active" as const },
-      { id: "org-portfolio-health", name: "Portfolio Health", description: "Executive portfolio reporting and decisions.", status: "Watch" as const },
-    ],
-    workspaceChats: [
-      { id: "org-command", title: "Org Chats", description: "Organization-level executive workspace." },
-      { id: "org-policy", title: "Policy Review", description: "Governance and data handling decisions." },
-      { id: "org-briefings", title: "Executive Briefings", description: "Leadership-ready summaries." },
-    ],
-    artifacts: [
-      ["Org AI Governance Charter", "DOCX", "Priya Shah", "Jun 11, 2026", "Final", "/artifacts/org-ai-governance-charter.docx", "org/artifacts/org-ai-governance-charter.docx"],
-      ["Portfolio Health Model", "XLSX", "Finance Ops", "Jun 10, 2026", "Pinned", "/artifacts/org-portfolio-health-model.xlsx", "org/artifacts/org-portfolio-health-model.xlsx"],
-      ["Executive AI Briefing", "PPTX", "Strategy Office", "Jun 9, 2026", "Draft", "/artifacts/org-executive-ai-briefing.pptx", "org/artifacts/org-executive-ai-briefing.pptx"],
-    ],
   },
 } satisfies Record<WorkspaceMode, {
   projectsHeading: string;
   projectChatsHeading: string;
   workspaceChatsHeading: string;
   unassignedProjectLabel: string;
-  projects: Array<Omit<ProjectSummary, "projectChats">>;
-  workspaceChats: ChatSummary[];
-  artifacts: Array<[string, string, string, string, Artifact["status"], string, string]>;
 }>;
-
-const projectChatTemplates: Record<WorkspaceMode, string[]> = {
-  Personal: ["Project Notes", "Project Chats", "Private Risks"],
-  Team: ["Shared Project Chat", "Project Chats", "Decision Log"],
-  Org: ["Org Project Chat", "Project Chats", "Leadership Decisions"],
-};
-
-function withProjectChats(mode: WorkspaceMode, project: Omit<ProjectSummary, "projectChats">): ProjectSummary {
-  return {
-    ...project,
-    projectChats: projectChatTemplates[mode].map((title, index) => ({
-      id: `${project.id}-chat-${index + 1}`,
-      title: `${project.name} ${title}`,
-      description: `${workspaceModeLabel(mode)} project chat scoped to ${project.name}.`,
-    })),
-  };
-}
-
-function buildIdea(
-  mode: WorkspaceMode,
-  index: number,
-  title: string,
-  category: string,
-  status: IdeaStatus,
-  owner: string,
-  avatar: string,
-  project?: ProjectSummary,
-): Idea {
-  const scopeName = project?.name ?? `${workspaceModeLabel(mode)} workspace`;
-  const normalizedIndex = project ? index % 10 : index;
-  return {
-    id: `${scopeByMode[mode]}-${project?.id ?? "workspace"}-idea-${index}`,
-    projectId: project?.id ?? null,
-    title,
-    status,
-    category,
-    owner,
-    avatar,
-    created: index === 1 ? "Today" : `Jun ${11 - index}`,
-    votes: Math.max(3, 18 - normalizedIndex * 2),
-    impact: Math.max(42, 92 - normalizedIndex * 7),
-    effort: Math.min(82, 34 + normalizedIndex * 8),
-    confidence: Math.max(58, 88 - normalizedIndex * 4),
-    summary: `${scopeName} scoped idea. This record is intentionally different from the other workspace and project scopes so switching views is obvious.`,
-    nextStep: `Confirm the ${scopeName.toLowerCase()} owner, artifact evidence, and decision path.`,
-    tags: [workspaceModeLabel(mode), project?.name ?? "General", category, status],
-    metrics: [`${mode} metric ${index}`, "Scoped evidence only", "No lower-scope exposure"],
-    thread: [
-      `${workspaceModeLabel(mode)} idea captured in Vertex AI Command Center.`,
-      "Assistant linked only same-scope chats, artifacts, and decisions.",
-    ],
-  };
-}
-
-function buildMessages(mode: WorkspaceMode, label: string, projectName?: string): ChatMessage[] {
-  const scopeLabel = workspaceModeLabel(mode);
-  const context = projectName ? `${scopeLabel} / ${projectName} / ${label}` : `${scopeLabel} / ${label}`;
-  return [
-    {
-      id: `${scopeByMode[mode]}-${label}-1`,
-      author: mode === "Org" ? "Priya Shah" : mode === "Team" ? "Taylor Kim" : "Alex Morgan",
-      role: "user",
-      avatar: mode === "Org" ? avatarPriya : mode === "Team" ? avatarTaylor : avatarAlex,
-      time: "9:15 AM",
-      text: `Summarize the current ${context} scope and call out the next action.`,
-    },
-    {
-      id: `${scopeByMode[mode]}-${label}-2`,
-      author: assistantName,
-      role: "assistant",
-      time: "9:16 AM",
-      text: `I reviewed only ${context}. The visible chats, ideas, artifacts, decisions, approvals, and tasks are isolated to the ${scopeByMode[mode]} scope.`,
-      artifact: {
-        title: `${scopeLabel} Scope Snapshot`,
-        meta: projectName ? "DOCX - Project scoped" : "PPTX - Workspace scoped",
-        type: projectName ? "doc" : "ppt",
-      },
-    },
-  ];
-}
-
-function buildArtifacts(mode: WorkspaceMode, project?: ProjectSummary): Artifact[] {
-  const artifactRows = project
-    ? [
-        [`${project.name} Scope Brief`, "DOCX", mode === "Org" ? "Priya Shah" : mode === "Team" ? "Taylor Kim" : "Alex Morgan", "Jun 11, 2026", "Draft", `/artifacts/${project.id}-scope-brief.docx`, `${scopeByMode[mode]}/projects/${project.id}/scope-brief.docx`],
-        [`${project.name} Metrics Model`, "XLSX", "Jordan Lee", "Jun 10, 2026", "Pinned", `/artifacts/${project.id}-metrics-model.xlsx`, `${scopeByMode[mode]}/projects/${project.id}/metrics-model.xlsx`],
-      ] satisfies Array<[string, string, string, string, Artifact["status"], string, string]>
-    : workspaceSeed[mode].artifacts;
-
-  return artifactRows.map(([title, type, owner, date, status, href, r2Key]) => ({
-    id: `seed-${r2Key.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "")}`,
-    projectId: project?.id ?? null,
-    parentArtifactId: null,
-    title,
-    type,
-    owner,
-    date,
-    status,
-    href,
-    r2Key,
-    summary: `${project?.name ?? workspaceModeLabel(mode)} artifact stored as R2 object ${r2Key}.`,
-    preview: [
-      `${project?.name ?? workspaceModeLabel(mode)}-only evidence and working notes.`,
-      "Dummy artifact content is intentionally unique by workspace.",
-      "D1 stores metadata while R2 stores the file bytes.",
-    ],
-    previewJson: {
-      preview: [
-        `${project?.name ?? workspaceModeLabel(mode)}-only evidence and working notes.`,
-        "Dummy artifact content is intentionally unique by workspace.",
-        "D1 stores metadata while R2 stores the file bytes.",
-      ],
-    },
-    pinnedTo: status === "Pinned" ? [mode] : [],
-    version: 1,
-    commitMessage: "Initial seed artifact",
-  }));
-}
 
 function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
   const seed = workspaceSeed[mode];
-  const projects = seed.projects.map((project) => withProjectChats(mode, project));
-  const conversations: Record<string, ChatMessage[]> = {};
-
-  for (const chat of seed.workspaceChats) {
-    conversations[getConversationKey(mode, null, chat.id)] = buildMessages(mode, chat.title);
-  }
-
-  for (const project of projects) {
-    for (const chat of project.projectChats) {
-      conversations[getConversationKey(mode, project.id, chat.id)] = buildMessages(mode, chat.title, project.name);
-    }
-  }
-
-  const workspaceIdeas =
-    mode === "Personal"
-      ? [
-          buildIdea(mode, 1, "Private meeting follow-up assistant", "Planning", "Pilot", "Alex Morgan", avatarAlex),
-          buildIdea(mode, 2, "Personal artifact reminder", "Artifacts", "Review", "Alex Morgan", avatarAlex),
-        ]
-      : mode === "Team"
-        ? [
-            buildIdea(mode, 1, "Team RAID Copilot", "Risk and issue management", "Pilot", "Taylor Kim", avatarTaylor),
-            buildIdea(mode, 2, "Team decision aging nudges", "Governance", "Approved", "Jordan Lee", avatarJordan),
-            buildIdea(mode, 3, "Team intake triage assistant", "Intake", "Review", "Maya Chen", avatarMaya),
-          ]
-        : [
-            buildIdea(mode, 1, "Org AI governance classifier", "Governance", "Approved", "Priya Shah", avatarPriya),
-            buildIdea(mode, 2, "Portfolio health narrative builder", "Planning", "Pilot", "Jordan Lee", avatarJordan),
-          buildIdea(mode, 3, "Enterprise artifact retention monitor", "Artifacts", "New", "Taylor Kim", avatarTaylor),
-        ];
-  const projectIdeas = projects.flatMap((project, index) => [
-    buildIdea(mode, index + 10, `${project.name} decision summarizer`, "Governance", "Review", mode === "Org" ? "Priya Shah" : "Taylor Kim", mode === "Org" ? avatarPriya : avatarTaylor, project),
-    buildIdea(mode, index + 20, `${project.name} artifact gap detector`, "Artifacts", "Pilot", "Jordan Lee", avatarJordan, project),
-  ]);
-  const ideas = [...workspaceIdeas, ...projectIdeas];
-  const artifacts = [
-    ...buildArtifacts(mode),
-    ...projects.flatMap((project) => buildArtifacts(mode, project)),
-  ];
-  const workspaceDecisions: Decision[] = [
-    { id: `${scopeByMode[mode]}-workspace-decision-1`, projectId: null, title: `${workspaceModeLabel(mode)} scope owner confirmed`, status: "Open", owner: mode === "Org" ? "Priya Shah" : "Alex Morgan", due: "Due Jun 14" },
-    { id: `${scopeByMode[mode]}-workspace-decision-2`, projectId: null, title: `${workspaceModeLabel(mode)} artifact retention path`, status: mode === "Personal" ? "Done" : "Blocked", owner: "Jordan Lee", due: mode === "Personal" ? "Done" : "Due Jun 12" },
-  ];
-  const projectDecisions: Decision[] = projects.map((project, index) => ({
-    id: `${project.id}-decision-${index + 1}`,
-    projectId: project.id,
-    title: `${project.name} delivery decision`,
-    status: project.status === "Watch" ? "Blocked" : "Open",
-    owner: mode === "Org" ? "Strategy Office" : "Maya Chen",
-    due: `Due Jun ${14 + index}`,
-  }));
-  const workspaceApprovals: Approval[] = [
-    { id: `${scopeByMode[mode]}-workspace-approval-1`, projectId: null, title: `${workspaceModeLabel(mode)} workspace publishing`, owner: mode === "Org" ? "Strategy Office" : "Taylor Kim", due: "Due Jun 15", status: "Needed" },
-    { id: `${scopeByMode[mode]}-workspace-approval-2`, projectId: null, title: `${workspaceModeLabel(mode)} data visibility`, owner: "Priya Shah", due: "Requested", status: "Requested" },
-  ];
-  const projectApprovals: Approval[] = projects.map((project, index) => ({
-    id: `${project.id}-approval-${index + 1}`,
-    projectId: project.id,
-    title: `${project.name} artifact approval`,
-    owner: mode === "Personal" ? "Alex Morgan" : "Taylor Kim",
-    due: `Due Jun ${15 + index}`,
-    status: project.status === "Planning" ? "Needed" : "Requested",
-  }));
-  const workspaceTasks: Task[] = [
-    { id: `${scopeByMode[mode]}-workspace-task-1`, projectId: null, title: `Review ${workspaceModeLabel(mode).toLowerCase()} project chat coverage`, owner: "Maya Chen", source: seed.projectChatsHeading, status: "Open" },
-    { id: `${scopeByMode[mode]}-workspace-task-2`, projectId: null, title: `Refresh ${workspaceModeLabel(mode).toLowerCase()} artifacts`, owner: "Alex Morgan", source: "Artifacts", status: "In progress" },
-  ];
-  const projectTasks: Task[] = projects.map((project, index) => ({
-    id: `${project.id}-task-${index + 1}`,
-    projectId: project.id,
-    title: `${project.name} follow-up from project chat`,
-    owner: index % 2 === 0 ? "Maya Chen" : "Jordan Lee",
-    source: project.projectChats[0]?.title ?? seed.projectChatsHeading,
-    status: project.status === "Active" ? "In progress" : "Open",
-  }));
 
   return {
     scope: scopeByMode[mode],
@@ -925,21 +710,18 @@ function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
     projectChatsHeading: seed.projectChatsHeading,
     workspaceChatsHeading: seed.workspaceChatsHeading,
     unassignedProjectLabel: seed.unassignedProjectLabel,
-    projects,
-    workspaceChats: seed.workspaceChats,
-    ideas,
-    conversations,
-    artifacts,
-    decisions: [...workspaceDecisions, ...projectDecisions],
-    approvals: [...workspaceApprovals, ...projectApprovals],
-    tasks: [...workspaceTasks, ...projectTasks],
-    pinnedIdeaIds: ideas.slice(0, 2).map((idea) => idea.id),
+    projects: [],
+    workspaceChats: [],
+    ideas: [],
+    conversations: {},
+    artifacts: [],
+    decisions: [],
+    approvals: [],
+    tasks: [],
+    pinnedIdeaIds: [],
     accessLevel: "Read / Write",
-    activity: [
-      { id: `${scopeByMode[mode]}-activity-1`, label: `${workspaceModeLabel(mode)} scope loaded`, detail: "Data is isolated from the other workspaces.", time: "9:21 AM" },
-      { id: `${scopeByMode[mode]}-activity-2`, label: "R2 artifact metadata ready", detail: `${buildArtifacts(mode).length} dummy objects mapped.`, time: "Yesterday" },
-    ],
-    updatedAt: "Jun 11, 2026 9:21 AM",
+    activity: [],
+    updatedAt: "",
   };
 }
 
@@ -1088,6 +870,59 @@ async function generateArtifactTitle(seedTitle: string, rows: ExportTable["rows"
     return generated || fallbackArtifactTitle(seedTitle, rows);
   } catch {
     return fallbackArtifactTitle(seedTitle, rows);
+  }
+}
+
+function fallbackWorkflowSuggestionTitle(kind: string, title: string) {
+  return title
+    .replace(/\s+/g, " ")
+    .replace(/^[-*•\s]+/, "")
+    .replace(/\b(task|approval|decision|idea)\s*[:#]\s*/i, "")
+    .trim()
+    .split(" ")
+    .slice(0, kind === "idea" ? 9 : 11)
+    .join(" ")
+    .slice(0, 120) || `${kind} suggestion`;
+}
+
+async function generateWorkflowSuggestionTitle(kind: "approval" | "decision" | "idea" | "task", title: string) {
+  const fallback = fallbackWorkflowSuggestionTitle(kind, title);
+  const ai = (env as Env).AI;
+  if (!ai) return fallback;
+  try {
+    const result = await withAiTimeout(
+      (signal) => runTrackedWorkersAiWithGateway(
+        ai,
+        lightweightChatTitleModelId,
+        {
+          messages: [
+            {
+              role: "system",
+              content: [
+                `Rewrite this ${kind} item as a concise list title.`,
+                "Return only the title, no quotes, no punctuation at the end.",
+                "Keep the concrete noun, owner object, or deliverable. Use 4 to 10 words.",
+              ].join(" "),
+            },
+            { role: "user", content: title.slice(0, 1200) },
+          ],
+          max_completion_tokens: 32,
+          temperature: 0.1,
+        },
+        {
+          feature: `workflow-${kind}-title`,
+          signal,
+          metadata: {
+            feature: `workflow-${kind}-title`,
+            model: lightweightChatTitleModelId,
+          },
+        },
+      ),
+      3500,
+    );
+    return fallbackWorkflowSuggestionTitle(kind, extractAiResponse(result)) || fallback;
+  } catch {
+    return fallback;
   }
 }
 
@@ -1588,21 +1423,23 @@ async function runGemmaChat({
 }
 
 function cycleDecisionStatus(status: Decision["status"]): Decision["status"] {
-  if (status === "Open") return "Done";
-  if (status === "Blocked") return "Open";
-  return "Open";
+  return status === "Completed" ? "Not Completed" : "Completed";
 }
 
 function cycleApprovalStatus(status: Approval["status"]): Approval["status"] {
-  if (status === "Needed") return "Requested";
-  if (status === "Requested") return "Approved";
-  return "Needed";
+  if (status === "Not Reviewed") return "Reviewing";
+  if (status === "Reviewing") return "Approved";
+  if (status === "Approved") return "Not Approved";
+  return "Not Reviewed";
 }
 
 function cycleTaskStatus(status: Task["status"]): Task["status"] {
-  if (status === "Open") return "In progress";
-  if (status === "In progress") return "Done";
-  return "Open";
+  return status === "Completed" ? "Open" : "Completed";
+}
+
+function titleMatchesTask(left: string, right: string) {
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return normalize(left) === normalize(right);
 }
 
 function impactScore(value: AddIdeaInput["impact"]) {
@@ -1679,6 +1516,7 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
   for (const row of rows) {
     const mode = modeByWorkspaceId.get(row.workspaceId);
     if (!mode) continue;
+    if (isSeedArtifactRow(row)) continue;
     const parsedPreview = parseArtifactPreview(row.previewJson);
     const artifact: ArtifactVersion = {
       id: row.id,
@@ -1721,6 +1559,218 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
   return root;
 }
 
+async function mergePersistedIdeas(root: PmoWorkspaceState) {
+  let rows: Array<{
+    id: string;
+    workspaceId: string;
+    projectId: string | null;
+    title: string;
+    originalText: string;
+    status: IdeaStatus;
+    category: string;
+    owner: string;
+    avatar: string;
+    created: string;
+    votes: number;
+    impact: number;
+    effort: number;
+    confidence: number;
+    summary: string;
+    nextStep: string;
+    tagsJson: string;
+    metricsJson: string;
+    threadJson: string;
+    pinned: boolean | number;
+  }>;
+  try {
+    const result = await getDb()
+      .prepare(
+        `SELECT id,
+                workspace_id as workspaceId,
+                project_id as projectId,
+                title,
+                original_text as originalText,
+                status,
+                category,
+                owner,
+                avatar,
+                created_label as created,
+                votes,
+                impact,
+                effort,
+                confidence,
+                summary,
+                next_step as nextStep,
+                tags_json as tagsJson,
+                metrics_json as metricsJson,
+                thread_json as threadJson,
+                pinned
+         FROM ideas`,
+      )
+      .all<typeof rows[number]>();
+    rows = result.results ?? [];
+  } catch {
+    return root;
+  }
+
+  for (const row of rows) {
+    const mode = modeForWorkspaceId(row.workspaceId);
+    if (!mode) continue;
+    if (isSeedIdeaRow(row)) continue;
+    const workspace = root.workspaces[mode];
+    const idea: Idea = {
+      id: row.id,
+      projectId: row.projectId,
+      title: row.title,
+      originalText: row.originalText || undefined,
+      status: row.status,
+      category: row.category,
+      owner: row.owner,
+      avatar: row.avatar,
+      created: row.created,
+      votes: row.votes,
+      impact: row.impact,
+      effort: row.effort,
+      confidence: row.confidence,
+      summary: row.summary,
+      nextStep: row.nextStep,
+      tags: parseStringArray(row.tagsJson),
+      metrics: parseStringArray(row.metricsJson),
+      thread: parseStringArray(row.threadJson),
+    };
+    workspace.ideas = [idea, ...workspace.ideas.filter((item) => item.id !== idea.id)];
+    if (row.pinned && !workspace.pinnedIdeaIds.includes(idea.id)) {
+      workspace.pinnedIdeaIds = [idea.id, ...workspace.pinnedIdeaIds];
+    }
+  }
+  return root;
+}
+
+async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
+  let rows: Array<{
+    id: string;
+    workspaceId: string;
+    kind: "approval" | "decision" | "task";
+    projectId: string | null;
+    title: string;
+    originalText: string;
+    owner: string;
+    due: string;
+    source: string | null;
+    status: string;
+  }>;
+  try {
+    const result = await getDb()
+      .prepare(
+        `SELECT id,
+                workspace_id as workspaceId,
+                kind,
+                project_id as projectId,
+                title,
+                original_text as originalText,
+                owner,
+                due,
+                source,
+                status
+         FROM workspace_actions`,
+      )
+      .all<typeof rows[number]>();
+    rows = result.results ?? [];
+  } catch {
+    return root;
+  }
+
+  for (const row of rows) {
+    const mode = modeForWorkspaceId(row.workspaceId);
+    if (!mode) continue;
+    if (isSeedWorkflowActionRow(row)) continue;
+    const workspace = root.workspaces[mode];
+    if (row.kind === "task") {
+      const task: Task = {
+        id: row.id,
+        projectId: row.projectId,
+        title: row.title,
+        originalText: row.originalText || undefined,
+        owner: row.owner,
+        source: row.source || "VertexAI suggestion",
+        status: row.status === "Completed" ? "Completed" : "Open",
+      };
+      workspace.tasks = [task, ...workspace.tasks.filter((item) => item.id !== task.id)];
+    } else if (row.kind === "approval") {
+      const status = ["Not Reviewed", "Reviewing", "Approved", "Not Approved"].includes(row.status)
+        ? row.status as Approval["status"]
+        : "Not Reviewed";
+      const approval: Approval = {
+        id: row.id,
+        projectId: row.projectId,
+        title: row.title,
+        originalText: row.originalText || undefined,
+        owner: row.owner,
+        due: row.due,
+        status,
+      };
+      workspace.approvals = [approval, ...workspace.approvals.filter((item) => item.id !== approval.id)];
+    } else {
+      const decision: Decision = {
+        id: row.id,
+        projectId: row.projectId,
+        title: row.title,
+        originalText: row.originalText || undefined,
+        owner: row.owner,
+        due: row.due,
+        status: row.status === "Completed" ? "Completed" : "Not Completed",
+      };
+      workspace.decisions = [decision, ...workspace.decisions.filter((item) => item.id !== decision.id)];
+    }
+  }
+  return root;
+}
+
+async function mergePersistedWorkspace(root: PmoWorkspaceState) {
+  const withArtifacts = await mergePersistedArtifacts(root);
+  for (const workspace of Object.values(withArtifacts.workspaces)) {
+    workspace.ideas = [];
+    workspace.pinnedIdeaIds = [];
+    workspace.decisions = [];
+    workspace.approvals = [];
+    workspace.tasks = [];
+  }
+  return mergePersistedWorkflowActions(await mergePersistedIdeas(withArtifacts));
+}
+
+function parseStringArray(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isSeedArtifactRow(row: { id: string; r2Key: string; summary: string; owner: string }) {
+  return row.id.startsWith("artifact-personal-")
+    || row.id.startsWith("artifact-team-")
+    || row.id.startsWith("artifact-org-")
+    || row.summary.toLowerCase().includes("dummy")
+    || /^(personal|team|org)\/artifacts\//.test(row.r2Key);
+}
+
+function isSeedIdeaRow(row: { id: string; title: string }) {
+  return row.id.startsWith("personal-idea-")
+    || row.id.startsWith("team-idea-")
+    || row.id.startsWith("org-idea-");
+}
+
+function isSeedWorkflowActionRow(row: { id: string; title: string }) {
+  return row.id.startsWith("personal-task-")
+    || row.id.startsWith("team-task-")
+    || row.id.startsWith("org-task-")
+    || row.id.startsWith("personal-decision-")
+    || row.id.startsWith("team-decision-")
+    || row.id.startsWith("org-decision-")
+    || row.title.toLowerCase().includes("dummy");
+}
+
 function parseArtifactPreview(previewJsonText: string): {
   preview: string[];
   previewJson?: JsonValue;
@@ -1761,8 +1811,87 @@ function buildArtifactVersionHistory(latest: ArtifactVersion, artifactsById: Map
 }
 
 export const fetchPmoWorkspace = createServerFn({ method: "GET" }).handler(async () => {
-  return mergePersistedArtifacts(clone(getMutableRoot()));
+  return mergePersistedWorkspace(clone(getMutableRoot()));
 });
+
+async function persistIdea(mode: WorkspaceMode, idea: Idea, pinned: boolean) {
+  await getDb()
+    .prepare(
+      `INSERT OR REPLACE INTO ideas (
+         id, workspace_id, project_id, title, original_text, status, category, owner, avatar,
+         created_label, votes, impact, effort, confidence, summary, next_step,
+         tags_json, metrics_json, thread_json, pinned
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      idea.id,
+      workspaceIdForMode(mode),
+      idea.projectId,
+      idea.title,
+      idea.originalText ?? "",
+      idea.status,
+      idea.category,
+      idea.owner,
+      idea.avatar,
+      idea.created,
+      idea.votes,
+      idea.impact,
+      idea.effort,
+      idea.confidence,
+      idea.summary,
+      idea.nextStep,
+      JSON.stringify(idea.tags),
+      JSON.stringify(idea.metrics),
+      JSON.stringify(idea.thread),
+      pinned ? 1 : 0,
+    )
+    .run();
+}
+
+async function persistWorkflowAction(
+  mode: WorkspaceMode,
+  kind: "approval" | "decision" | "task",
+  item: Approval | Decision | Task,
+) {
+  await getDb()
+    .prepare(
+      `INSERT OR REPLACE INTO workspace_actions (
+         id, workspace_id, kind, project_id, title, original_text, owner, due, source, status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      item.id,
+      workspaceIdForMode(mode),
+      kind,
+      item.projectId,
+      item.title,
+      item.originalText ?? "",
+      item.owner,
+      kind === "task" ? "" : (item as Approval | Decision).due,
+      kind === "task" ? (item as Task).source : null,
+      item.status,
+    )
+    .run();
+}
+
+async function updatePersistedWorkflowActionStatus(
+  mode: WorkspaceMode,
+  kind: "approval" | "decision" | "task",
+  id: string,
+  status: string,
+) {
+  await getDb()
+    .prepare("UPDATE workspace_actions SET status = ? WHERE id = ? AND workspace_id = ? AND kind = ?")
+    .bind(status, id, workspaceIdForMode(mode), kind)
+    .run();
+}
+
+async function deletePersistedWorkflowAction(mode: WorkspaceMode, kind: "approval" | "decision" | "task", id: string) {
+  await getDb()
+    .prepare("DELETE FROM workspace_actions WHERE id = ? AND workspace_id = ? AND kind = ?")
+    .bind(id, workspaceIdForMode(mode), kind)
+    .run();
+}
 
 async function requireWorkspaceEditor() {
   const request = getRequest();
@@ -1986,14 +2115,14 @@ export const addIdea = createServerFn({ method: "POST" })
     const user = await requireWorkspaceEditor();
     const mode = data.mode ?? "Personal";
     const workspace = getMutableWorkspace(mode);
-    const project = workspace.projects.find((item) => item.id === data.projectId);
     const title = data.title.trim();
-    if (!title) return clone(getMutableRoot());
+    if (!title) return mergePersistedWorkspace(clone(getMutableRoot()));
 
     const nextIdea: Idea = {
       id: createId(`${workspace.scope}-idea`),
-      projectId: project?.id ?? null,
+      projectId: data.projectId ?? null,
       title,
+      originalText: data.summary.trim() || title,
       status: data.status,
       category: data.category,
       owner: "Alex Morgan",
@@ -2003,15 +2132,16 @@ export const addIdea = createServerFn({ method: "POST" })
       impact: impactScore(data.impact),
       effort: data.impact === "High" ? 52 : data.impact === "Medium" ? 42 : 30,
       confidence: data.impact === "High" ? 78 : 66,
-      summary: data.summary.trim() || `New ${project?.name ?? workspaceModeLabel(mode).toLowerCase()} improvement idea captured from the current scope.`,
+      summary: data.summary.trim() || `New ${workspaceModeLabel(mode).toLowerCase()} improvement idea captured from the current scope.`,
       nextStep: "Confirm owner, evidence source, and governance fit.",
-      tags: [data.category, data.impact, workspaceModeLabel(mode), project?.name ?? "General"],
+      tags: [data.category, data.impact, workspaceModeLabel(mode), data.projectId ? "Project" : "General"],
       metrics: ["Owner confirmation needed", "Evidence source pending", "Governance review pending"],
       thread: ["Idea captured through Vertex AI Command Center.", "Assistant prepared initial impact and follow-up fields."],
     };
 
     workspace.ideas = [nextIdea, ...workspace.ideas];
     workspace.pinnedIdeaIds = [nextIdea.id, ...workspace.pinnedIdeaIds];
+    await persistIdea(mode, nextIdea, true);
     recordActivity(workspace, "Idea added", `${nextIdea.title} entered ${workspaceModeLabel(mode)}.`);
     await recordWorkspaceMutation({
       entity: "idea",
@@ -2023,7 +2153,7 @@ export const addIdea = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return clone(getMutableRoot());
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const updateIdeaStatus = createServerFn({ method: "POST" })
@@ -2033,6 +2163,10 @@ export const updateIdeaStatus = createServerFn({ method: "POST" })
     const workspace = getMutableWorkspace(data.mode);
     workspace.ideas = workspace.ideas.map((idea) => (idea.id === data.id ? { ...idea, status: data.status } : idea));
     const idea = workspace.ideas.find((item) => item.id === data.id);
+    await getDb()
+      .prepare("UPDATE ideas SET status = ? WHERE id = ? AND workspace_id = ?")
+      .bind(data.status, data.id, workspaceIdForMode(data.mode))
+      .run();
     recordActivity(workspace, "Idea status changed", `${idea?.title ?? "Idea"} moved to ${data.status}.`);
     await recordWorkspaceMutation({
       entity: "idea",
@@ -2044,7 +2178,7 @@ export const updateIdeaStatus = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return clone(getMutableRoot());
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const voteIdea = createServerFn({ method: "POST" })
@@ -2054,6 +2188,10 @@ export const voteIdea = createServerFn({ method: "POST" })
     const workspace = getMutableWorkspace(data.mode);
     workspace.ideas = workspace.ideas.map((idea) => (idea.id === data.id ? { ...idea, votes: idea.votes + 1 } : idea));
     const idea = workspace.ideas.find((item) => item.id === data.id);
+    await getDb()
+      .prepare("UPDATE ideas SET votes = votes + 1 WHERE id = ? AND workspace_id = ?")
+      .bind(data.id, workspaceIdForMode(data.mode))
+      .run();
     recordActivity(workspace, "Idea vote added", `${idea?.title ?? "Idea"} gained a vote.`);
     await recordWorkspaceMutation({
       entity: "idea",
@@ -2065,7 +2203,7 @@ export const voteIdea = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return clone(getMutableRoot());
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const toggleIdeaPin = createServerFn({ method: "POST" })
@@ -2076,6 +2214,10 @@ export const toggleIdeaPin = createServerFn({ method: "POST" })
     const isPinned = workspace.pinnedIdeaIds.includes(data.id);
     workspace.pinnedIdeaIds = isPinned ? workspace.pinnedIdeaIds.filter((id) => id !== data.id) : [data.id, ...workspace.pinnedIdeaIds];
     const idea = workspace.ideas.find((item) => item.id === data.id);
+    await getDb()
+      .prepare("UPDATE ideas SET pinned = ? WHERE id = ? AND workspace_id = ?")
+      .bind(isPinned ? 0 : 1, data.id, workspaceIdForMode(data.mode))
+      .run();
     recordActivity(workspace, isPinned ? "Idea unpinned" : "Idea pinned", `${idea?.title ?? "Idea"} workspace pin changed.`);
     await recordWorkspaceMutation({
       entity: "idea",
@@ -2087,7 +2229,7 @@ export const toggleIdeaPin = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return clone(getMutableRoot());
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const toggleArtifactPin = createServerFn({ method: "POST" })
@@ -2125,7 +2267,7 @@ export const toggleArtifactPin = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return mergePersistedArtifacts(clone(getMutableRoot()));
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const deleteArtifact = createServerFn({ method: "POST" })
@@ -2304,7 +2446,7 @@ export const restoreArtifactVersion = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return mergePersistedArtifacts(clone(getMutableRoot()));
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const saveTableArtifact = createServerFn({ method: "POST" })
@@ -2430,7 +2572,7 @@ export const saveTableArtifact = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    const mergedWorkspace = await mergePersistedArtifacts(clone(getMutableRoot()));
+    const mergedWorkspace = await mergePersistedWorkspace(clone(getMutableRoot()));
     return { workspace: mergedWorkspace, artifact };
   });
 
@@ -2459,6 +2601,7 @@ export const toggleDecisionStatus = createServerFn({ method: "POST" })
     const workspace = getMutableWorkspace(data.mode);
     workspace.decisions = workspace.decisions.map((decision) => (decision.id === data.id ? { ...decision, status: cycleDecisionStatus(decision.status) } : decision));
     const decision = workspace.decisions.find((item) => item.id === data.id);
+    if (decision) await updatePersistedWorkflowActionStatus(data.mode, "decision", data.id, decision.status);
     recordActivity(workspace, "Decision updated", `${decision?.title ?? "Decision"} is now ${decision?.status ?? "updated"}.`);
     await recordWorkspaceMutation({
       entity: "decision",
@@ -2470,7 +2613,7 @@ export const toggleDecisionStatus = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return clone(getMutableRoot());
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const toggleApprovalStatus = createServerFn({ method: "POST" })
@@ -2480,6 +2623,7 @@ export const toggleApprovalStatus = createServerFn({ method: "POST" })
     const workspace = getMutableWorkspace(data.mode);
     workspace.approvals = workspace.approvals.map((approval) => (approval.id === data.id ? { ...approval, status: cycleApprovalStatus(approval.status) } : approval));
     const approval = workspace.approvals.find((item) => item.id === data.id);
+    if (approval) await updatePersistedWorkflowActionStatus(data.mode, "approval", data.id, approval.status);
     recordActivity(workspace, "Approval updated", `${approval?.title ?? "Approval"} is now ${approval?.status ?? "updated"}.`);
     await recordWorkspaceMutation({
       entity: "approval",
@@ -2491,7 +2635,7 @@ export const toggleApprovalStatus = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return clone(getMutableRoot());
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const toggleTaskStatus = createServerFn({ method: "POST" })
@@ -2501,6 +2645,7 @@ export const toggleTaskStatus = createServerFn({ method: "POST" })
     const workspace = getMutableWorkspace(data.mode);
     workspace.tasks = workspace.tasks.map((task) => (task.id === data.id ? { ...task, status: cycleTaskStatus(task.status) } : task));
     const task = workspace.tasks.find((item) => item.id === data.id);
+    if (task) await updatePersistedWorkflowActionStatus(data.mode, "task", data.id, task.status);
     recordActivity(workspace, "Task updated", `${task?.title ?? "Task"} is now ${task?.status ?? "updated"}.`);
     await recordWorkspaceMutation({
       entity: "task",
@@ -2512,7 +2657,318 @@ export const toggleTaskStatus = createServerFn({ method: "POST" })
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
-    return clone(getMutableRoot());
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const updateTaskStatus = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string; status: Task["status"] }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    workspace.tasks = workspace.tasks.map((task) => (task.id === data.id ? { ...task, status: data.status } : task));
+    const task = workspace.tasks.find((item) => item.id === data.id);
+    await updatePersistedWorkflowActionStatus(data.mode, "task", data.id, data.status);
+    recordActivity(workspace, "Task status changed", `${task?.title ?? "Task"} moved to ${data.status}.`);
+    await recordWorkspaceMutation({
+      entity: "task",
+      entityId: data.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "update",
+      projectId: task?.projectId ?? null,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const updateApprovalStatus = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string; status: Approval["status"] }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    workspace.approvals = workspace.approvals.map((approval) => (approval.id === data.id ? { ...approval, status: data.status } : approval));
+    const approval = workspace.approvals.find((item) => item.id === data.id);
+    await updatePersistedWorkflowActionStatus(data.mode, "approval", data.id, data.status);
+    recordActivity(workspace, "Approval status changed", `${approval?.title ?? "Approval"} moved to ${data.status}.`);
+    await recordWorkspaceMutation({
+      entity: "approval",
+      entityId: data.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "update",
+      projectId: approval?.projectId ?? null,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const updateDecisionStatus = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string; status: Decision["status"] }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    workspace.decisions = workspace.decisions.map((decision) => (decision.id === data.id ? { ...decision, status: data.status } : decision));
+    const decision = workspace.decisions.find((item) => item.id === data.id);
+    await updatePersistedWorkflowActionStatus(data.mode, "decision", data.id, data.status);
+    recordActivity(workspace, "Decision status changed", `${decision?.title ?? "Decision"} moved to ${data.status}.`);
+    await recordWorkspaceMutation({
+      entity: "decision",
+      entityId: data.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "update",
+      projectId: decision?.projectId ?? null,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const createTaskFromSuggestion = createServerFn({ method: "POST" })
+  .validator((data: CreateTaskInput) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const title = (await generateWorkflowSuggestionTitle("task", data.title)).slice(0, 140);
+    if (!title) throw new Error("Task title is required.");
+    const workspace = getMutableWorkspace(data.mode);
+    const existingTask = workspace.tasks.find((task) => titleMatchesTask(task.title, title) && (data.projectId ?? null) === task.projectId);
+    if (existingTask) return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), task: existingTask };
+
+    const task: Task = {
+      id: createId(`${scopeByMode[data.mode]}-llm-task`),
+      projectId: data.projectId ?? null,
+      title,
+      originalText: data.originalText?.trim().slice(0, 1000) || data.title.trim().slice(0, 1000),
+      owner: data.owner?.trim().slice(0, 80) || "You",
+      source: data.source?.trim().slice(0, 96) || "VertexAI suggestion",
+      status: "Open",
+    };
+    workspace.tasks = [task, ...workspace.tasks];
+    await persistWorkflowAction(data.mode, "task", task);
+    recordActivity(workspace, "Task created", `${task.title} was added from VertexAI suggestions.`);
+    await recordWorkspaceMutation({
+      entity: "task",
+      entityId: task.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "insert",
+      projectId: task.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), task };
+  });
+
+export const createApprovalFromSuggestion = createServerFn({ method: "POST" })
+  .validator((data: CreateWorkflowSuggestionInput) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const title = (await generateWorkflowSuggestionTitle("approval", data.title)).slice(0, 140);
+    if (!title) throw new Error("Approval title is required.");
+    const workspace = getMutableWorkspace(data.mode);
+    const existingApproval = workspace.approvals.find((approval) => titleMatchesTask(approval.title, title) && (data.projectId ?? null) === approval.projectId);
+    if (existingApproval) return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), approval: existingApproval };
+    const approval: Approval = {
+      id: createId(`${scopeByMode[data.mode]}-llm-approval`),
+      projectId: data.projectId ?? null,
+      title,
+      originalText: data.originalText?.trim().slice(0, 1000) || data.title.trim().slice(0, 1000),
+      owner: data.owner?.trim().slice(0, 80) || "You",
+      due: "Requested",
+      status: "Not Reviewed",
+    };
+    workspace.approvals = [approval, ...workspace.approvals];
+    await persistWorkflowAction(data.mode, "approval", approval);
+    recordActivity(workspace, "Approval created", `${approval.title} was added from VertexAI suggestions.`);
+    await recordWorkspaceMutation({
+      entity: "approval",
+      entityId: approval.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "insert",
+      projectId: approval.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), approval };
+  });
+
+export const createDecisionFromSuggestion = createServerFn({ method: "POST" })
+  .validator((data: CreateWorkflowSuggestionInput) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const title = (await generateWorkflowSuggestionTitle("decision", data.title)).slice(0, 140);
+    if (!title) throw new Error("Decision title is required.");
+    const workspace = getMutableWorkspace(data.mode);
+    const existingDecision = workspace.decisions.find((decision) => titleMatchesTask(decision.title, title) && (data.projectId ?? null) === decision.projectId);
+    if (existingDecision) return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), decision: existingDecision };
+    const decision: Decision = {
+      id: createId(`${scopeByMode[data.mode]}-llm-decision`),
+      projectId: data.projectId ?? null,
+      title,
+      originalText: data.originalText?.trim().slice(0, 1000) || data.title.trim().slice(0, 1000),
+      owner: data.owner?.trim().slice(0, 80) || "You",
+      due: "Due soon",
+      status: "Not Completed",
+    };
+    workspace.decisions = [decision, ...workspace.decisions];
+    await persistWorkflowAction(data.mode, "decision", decision);
+    recordActivity(workspace, "Decision created", `${decision.title} was added from VertexAI suggestions.`);
+    await recordWorkspaceMutation({
+      entity: "decision",
+      entityId: decision.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "insert",
+      projectId: decision.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), decision };
+  });
+
+export const createIdeaFromSuggestion = createServerFn({ method: "POST" })
+  .validator((data: CreateWorkflowSuggestionInput) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const title = (await generateWorkflowSuggestionTitle("idea", data.title)).slice(0, 120);
+    if (!title) throw new Error("Idea title is required.");
+    const workspace = getMutableWorkspace(data.mode);
+    const existingIdea = workspace.ideas.find((idea) => titleMatchesTask(idea.title, title) && (data.projectId ?? null) === idea.projectId);
+    if (existingIdea) return mergePersistedWorkspace(clone(getMutableRoot()));
+    const idea: Idea = {
+      id: createId(`${workspace.scope}-llm-idea`),
+      projectId: data.projectId ?? null,
+      title,
+      originalText: data.originalText?.trim().slice(0, 1000) || data.title.trim().slice(0, 1000),
+      status: "Not Started",
+      category: "Workflow",
+      owner: data.owner?.trim().slice(0, 80) || "You",
+      avatar: avatarAlex,
+      created: "Just now",
+      votes: 1,
+      impact: impactScore("Medium"),
+      effort: 42,
+      confidence: 66,
+      summary: data.source ? `Captured from ${data.source}.` : "Captured from VertexAI suggestions.",
+      nextStep: "Confirm owner, evidence source, and governance fit.",
+      tags: ["Workflow", "Medium", workspaceModeLabel(data.mode), data.projectId ? "Project" : "General"],
+      metrics: ["Owner confirmation needed", "Evidence source pending", "Governance review pending"],
+      thread: ["Idea captured through Vertex AI Command Center.", "Assistant prepared initial impact and follow-up fields."],
+    };
+    workspace.ideas = [idea, ...workspace.ideas];
+    workspace.pinnedIdeaIds = [idea.id, ...workspace.pinnedIdeaIds];
+    await persistIdea(data.mode, idea, true);
+    recordActivity(workspace, "Idea created", `${idea.title} was added from VertexAI suggestions.`);
+    await recordWorkspaceMutation({
+      entity: "idea",
+      entityId: idea.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "insert",
+      projectId: idea.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const removeSuggestedTask = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    const task = workspace.tasks.find((item) => item.id === data.id);
+    if (!task) return mergePersistedWorkspace(clone(getMutableRoot()));
+    workspace.tasks = workspace.tasks.filter((item) => item.id !== data.id);
+    await deletePersistedWorkflowAction(data.mode, "task", data.id);
+    recordActivity(workspace, "Task removed", `${task.title} was removed from tasks.`);
+    await recordWorkspaceMutation({
+      entity: "task",
+      entityId: data.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "delete",
+      projectId: task.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const removeSuggestedDecision = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    const decision = workspace.decisions.find((item) => item.id === data.id);
+    if (!decision) return mergePersistedWorkspace(clone(getMutableRoot()));
+    workspace.decisions = workspace.decisions.filter((item) => item.id !== data.id);
+    await deletePersistedWorkflowAction(data.mode, "decision", data.id);
+    recordActivity(workspace, "Decision removed", `${decision.title} was removed from decisions.`);
+    await recordWorkspaceMutation({
+      entity: "decision",
+      entityId: data.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "delete",
+      projectId: decision.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const removeSuggestedApproval = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    const approval = workspace.approvals.find((item) => item.id === data.id);
+    if (!approval) return mergePersistedWorkspace(clone(getMutableRoot()));
+    workspace.approvals = workspace.approvals.filter((item) => item.id !== data.id);
+    await deletePersistedWorkflowAction(data.mode, "approval", data.id);
+    recordActivity(workspace, "Approval removed", `${approval.title} was removed from approvals.`);
+    await recordWorkspaceMutation({
+      entity: "approval",
+      entityId: data.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "delete",
+      projectId: approval.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
+  });
+
+export const removeSuggestedIdea = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    const idea = workspace.ideas.find((item) => item.id === data.id);
+    if (!idea) return mergePersistedWorkspace(clone(getMutableRoot()));
+    workspace.ideas = workspace.ideas.filter((item) => item.id !== data.id);
+    workspace.pinnedIdeaIds = workspace.pinnedIdeaIds.filter((id) => id !== data.id);
+    await getDb()
+      .prepare("DELETE FROM ideas WHERE id = ? AND workspace_id = ?")
+      .bind(data.id, workspaceIdForMode(data.mode))
+      .run();
+    recordActivity(workspace, "Idea removed", `${idea.title} was removed from ideas.`);
+    await recordWorkspaceMutation({
+      entity: "idea",
+      entityId: data.id,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "delete",
+      projectId: idea.projectId,
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedWorkspace(clone(getMutableRoot()));
   });
 
 export const updateAccessLevel = createServerFn({ method: "POST" })

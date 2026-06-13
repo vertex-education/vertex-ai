@@ -1,7 +1,8 @@
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { CheckCircle2, ClipboardCheck, ClipboardList } from "lucide-react";
+import { Circle, ClipboardCheck, GitPullRequest, Lightbulb, MoreHorizontal, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -36,6 +37,7 @@ type CodePayload = {
 export type WorkflowApprovalAction = {
   id: string;
   title: string;
+  originalText?: string;
   owner: string;
   due: string;
   status: string;
@@ -45,23 +47,71 @@ export type WorkflowApprovalAction = {
 export type WorkflowTaskAction = {
   id: string;
   title: string;
+  originalText?: string;
   owner: string;
   source: string;
   status: string;
   clientStatus?: "pending";
 };
 
+export type WorkflowIdeaAction = {
+  id: string;
+  title: string;
+  originalText?: string;
+  status: string;
+  category: string;
+  owner: string;
+  clientStatus?: "pending";
+};
+
+export type WorkflowDecisionAction = {
+  id: string;
+  title: string;
+  originalText?: string;
+  owner: string;
+  due: string;
+  status: string;
+  clientStatus?: "pending";
+};
+
 export type WorkflowActionContext = {
   approvals?: WorkflowApprovalAction[];
+  decisions?: WorkflowDecisionAction[];
+  ideas?: WorkflowIdeaAction[];
   tasks?: WorkflowTaskAction[];
   canEdit?: boolean;
   pendingApproval?: boolean;
   pendingTask?: boolean;
+  pendingTaskTitle?: string;
+  pendingTaskRemovalId?: string;
+  activeMode?: "Personal" | "Team" | "Org";
+  activeProjectId?: string | null;
+  sourceTitle?: string;
+  onCreateTask?: (input: {
+    mode: "Personal" | "Team" | "Org";
+    projectId?: string | null;
+    title: string;
+    originalText?: string;
+    owner?: string;
+    source?: string;
+  }) => void;
+  onCreateApproval?: (input: WorkflowSuggestionInput) => void;
+  onCreateDecision?: (input: WorkflowSuggestionInput) => void;
+  onCreateIdea?: (input: WorkflowSuggestionInput) => void;
   onToggleApproval?: (id: string) => void;
   onToggleTask?: (id: string) => void;
 };
 
-type WorkflowActionKind = "approval" | "task";
+export type WorkflowSuggestionInput = {
+  mode: "Personal" | "Team" | "Org";
+  projectId?: string | null;
+  title: string;
+  originalText?: string;
+  owner?: string;
+  source?: string;
+};
+
+type WorkflowActionKind = "approval" | "decision" | "idea" | "task";
 
 type ParsedWorkflowAction = {
   kind: WorkflowActionKind;
@@ -261,28 +311,35 @@ function collectWorkflowActionCandidates(value: unknown): Array<{ kind: Workflow
 function normalizeWorkflowAction(candidate: { kind: WorkflowActionKind; value: unknown }): ParsedWorkflowAction | null {
   if (typeof candidate.value === "string") {
     const title = cleanActionTitle(candidate.value);
+    if (candidate.kind === "task" && !hasFollowThroughLanguage(title)) return null;
     return title ? { kind: candidate.kind, title } : null;
   }
   if (!isRecord(candidate.value)) return null;
-  const title = extractStringField(candidate.value, ["title", "name", "label", "summary", "task", "approval"]);
+  const title = extractStringField(candidate.value, ["title", "name", "label", "summary", "task", "approval", "decision", "idea"]);
   if (!title) return null;
+  const owner = extractStringField(candidate.value, ["owner", "assignee", "assignedTo", "requester"]) || undefined;
+  const due = extractStringField(candidate.value, ["due", "dueDate", "deadline"]) || undefined;
+  const source = extractStringField(candidate.value, ["source", "sourceChat", "artifact"]) || undefined;
+  const status = extractStringField(candidate.value, ["status", "state"]) || undefined;
+  if (candidate.kind === "task" && !hasFollowThroughLanguage(title) && !owner && !due && !source && !status) return null;
   return {
     kind: candidate.kind,
     id: extractStringField(candidate.value, ["id", "actionId", "approvalId", "taskId"]) || undefined,
     title,
-    owner: extractStringField(candidate.value, ["owner", "assignee", "assignedTo", "requester"]) || undefined,
-    due: extractStringField(candidate.value, ["due", "dueDate", "deadline"]) || undefined,
-    source: extractStringField(candidate.value, ["source", "sourceChat", "artifact"]) || undefined,
-    status: extractStringField(candidate.value, ["status", "state"]) || undefined,
+    owner,
+    due,
+    source,
+    status,
   };
 }
 
 function resolveMarkdownWorkflowAction(text: string, workflowActions: WorkflowActionContext | undefined): ParsedWorkflowAction | null {
   const rawText = text.replace(/\s+/g, " ").trim();
-  const explicit = rawText.match(/\b(approval|task)\s*[:#]\s*([a-z0-9][\w:-]*)/i);
+  const explicit = rawText.match(/\b(approval|decision|idea|task)\s*[:#]\s*([a-z0-9][\w:-]*)/i);
   if (explicit) {
+    const kind = explicit[1].toLowerCase() as WorkflowActionKind;
     return {
-      kind: explicit[1].toLowerCase() === "approval" ? "approval" : "task",
+      kind,
       id: explicit[2],
       title: cleanActionTitle(rawText.replace(explicit[0], "")) || explicit[2],
     };
@@ -290,25 +347,37 @@ function resolveMarkdownWorkflowAction(text: string, workflowActions: WorkflowAc
   const normalizedText = cleanActionTitle(rawText);
   if (!normalizedText) return null;
 
-  const approval = workflowActions?.approvals?.find((item) => titleMatches(normalizedText, item.title));
-  if (approval) return { kind: "approval", id: approval.id, title: approval.title };
-  const task = workflowActions?.tasks?.find((item) => titleMatches(normalizedText, item.title));
-  if (task) return { kind: "task", id: task.id, title: task.title };
+  const approval = workflowActions?.approvals?.find((item) => titleMatches(normalizedText, item.originalText ?? item.title));
+  if (approval) return { kind: "approval", id: approval.id, title: normalizedText };
+  const decision = workflowActions?.decisions?.find((item) => titleMatches(normalizedText, item.originalText ?? item.title));
+  if (decision) return { kind: "decision", id: decision.id, title: normalizedText };
+  const idea = workflowActions?.ideas?.find((item) => titleMatches(normalizedText, item.originalText ?? item.title));
+  if (idea) return { kind: "idea", id: idea.id, title: normalizedText };
+  const task = workflowActions?.tasks?.find((item) => titleMatches(normalizedText, item.originalText ?? item.title));
+  if (task) return { kind: "task", id: task.id, title: normalizedText };
 
   if (/\b(approval|approve|sign[- ]?off)\b/i.test(normalizedText)) return { kind: "approval", title: normalizedText };
-  if (/\b(task|assigned|follow[- ]?up|todo|to do)\b/i.test(normalizedText)) return { kind: "task", title: normalizedText };
+  if (/\b(decision|decide|choice|blocked row|trade[- ]?off)\b/i.test(normalizedText)) return { kind: "decision", title: normalizedText };
+  if (/\b(idea|opportunity|proposal|concept|pilot|experiment)\b/i.test(normalizedText)) return { kind: "idea", title: normalizedText };
+  if (hasFollowThroughLanguage(normalizedText)) return { kind: "task", title: normalizedText };
   return null;
 }
 
 function resolveWorkflowAction(action: ParsedWorkflowAction, workflowActions: WorkflowActionContext | undefined) {
-  const collection = action.kind === "approval" ? workflowActions?.approvals : workflowActions?.tasks;
+  const collection = action.kind === "approval"
+    ? workflowActions?.approvals
+    : action.kind === "decision"
+      ? workflowActions?.decisions
+      : action.kind === "idea"
+        ? workflowActions?.ideas
+        : workflowActions?.tasks;
   const exact = action.id ? collection?.find((item) => item.id === action.id) : undefined;
-  const titleMatch = collection?.find((item) => titleMatches(action.title, item.title));
+  const titleMatch = collection?.find((item) => titleMatches(action.title, item.originalText ?? item.title));
   const matched = exact ?? titleMatch;
   return {
     ...action,
     id: matched?.id ?? action.id,
-    title: matched?.title ?? action.title,
+    title: action.title,
     owner: matched?.owner ?? action.owner,
     due: action.kind === "approval" ? (matched as WorkflowApprovalAction | undefined)?.due ?? action.due : action.due,
     source: action.kind === "task" ? (matched as WorkflowTaskAction | undefined)?.source ?? action.source : action.source,
@@ -412,46 +481,123 @@ function InlineWorkflowAction({
   workflowActions?: WorkflowActionContext;
 }) {
   const resolved = resolveWorkflowAction(action, workflowActions);
-  const isApproval = resolved.kind === "approval";
-  const status = resolved.status || (isApproval ? "Needed" : "Open");
-  const isComplete = isApproval ? status === "Approved" : status === "Done";
-  const isPending = Boolean(resolved.clientStatus === "pending" || (isApproval ? workflowActions?.pendingApproval : workflowActions?.pendingTask));
-  const canMutate = Boolean(workflowActions?.canEdit && resolved.id && (isApproval ? workflowActions?.onToggleApproval : workflowActions?.onToggleTask));
-  const Icon = isApproval ? ClipboardCheck : ClipboardList;
-  const buttonLabel = isApproval
-    ? status === "Approved" ? "Approved" : status === "Requested" ? "Mark approved" : "Request approval"
-    : status === "Done" ? "Done" : status === "In progress" ? "Mark done" : "Start task";
+  const isTask = resolved.kind === "task";
+  const isPending = Boolean(
+    resolved.clientStatus === "pending"
+    || (isTask && workflowActions?.pendingTaskTitle && titleMatches(workflowActions.pendingTaskTitle, resolved.title))
+    || (isTask && resolved.id && workflowActions?.pendingTaskRemovalId === resolved.id),
+  );
+  const canCreate = Boolean(workflowActions?.canEdit && !resolved.id && workflowActions?.activeMode && createHandlerForKind(resolved.kind, workflowActions));
+  const CreatedIcon = iconForWorkflowKind(resolved.kind);
 
   return (
-    <span className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border bg-background px-2 py-1.5 align-middle text-sm">
-      <Icon className={cn("size-4 shrink-0", isComplete ? "text-success" : "text-primary")} />
-      <span className="min-w-0">
-        <span className="font-medium text-foreground">{resolved.title}</span>
-        <span className="ml-2 text-xs text-muted-foreground">
-          {status}
-          {resolved.owner ? ` / ${resolved.owner}` : ""}
-          {resolved.due ? ` / ${resolved.due}` : ""}
-          {resolved.source ? ` / ${resolved.source}` : ""}
-        </span>
-      </span>
+    <>
+      <span>{resolved.title}</span>{" "}
+      {resolved.id ? (
+        <CreatedIcon className="inline size-3.5 align-[-2px] text-primary" aria-label={`${workflowKindLabel(resolved.kind)} created`} />
+      ) : (
+        <InlineActionMenu
+          action={resolved}
+          canCreate={canCreate}
+          isPending={isPending}
+          workflowActions={workflowActions}
+        />
+      )}
+    </>
+  );
+}
+
+function InlineActionMenu({
+  action,
+  canCreate,
+  isPending,
+  workflowActions,
+}: {
+  action: ParsedWorkflowAction;
+  canCreate: boolean;
+  isPending: boolean;
+  workflowActions?: WorkflowActionContext;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  if (!canCreate) return null;
+
+  const Icon = iconForWorkflowKind(action.kind);
+  const label = workflowKindLabel(action.kind);
+
+  return (
+    <span className="relative inline-block align-[-3px]" ref={menuRef}>
       <Button
         type="button"
         size="sm"
-        variant={isComplete ? "secondary" : "outline"}
-        className="h-7 gap-1.5 px-2 text-xs"
-        disabled={!canMutate || isPending}
-        title={canMutate ? buttonLabel : "No matching workspace action is available"}
-        onClick={() => {
-          if (!resolved.id) return;
-          if (isApproval) workflowActions?.onToggleApproval?.(resolved.id);
-          else workflowActions?.onToggleTask?.(resolved.id);
-        }}
+        variant="ghost"
+        className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+        disabled={isPending}
+        title="Actions"
+        aria-label={`Actions for ${action.title}`}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
       >
-        <CheckCircle2 className="size-3.5" />
-        {isPending ? "Updating..." : buttonLabel}
+        <MoreHorizontal className="size-3.5" />
       </Button>
+      {open ? (
+        <span className="absolute left-0 top-6 z-[9999] min-w-40 rounded-md border bg-popover p-1 text-popover-foreground shadow-xl">
+          {canCreate ? (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+              onClick={() => {
+                setOpen(false);
+                createHandlerForKind(action.kind, workflowActions)?.({
+                  mode: workflowActions?.activeMode ?? "Personal",
+                  projectId: workflowActions?.activeProjectId ?? null,
+                  title: action.title,
+                  originalText: action.title,
+                  owner: action.owner,
+                  source: action.source ?? workflowActions?.sourceTitle ?? "VertexAI suggestion",
+                });
+              }}
+            >
+              <Icon className="size-3.5" />
+              Add {label}
+            </button>
+          ) : null}
+        </span>
+      ) : null}
     </span>
   );
+}
+
+function createHandlerForKind(kind: WorkflowActionKind, workflowActions: WorkflowActionContext | undefined) {
+  if (kind === "approval") return workflowActions?.onCreateApproval;
+  if (kind === "decision") return workflowActions?.onCreateDecision;
+  if (kind === "idea") return workflowActions?.onCreateIdea;
+  return workflowActions?.onCreateTask;
+}
+
+function iconForWorkflowKind(kind: WorkflowActionKind) {
+  if (kind === "approval") return ShieldCheck;
+  if (kind === "decision") return GitPullRequest;
+  if (kind === "idea") return Lightbulb;
+  return Circle;
+}
+
+function workflowKindLabel(kind: WorkflowActionKind) {
+  if (kind === "approval") return "Approval";
+  if (kind === "decision") return "Decision";
+  if (kind === "idea") return "Idea";
+  return "Task";
 }
 
 function HighlightedCodeBlock({ className, code, language }: { className?: string; code: string; language: string }) {
@@ -519,6 +665,8 @@ function normalizeWorkflowKind(value: unknown): WorkflowActionKind | null {
   if (typeof value !== "string") return null;
   const normalized = value.toLowerCase().replace(/[^a-z]/g, "");
   if (["approval", "approvals", "pendingapproval", "pendingapprovals"].includes(normalized)) return "approval";
+  if (["decision", "decisions"].includes(normalized)) return "decision";
+  if (["idea", "ideas", "opportunity", "opportunities"].includes(normalized)) return "idea";
   if (["task", "tasks", "assignedtask", "assignedtasks", "todo", "todos"].includes(normalized)) return "task";
   return null;
 }
@@ -543,6 +691,10 @@ function cleanActionTitle(value: string) {
     .replace(/\s+/g, " ")
     .replace(/^[\s:;-]+|[\s:;-]+$/g, "")
     .trim();
+}
+
+function hasFollowThroughLanguage(value: string) {
+  return /\b(task|todo|to do|follow[- ]?up|action item|next step|assign(?:ed)? to|owner\s*:|due\s*:|deadline|needs follow[- ]?up|requires follow[- ]?through|send|schedule|update|prepare|confirm|publish|deliver|resolve)\b/i.test(value);
 }
 
 function normalizeActionText(value: string) {

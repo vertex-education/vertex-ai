@@ -35,6 +35,7 @@ focused region comparison evidence: Focused checks covered the top navigation, l
 - Project switching now loads project-specific chat lists and demo conversations for Vertex Hub, LMS Next Gen, Data Migration, and AI Innovation Lab.
 - Attachment, workspace/web, and model popovers are anchored to the composer and no longer render at the top of the page.
 - Pinned items now render above the workspace tabs so triage context stays visible while switching between Ideas, Artifacts, Decisions, Approvals, Tasks, and Prompt Templates.
+- The pinned-items rail no longer shows a separate `Pins` action or header navigation; left and right carousel buttons appear beside the cards only when pinned items overflow the available width.
 - Artifact rows expose real downloadable Office files from `public/artifacts`, including DOCX, PPTX, and XLSX examples.
 - Artifact preview modal opens from artifact rows and the selected-artifact panel, showing a concise document preview plus a direct download action.
 - Workspace mode tabs now switch between Personal, Team, Personal Project, and Team Project contexts, with dynamic breadcrumbs below the mode tabs.
@@ -57,6 +58,7 @@ focused region comparison evidence: Focused checks covered the top navigation, l
 - Refactored the improvement strip into a pinned-items rail for ideas and artifacts.
 - Added Approvals and Tasks views with realistic PMO follow-ups surfaced from project chats.
 - Fixed pinned-rail layout so workspace tabs keep full-height clickable hit targets.
+- Updated pinned-rail carousel behavior so arrow clicks move to the next card boundary and reveal the next full pinned item in either direction.
 
 **Validation Notes**
 - `npm run lint` passed.

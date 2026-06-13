@@ -10,6 +10,8 @@ The app is organized around three explicit workspace scopes:
 
 Each scope has its own projects, chats, ideas, artifacts, decisions, approvals, tasks, activity, and seed data. The UI is designed so lower scopes do not surface higher-scope information, and switching a project dynamically changes the `Project Chats` section for the selected workspace.
 
+Pinned ideas and artifacts render in a `Pinned Items` rail above the workspace tabs. The rail stays scoped to the active workspace, shows all pinned items, and only displays left or right carousel buttons when the pinned cards overflow the available width. Each arrow click moves to the next card boundary so the next pinned item is fully visible.
+
 ## Stack
 
 - React 19

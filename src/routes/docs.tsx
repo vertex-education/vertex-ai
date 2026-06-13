@@ -233,6 +233,7 @@ const docSections: DocSection[] = [
       "Select an artifact to view metadata and preview details in the right panel.",
       "Preview files from the artifact list or details panel, then download from the preview dialog.",
       "Pin important artifacts to keep them visible in the workspace strip.",
+      "Use the Pinned Items rail arrows when pinned ideas and artifacts exceed the available width.",
       "Use the version history timeline to preview older versions read-only or restore one as a new latest version.",
     ],
     details: [
@@ -240,6 +241,7 @@ const docSections: DocSection[] = [
       "Use preview for quick inspection when you only need to confirm contents or sheet structure.",
       "Download the original file when you need an offline copy of the source document, presentation, or workbook.",
       "Pin high-value artifacts that should remain visible from the workspace overview.",
+      "Pinned items stay in the current workspace scope; carousel arrows appear only when more pinned cards exist off-screen and move one full card into view per click.",
       "Artifact history is immutable; restoring an older version creates a new current version instead of replacing or deleting prior files.",
       "Pin changes update immediately and show a Pending badge while the background artifact write completes.",
       "Generated table exports show a Saving badge in the artifact list until the XLSX file and metadata are committed.",
@@ -274,7 +276,7 @@ const docSections: DocSection[] = [
       "Use Pilot for ideas being tested in a real workflow and Approved when they are ready for rollout.",
       "Use Implemented when the idea has been released into the operating model.",
       "Use Blocked when the next step depends on a missing owner, data source, governance decision, or dependency.",
-      "Votes and pins help surface ideas that should stay visible during planning conversations.",
+      "Votes and pins help surface ideas that should stay visible during planning conversations in the scoped Pinned Items rail.",
     ],
     technicalDetails: [
       "Idea status is modeled as a fixed union: New, Review, Pilot, Approved, Implemented, and Blocked.",

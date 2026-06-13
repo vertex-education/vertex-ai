@@ -571,6 +571,7 @@ async function listMessagesForChats({
 
   const keyByChatId = new Map(chatScopes.map((chat) => [chat.chatId, chat.key]));
   return (result.results ?? []).reduce<Record<string, ChatMessage[]>>((groups, message) => {
+    if (isSeedChatMessage(message.id)) return groups;
     const key = keyByChatId.get(message.chatId);
     if (!key) return groups;
     groups[key] ??= [];
@@ -589,6 +590,10 @@ async function listMessagesForChats({
     });
     return groups;
   }, {});
+}
+
+function isSeedChatMessage(id: string) {
+  return id.startsWith("msg-personal-") || id.startsWith("msg-team-") || id.startsWith("msg-org-");
 }
 
 export const listMyScopedChats = createServerFn({ method: "POST" })
