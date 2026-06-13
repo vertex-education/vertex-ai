@@ -53,6 +53,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import type { ExtractedChatAttachment } from "@/lib/attachment-extraction";
 import { ArtifactUploader } from "@/components/ArtifactUploader";
 import { ArtifactRenderer } from "@/components/ArtifactRenderer";
 import { AppRail } from "@/components/AppRail";
@@ -102,6 +103,7 @@ import {
   type AddIdeaInput,
   type Approval,
   type Artifact,
+  type ChatAttachment,
   type ChatMessage,
   type ChatReasoningLevel,
   type ChatSection,
@@ -129,6 +131,7 @@ import {
   promptTemplates,
   sendChatMessage,
   saveTableArtifact,
+  restoreArtifactVersion,
   statusFilters,
   statusMeta,
   tabs,
@@ -608,6 +611,8 @@ function PMOCommandCenter() {
   const [statusFilter, setStatusFilter] = useState<IdeaStatus | "All">("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [chatInput, setChatInput] = useState("");
+  const [chatAttachments, setChatAttachments] = useState<ExtractedChatAttachment[]>([]);
+  const [isExtractingAttachment, setIsExtractingAttachment] = useState(false);
   const [chatReasoningLevel, setChatReasoningLevel] = useState<ChatReasoningLevel>(() => {
     if (typeof window === "undefined") return "low";
     const saved = window.localStorage.getItem("vertex-chat-reasoning-level");
@@ -629,6 +634,7 @@ function PMOCommandCenter() {
   const [isScopedRagStreaming, setIsScopedRagStreaming] = useState(false);
   const chatFormRef = useRef<HTMLFormElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
   const composerHighlightTimeoutRef = useRef<number | null>(null);
   const [isComposerHighlighted, setIsComposerHighlighted] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -678,7 +684,7 @@ function PMOCommandCenter() {
     onSuccess: invalidateWorkspace,
   });
   const sendMessageMutation = useMutation({
-    mutationFn: (input: { mode: WorkspaceMode; teamId?: string | null; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string; reasoningLevel: ChatReasoningLevel; webSearchEnabled?: boolean }) =>
+    mutationFn: (input: { mode: WorkspaceMode; teamId?: string | null; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string; reasoningLevel: ChatReasoningLevel; webSearchEnabled?: boolean; attachments?: ChatAttachment[] }) =>
       sendChatMessage({ data: input }),
     onMutate: async (input) => {
       const queryKey = scopedChatsQueryKey;
@@ -689,7 +695,8 @@ function PMOCommandCenter() {
         role: "user",
         avatar: avatarAlex,
         time: clientTimeLabel(),
-        text: input.text,
+        text: input.text || "Attached files for review.",
+        attachments: input.attachments,
         clientStatus: "sending",
       };
       await queryClient.cancelQueries({ queryKey });
@@ -776,6 +783,19 @@ function PMOCommandCenter() {
     onError: (error, _input, context) => {
       if (context?.previousWorkspace) queryClient.setQueryData(pmoWorkspaceQueryKey, context.previousWorkspace);
       updateToast(error instanceof Error ? error.message : "Could not delete artifact.");
+    },
+    onSettled: async () => {
+      await invalidateWorkspace();
+    },
+  });
+  const restoreArtifactMutation = useMutation({
+    mutationFn: (input: { mode: WorkspaceMode; artifactId: string; commitMessage?: string }) => restoreArtifactVersion({ data: input }),
+    onSuccess: (workspace) => {
+      queryClient.setQueryData(pmoWorkspaceQueryKey, workspace);
+      updateToast("Artifact version restored");
+    },
+    onError: (error) => {
+      updateToast(error instanceof Error ? error.message : "Could not restore artifact version.");
     },
     onSettled: async () => {
       await invalidateWorkspace();
@@ -1679,6 +1699,37 @@ function PMOCommandCenter() {
     return { chat, projectId, section };
   }
 
+  async function handleAttachFiles(files: FileList | null) {
+    if (!files?.length) return;
+    const availableSlots = Math.max(0, 6 - chatAttachments.length);
+    if (availableSlots === 0) {
+      updateToast("Remove an attachment before adding another file.");
+      return;
+    }
+    setIsExtractingAttachment(true);
+    try {
+      const { extractChatAttachment } = await import("@/lib/attachment-extraction");
+      const selectedFiles = Array.from(files).slice(0, availableSlots);
+      const extracted = await Promise.all(selectedFiles.map((file) => extractChatAttachment(file)));
+      setChatAttachments((current) => [...current, ...extracted].slice(0, 6));
+      const failed = extracted.filter((attachment) => attachment.status === "error");
+      if (failed.length > 0) {
+        updateToast(`${failed.length} attachment${failed.length === 1 ? "" : "s"} could not be read.`);
+      } else {
+        updateToast(`${extracted.length} attachment${extracted.length === 1 ? "" : "s"} ready for Gemma 4`);
+      }
+    } catch (error) {
+      updateToast(error instanceof Error ? error.message : "Could not attach file.");
+    } finally {
+      setIsExtractingAttachment(false);
+      if (chatFileInputRef.current) chatFileInputRef.current.value = "";
+    }
+  }
+
+  function removeChatAttachment(id: string) {
+    setChatAttachments((attachments) => attachments.filter((attachment) => attachment.id !== id));
+  }
+
   function handleInviteTeam(team: TeamSummary) {
     if (!canEdit) {
       updateToast("Viewer access is read-only");
@@ -1739,17 +1790,19 @@ function PMOCommandCenter() {
       return;
     }
     const text = chatInput.trim();
-    if (!text) return;
+    const readyAttachments = chatAttachments.filter((attachment) => attachment.status !== "error");
+    if (!text && readyAttachments.length === 0) return;
     let targetConversationKey = "";
     let usedSendMessageMutation = false;
     try {
       const target = await ensureActiveChatForSubmit();
       targetConversationKey = getConversationKey(activeMode, target.projectId, target.chat.id);
       setChatInput("");
+      setChatAttachments([]);
       setActiveTab("Chat");
       setRightOpen(true);
       const teamId = activeMode === "Team" ? selectedTeam?.id ?? "" : "";
-      if (teamId && target.projectId && !webSearchEnabled) {
+      if (teamId && target.projectId && !webSearchEnabled && readyAttachments.length === 0) {
         await runScopedRagStream({
           key: targetConversationKey,
           projectId: target.projectId,
@@ -1772,10 +1825,12 @@ function PMOCommandCenter() {
         model: "Gemma 4 26B",
         reasoningLevel: chatReasoningLevel,
         webSearchEnabled,
+        attachments: readyAttachments,
       });
       updateToast("VertexAI response added");
     } catch (error) {
       setChatInput(text);
+      setChatAttachments(readyAttachments);
       if (!usedSendMessageMutation) {
         if (targetConversationKey) {
           queryClient.setQueryData<ScopedChatsResult>(scopedChatsQueryKey, (current) =>
@@ -1821,6 +1876,7 @@ function PMOCommandCenter() {
         activeChatTitle={activeChat?.title}
         canEdit={canEdit}
         projectId={scopedProjectId}
+        selectedArtifact={selectedArtifact}
         onSaved={(title) => updateToast(`Saved "${title}" to Artifacts`)}
         onError={(message) => updateToast(message)}
       />
@@ -2007,13 +2063,13 @@ function PMOCommandCenter() {
                     <form
                       ref={chatFormRef}
                       className={cn(
-                        "fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42/0.22)] backdrop-blur transition-[border-color,box-shadow] lg:left-92 xl:left-97",
+                        "fixed inset-x-3 bottom-3 z-50 grid grid-cols-[minmax(0,1fr)_38px_44px] gap-2 rounded-xl border bg-card/95 p-3 shadow-[0_18px_60px_rgb(15_23_42/0.22)] backdrop-blur transition-[border-color,box-shadow] lg:left-92 xl:left-97",
                         isComposerHighlighted && "border-primary/70 shadow-[0_18px_70px_rgb(0_56_101/0.28),0_0_0_3px_rgb(0_56_101/0.18)]",
                         rightOpen ? "lg:right-104 xl:right-106.5" : "lg:right-18 xl:right-18",
                       )}
                       onSubmit={handleSendMessage}
                     >
-                      <div className="col-span-4 flex flex-wrap items-center gap-1.5">
+                      <div className="col-span-3 flex flex-wrap items-center gap-1.5">
                         <span className="mr-1 inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground">
                           <Zap className="size-3.5" />
                           Reasoning
@@ -2072,6 +2128,32 @@ function PMOCommandCenter() {
                           {chatReasoningProfiles[chatReasoningLevel].maxCompletionTokens.toLocaleString()} tokens / {Math.round(chatReasoningProfiles[chatReasoningLevel].timeoutMs / 1000)}s
                         </span>
                       </div>
+                      {chatAttachments.length > 0 ? (
+                        <div className="col-span-3 flex flex-wrap gap-1.5">
+                          {chatAttachments.map((attachment) => (
+                            <span
+                              key={attachment.id}
+                              className={cn(
+                                "inline-flex max-w-full items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-xs",
+                                attachment.status === "error" && "border-destructive/40 bg-destructive/5 text-destructive",
+                              )}
+                              title={attachment.error ?? `${attachment.name} is ready for Gemma 4 context`}
+                            >
+                              <FileText className="size-3.5 shrink-0" />
+                              <span className="max-w-44 truncate font-medium">{attachment.name}</span>
+                              <span className="shrink-0 text-muted-foreground">{attachment.extension.toUpperCase()}</span>
+                              <button
+                                type="button"
+                                className="grid size-4 shrink-0 place-items-center rounded-sm hover:bg-accent"
+                                aria-label={`Remove ${attachment.name}`}
+                                onClick={() => removeChatAttachment(attachment.id)}
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       <Input
                         aria-label="Ask the PMO assistant"
                         placeholder={`Message VertexAI about ${scopeContextLabel} / ${activeChat?.title ?? "new AI chat"}`}
@@ -2080,18 +2162,31 @@ function PMOCommandCenter() {
                           "transition-[background-color,border-color,box-shadow]",
                           isComposerHighlighted && "border-primary bg-primary/5 shadow-[0_0_0_3px_rgb(0_56_101/0.18)]",
                         )}
-                        disabled={sendMessageMutation.isPending || isScopedRagStreaming}
+                        disabled={sendMessageMutation.isPending || isScopedRagStreaming || isExtractingAttachment}
                         value={chatInput}
                         onKeyDown={handleChatInputKeyDown}
                         onChange={(event) => setChatInput(event.target.value)}
                       />
-                      <Button type="button" variant="outline" size="icon" aria-label="Attach file" onClick={() => updateToast("Attachment queued")}>
+                      <input
+                        ref={chatFileInputRef}
+                        className="sr-only"
+                        type="file"
+                        multiple
+                        accept=".pdf,.xlsx,.pptx,.docx,.csv,.txt"
+                        onChange={(event) => void handleAttachFiles(event.target.files)}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label="Attach file"
+                        title="Attach PDF, XLSX, PPTX, DOCX, CSV, or TXT"
+                        disabled={sendMessageMutation.isPending || isScopedRagStreaming || isExtractingAttachment}
+                        onClick={() => chatFileInputRef.current?.click()}
+                      >
                         <Paperclip />
                       </Button>
-                      <Button type="button" variant="outline" size="icon" aria-label="Add workspace context" onClick={() => updateToast("Workspace context added")}>
-                        <Folder />
-                      </Button>
-                      <Button type="button" size="icon" aria-label="Send message" disabled={sendMessageMutation.isPending || isScopedRagStreaming || !chatInput.trim()} onClick={handleChatSubmitButton}>
+                      <Button type="button" size="icon" aria-label="Send message" disabled={sendMessageMutation.isPending || isScopedRagStreaming || isExtractingAttachment || (!chatInput.trim() && chatAttachments.every((attachment) => attachment.status === "error"))} onClick={handleChatSubmitButton}>
                         <Send />
                       </Button>
                     </form>
@@ -2129,6 +2224,9 @@ function PMOCommandCenter() {
                       workspaceTitle={workspaceTitle}
                       onClose={() => setRightOpen(false)}
                       onPreviewArtifact={() => selectedArtifact && setPreviewArtifact(selectedArtifact)}
+                      onRestoreArtifactVersion={(artifactId) =>
+                        restoreArtifactMutation.mutate({ mode: activeMode, artifactId })
+                      }
                       onShare={() => updateToast("Share link options ready")}
                       onStatusChange={(status) => selectedIdea && updateStatusMutation.mutate({ id: selectedIdea.id, status })}
                       onToggleArtifactPin={() =>
@@ -3593,6 +3691,25 @@ function ChatView({
                   />
                 )}
               </div>
+              {message.attachments?.length ? (
+                <div className={cn("flex flex-wrap gap-1.5", isUser && "justify-end")}>
+                  {message.attachments.map((attachment) => (
+                    <span
+                      key={attachment.id}
+                      className={cn(
+                        "inline-flex max-w-full items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-xs text-foreground",
+                        attachment.status === "partial" && "border-amber-300 bg-amber-50",
+                        attachment.status === "error" && "border-destructive/40 bg-destructive/5 text-destructive",
+                      )}
+                      title={attachment.error ?? `${attachment.name} was included as Gemma 4 context`}
+                    >
+                      <FileText className="size-3.5 shrink-0" />
+                      <span className="max-w-48 truncate font-medium">{attachment.name}</span>
+                      <span className="shrink-0 text-muted-foreground">{attachment.extension.toUpperCase()}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {canBranch && message.clientStatus !== "sending" ? (
                 <div className="flex justify-start">
                   <Button
@@ -3972,6 +4089,7 @@ function RenderedTableExportControls({
   onError,
   onSaved,
   projectId,
+  selectedArtifact,
 }: {
   activeMode: WorkspaceMode;
   activeChatTitle?: string;
@@ -3979,6 +4097,7 @@ function RenderedTableExportControls({
   onError: (message: string) => void;
   onSaved: (title: string) => void;
   projectId: string | null;
+  selectedArtifact?: Artifact;
 }) {
   const queryClient = useQueryClient();
   const savedTablesRef = useRef(new Set<string>());
@@ -3994,7 +4113,9 @@ function RenderedTableExportControls({
       const sourceChatTitleValue = formData.get("chat_title");
       const rowsJson = formData.get("rows_json");
       const optimisticPreview = parsePreviewRows(typeof rowsJson === "string" ? rowsJson : "");
+      const optimisticR2Key = `optimistic-artifact-${Date.now()}`;
       const optimisticArtifact: Artifact = {
+        id: optimisticR2Key,
         projectId: typeof projectIdValue === "string" && projectIdValue ? projectIdValue : null,
         sourceChatTitle: typeof sourceChatTitleValue === "string" && sourceChatTitleValue ? sourceChatTitleValue : undefined,
         title,
@@ -4004,7 +4125,7 @@ function RenderedTableExportControls({
         status: "Draft",
         summary: "Saving XLSX artifact...",
         href: "#",
-        r2Key: `optimistic-artifact-${Date.now()}`,
+        r2Key: optimisticR2Key,
         preview: ["Saving table export", title],
         previewJson: {
           kind: "table",
@@ -4013,6 +4134,8 @@ function RenderedTableExportControls({
           rows: optimisticPreview.rows,
         },
         pinnedTo: [],
+        version: 1,
+        commitMessage: "Saving from chat table export",
         clientStatus: "saving",
       };
       queryClient.setQueryData<PmoWorkspaceState>(pmoWorkspaceQueryKey, (current) =>
@@ -4098,7 +4221,7 @@ function RenderedTableExportControls({
 
       if (canEdit && hasSaveableRows(table)) {
         const key = tableKey(table);
-        const saveButton = button("Save to Artifacts", "Save table as XLSX artifact", () => {
+        const saveTable = (saveButton: HTMLButtonElement, updateArtifact: boolean) => {
           const title = tableTitle(table);
           const formData = new FormData();
           formData.set("mode", activeMode);
@@ -4108,6 +4231,10 @@ function RenderedTableExportControls({
           formData.set("title", title);
           formData.set("table_key", key);
           formData.set("rows_json", JSON.stringify(rowsFromHtmlTable(table)));
+          if (updateArtifact && selectedArtifact) {
+            formData.set("base_artifact_id", selectedArtifact.id);
+            formData.set("commit_message", `Updated from ${sourceTitle || activeChatTitle || "follow-on chat"}`);
+          }
           saveButton.disabled = true;
           saveButton.textContent = "Saving...";
           saveButton.className = `${buttonClass} cursor-wait opacity-60`;
@@ -4123,6 +4250,9 @@ function RenderedTableExportControls({
               saveButton.className = buttonClass;
             },
           });
+        };
+        const saveButton = button("Save to Artifacts", "Save table as XLSX artifact", () => {
+          saveTable(saveButton, false);
         });
         if (savedTablesRef.current.has(key)) {
           saveButton.disabled = true;
@@ -4130,6 +4260,12 @@ function RenderedTableExportControls({
           saveButton.className = `${buttonClass} cursor-not-allowed opacity-50`;
         }
         controls.appendChild(saveButton);
+        if (selectedArtifact?.id.startsWith("artifact-") && selectedArtifact.type === "XLSX" && selectedArtifact.projectId === projectId) {
+          const updateButton = button("Update Selected", `Create version ${selectedArtifact.version + 1} of ${selectedArtifact.title}`, () => {
+            saveTable(updateButton, true);
+          });
+          controls.appendChild(updateButton);
+        }
       }
     }
 
@@ -4178,7 +4314,7 @@ function RenderedTableExportControls({
         delete table.dataset.exportControls;
       });
     };
-  }, [activeMode, activeChatTitle, canEdit, projectId]);
+  }, [activeMode, activeChatTitle, canEdit, projectId, selectedArtifact]);
 
   return null;
 }
@@ -4356,7 +4492,7 @@ function ArtifactsView({
                   ? "Saving..."
                   : row.original.clientStatus === "pinning"
                     ? "Updating pin..."
-                    : row.original.summary}
+                    : `v${row.original.version} / ${row.original.summary}`}
               </em>
             </span>
           </div>
@@ -4837,6 +4973,7 @@ function DetailPanel({
   workspaceTitle,
   onClose,
   onPreviewArtifact,
+  onRestoreArtifactVersion,
   onShare,
   onStatusChange,
   onToggleApproval,
@@ -4864,6 +5001,7 @@ function DetailPanel({
   workspaceTitle: string;
   onClose: () => void;
   onPreviewArtifact: () => void;
+  onRestoreArtifactVersion: (artifactId: string) => void;
   onShare: () => void;
   onStatusChange: (status: IdeaStatus) => void;
   onToggleApproval: (id: string) => void;
@@ -4915,6 +5053,7 @@ function DetailPanel({
           artifact={artifact}
           canEdit={canEdit}
           onPreviewArtifact={onPreviewArtifact}
+          onRestoreArtifactVersion={onRestoreArtifactVersion}
           onShare={onShare}
           onToggleArtifactPin={onToggleArtifactPin}
         />
@@ -5166,6 +5305,7 @@ function ArtifactDetail({
   artifact,
   canEdit,
   onPreviewArtifact,
+  onRestoreArtifactVersion,
   onShare,
   onToggleArtifactPin,
 }: {
@@ -5173,17 +5313,19 @@ function ArtifactDetail({
   artifact: Artifact;
   canEdit: boolean;
   onPreviewArtifact: () => void;
+  onRestoreArtifactVersion: (artifactId: string) => void;
   onShare: () => void;
   onToggleArtifactPin: () => void;
 }) {
   const isPinned = artifact.pinnedTo.includes(activeMode);
+  const versionHistory = artifact.versionHistory ?? [];
 
   return (
     <Card className="mb-3">
       <CardHeader>
         <CardTitle className="text-lg leading-6">{artifact.title}</CardTitle>
         <CardDescription>
-          {artifact.type} / {artifact.status} / {artifact.owner}
+          {artifact.type} / {artifact.status} / {artifact.owner} / v{artifact.version}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
@@ -5217,6 +5359,43 @@ function ArtifactDetail({
             </a>
           </Button>
         </div>
+        {versionHistory.length > 0 ? (
+          <div className="space-y-2 rounded-md border bg-muted/25 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold">Version history</span>
+              <Badge variant="secondary">{versionHistory.length} versions</Badge>
+            </div>
+            <div className="space-y-2">
+              {versionHistory.map((version) => {
+                const isLatest = version.id === artifact.id;
+                return (
+                  <div key={version.id} className="rounded-md border bg-background p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <strong className="block text-sm">Version {version.version}{isLatest ? " current" : ""}</strong>
+                        <span className="block text-xs text-muted-foreground">{version.date} / {version.commitMessage}</span>
+                      </div>
+                      {canEdit && !isLatest ? (
+                        <Button type="button" variant="outline" size="sm" onClick={() => onRestoreArtifactVersion(version.id)}>
+                          Restore
+                        </Button>
+                      ) : null}
+                    </div>
+                    {!isLatest ? (
+                      <div className="mt-3">
+                        <ArtifactRenderer
+                          fileType={version.type}
+                          previewJson={version.previewJson}
+                          fallbackPreview={version.preview}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -5771,7 +5950,7 @@ function ArtifactPreviewDialog({
             <DialogHeader className={cn(isWorkbook && "border-b px-5 py-4")}>
               <DialogTitle>{artifact.title}</DialogTitle>
               <DialogDescription>
-                {artifact.type} / {artifact.status} / {artifact.owner}
+                {artifact.type} / {artifact.status} / {artifact.owner} / v{artifact.version}
                 {artifact.sourceChatTitle ? ` / Chat: ${artifact.sourceChatTitle}` : ""}
               </DialogDescription>
             </DialogHeader>
@@ -5782,7 +5961,7 @@ function ArtifactPreviewDialog({
               <div className="grid min-h-44 place-items-center content-center gap-2 rounded-lg border bg-muted text-primary">
                 {artifactIcon(artifact.type)}
                 <strong>{artifact.type}</strong>
-                <span className="text-xs text-muted-foreground">{artifact.status}</span>
+                <span className="text-xs text-muted-foreground">{artifact.status} / v{artifact.version}</span>
               </div>
               <div className="space-y-3">
                 <p className="text-sm leading-6 text-muted-foreground">{artifact.summary}</p>

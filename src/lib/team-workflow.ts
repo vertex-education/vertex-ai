@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
-import { runWorkersAiWithGateway } from "@/lib/ai-gateway";
+import { runTrackedWorkersAiWithGateway } from "@/lib/ai-gateway";
 import { getAuth } from "@/lib/auth";
 import { lightweightChatTitleModelId } from "@/lib/prompts";
-import { getConversationKey, type ChatMessage, type ChatSection, type ChatSummary, type ProjectSummary, type WorkspaceMode } from "@/lib/pmo-data";
+import { getConversationKey, parseChatAttachments, type ChatMessage, type ChatSection, type ChatSummary, type ProjectSummary, type WorkspaceMode } from "@/lib/pmo-data";
 import { recordRealtimeMutationEvent, type RealtimeInvalidationTarget } from "@/lib/realtime-events";
 import { getRequest } from "@tanstack/start-server-core";
 
@@ -190,7 +190,7 @@ async function generateBranchChatTitle(context: unknown, sourceChatTitle: string
 
   try {
     const result = await Promise.race([
-      runWorkersAiWithGateway(ai, lightweightChatTitleModelId, {
+      runTrackedWorkersAiWithGateway(ai, lightweightChatTitleModelId, {
         messages: [
           {
             role: "system",
@@ -205,6 +205,7 @@ async function generateBranchChatTitle(context: unknown, sourceChatTitle: string
         max_completion_tokens: 24,
         temperature: 0.1,
       }, {
+        feature: "branch-title",
         metadata: {
           feature: "branch-title",
           model: lightweightChatTitleModelId,
@@ -547,7 +548,7 @@ async function listMessagesForChats({
   const placeholders = chatScopes.map(() => "?").join(", ");
   const result = await getDb()
     .prepare(
-      `SELECT chat_id as chatId, id, parent_id as parentId, author, role, avatar, message_time as time, body as text, artifact_title as artifactTitle, artifact_type as artifactType, artifact_meta as artifactMeta
+      `SELECT chat_id as chatId, id, parent_id as parentId, author, role, avatar, message_time as time, body as text, artifact_title as artifactTitle, artifact_type as artifactType, artifact_meta as artifactMeta, attachments_json as attachmentsJson
        FROM chat_messages
        WHERE chat_id IN (${placeholders})
        ORDER BY created_at ASC`,
@@ -565,6 +566,7 @@ async function listMessagesForChats({
       artifactTitle: string | null;
       artifactType: "doc" | "ppt" | "sheet" | null;
       artifactMeta: string | null;
+      attachmentsJson: string | null;
     }>();
 
   const keyByChatId = new Map(chatScopes.map((chat) => [chat.chatId, chat.key]));
@@ -583,6 +585,7 @@ async function listMessagesForChats({
       artifact: message.artifactTitle && message.artifactType && message.artifactMeta
         ? { title: message.artifactTitle, type: message.artifactType, meta: message.artifactMeta }
         : undefined,
+      attachments: parseChatAttachments(message.attachmentsJson),
     });
     return groups;
   }, {});
@@ -750,7 +753,8 @@ export const branchScopedChat = createServerFn({ method: "POST" })
                 body as text,
                 artifact_title as artifactTitle,
                 artifact_type as artifactType,
-                artifact_meta as artifactMeta
+                artifact_meta as artifactMeta,
+                attachments_json as attachmentsJson
          FROM chat_messages
          WHERE id = ?
            AND chat_id = ?
@@ -767,6 +771,7 @@ export const branchScopedChat = createServerFn({ method: "POST" })
         artifactTitle: string | null;
         artifactType: "doc" | "ppt" | "sheet" | null;
         artifactMeta: string | null;
+        attachmentsJson: string | null;
       }>();
     if (!sourceMessage) throw new Error("Message was not found in this chat.");
 
@@ -800,6 +805,7 @@ export const branchScopedChat = createServerFn({ method: "POST" })
       artifact: sourceMessage.artifactTitle && sourceMessage.artifactType && sourceMessage.artifactMeta
         ? { title: sourceMessage.artifactTitle, type: sourceMessage.artifactType, meta: sourceMessage.artifactMeta }
         : undefined,
+      attachments: parseChatAttachments(sourceMessage.attachmentsJson),
     };
     await getDb()
       .prepare(
@@ -816,8 +822,9 @@ export const branchScopedChat = createServerFn({ method: "POST" })
           artifact_title,
           artifact_type,
           artifact_meta,
+          attachments_json,
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         rootMessage.id,
@@ -832,6 +839,7 @@ export const branchScopedChat = createServerFn({ method: "POST" })
         rootMessage.artifact?.title ?? null,
         rootMessage.artifact?.type ?? null,
         rootMessage.artifact?.meta ?? null,
+        rootMessage.attachments?.length ? JSON.stringify(rootMessage.attachments) : null,
         new Date().toISOString(),
       )
       .run();

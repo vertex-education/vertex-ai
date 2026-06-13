@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { createServerFn } from "@tanstack/react-start";
 import { setResponseStatus } from "@tanstack/react-start/server";
 import { getRequest } from "@tanstack/start-server-core";
-import { getAiGatewayLogId, runWorkersAiWithGateway } from "@/lib/ai-gateway";
+import { getAiGatewayLogId, runTrackedWorkersAiWithGateway, runWorkersAiWithGateway } from "@/lib/ai-gateway";
 import { recordAdminUsageEvent } from "@/lib/admin-metrics.server";
 import { getAuth } from "@/lib/auth";
 import type { DocumentIngestionJob } from "@/lib/document-ingestion-queue";
@@ -14,6 +14,7 @@ import { buildVertexAiSystemPrompt } from "@/lib/prompts";
 const embeddingModelId = "@cf/baai/bge-large-en-v1.5";
 const generationModelId = "@cf/google/gemma-4-26b-a4b-it";
 const embeddingBatchSize = 50;
+const webSearchTimeoutMs = 10_000;
 
 type RagEnv = Env & {
   VECTORIZE?: Vectorize;
@@ -216,16 +217,31 @@ function createR2Key(teamId: string, projectId: string, fileName: string) {
   return `rag/${teamId}/${projectId}/${Date.now()}-${crypto.randomUUID()}-${safeFileName(fileName)}`;
 }
 
-async function embedTexts(texts: string[]) {
+async function embedTexts(
+  texts: string[],
+  scope?: {
+    feature?: string;
+    teamId?: string | null;
+    workspaceId?: string | null;
+    projectId?: string | null;
+  },
+) {
   const ai = getAi();
   const embeddings: number[][] = [];
 
   for (let index = 0; index < texts.length; index += embeddingBatchSize) {
     const batch = texts.slice(index, index + embeddingBatchSize);
-    const result = (await runWorkersAiWithGateway(ai, embeddingModelId, { text: batch, pooling: "cls" }, {
+    const feature = scope?.feature ?? "scoped-rag-embedding";
+    const result = (await runTrackedWorkersAiWithGateway(ai, embeddingModelId, { text: batch, pooling: "cls" }, {
+      feature,
+      teamId: scope?.teamId,
+      projectId: scope?.projectId,
       metadata: {
-        feature: "scoped-rag-embedding",
+        feature,
         model: embeddingModelId,
+        workspaceId: scope?.workspaceId ?? null,
+        batchSize: batch.length,
+        batchIndex: index / embeddingBatchSize,
       },
     })) as EmbeddingResponse;
     if (!result.data || result.data.length !== batch.length) {
@@ -280,6 +296,63 @@ function buildContext(chunks: DocumentChunkRow[]) {
         `[${index + 1}] document="${chunk.documentName}" r2_key="${chunk.r2Key}" vector_id="${chunk.id}"\n${chunk.content}`,
     )
     .join("\n\n");
+}
+
+async function fetchScopedHistoricalPromptContext({
+  prompt,
+  teamId,
+  workspaceId,
+  projectId,
+  feature,
+}: {
+  prompt: string;
+  teamId: string;
+  workspaceId: string;
+  projectId: string;
+  feature: string;
+}) {
+  const [promptEmbedding] = await embedTexts([prompt], {
+    feature: "scoped-rag-query-embedding",
+    teamId,
+    workspaceId,
+    projectId,
+  });
+  const vectorStartedAt = Date.now();
+  const matches = await getVectorize().query(promptEmbedding, {
+    topK: 8,
+    returnMetadata: "indexed",
+    filter: {
+      team_id: { $eq: teamId },
+      project_id: { $eq: projectId },
+    },
+  });
+  await recordAdminUsageEvent({
+    provider: "vectorize",
+    feature,
+    durationMs: Date.now() - vectorStartedAt,
+    teamId,
+    projectId,
+    metadata: {
+      workspaceId,
+      topK: 8,
+      matches: matches.matches.length,
+    },
+  });
+
+  const vectorIds = matches.matches.map((match) => match.id);
+  const chunks = await fetchChunksByIds(vectorIds);
+  const scoresById = new Map(matches.matches.map((match) => [match.id, typeof match.score === "number" ? match.score : null]));
+  const citations: ChatWithScopedRagCitation[] = chunks.map((chunk) => ({
+    id: chunk.id,
+    documentName: chunk.documentName,
+    r2Key: chunk.r2Key,
+    score: scoresById.get(chunk.id) ?? null,
+  }));
+
+  return {
+    context: buildContext(chunks),
+    citations,
+  };
 }
 
 async function fetchChunksByIds(ids: string[]) {
@@ -435,17 +508,31 @@ async function createWebSearchGenerationResponse({
   runtimeEnv: RagEnv;
   scopedPromptContext: ScopedPromptContext;
 }) {
-  const webContext = await fetchConsolidatedWebSearch(prompt, runtimeEnv);
+  const [webContext, historicalContext] = await Promise.all([
+    fetchConsolidatedWebSearch(prompt, runtimeEnv),
+    fetchScopedHistoricalPromptContext({
+      prompt,
+      teamId,
+      workspaceId,
+      projectId,
+      feature: "scoped-rag-web-context-query",
+    }),
+  ]);
   const systemPrompt = [
     buildScopedEnvironmentContext(scopedPromptContext),
     "",
     "You are a scoped team-project assistant.",
-    "Use the real-time web context below for current or external facts.",
+    "Use the real-time web context below for current or external facts and the scoped historical chunks for internal project history.",
     "If the web providers are unavailable or do not return useful evidence, say that live web search did not return enough usable information.",
-    "Do not invent source URLs, dates, prices, laws, policies, or public facts.",
+    "Cite supporting artifact keys inline using the format [r2_key: path] when relying on historical chunks.",
+    "If the historical chunks do not contain enough evidence, say that the scoped artifact history does not contain enough information.",
+    "Do not invent citations, source URLs, dates, prices, laws, policies, or public facts.",
     "",
     "Real-Time Web Context:",
     webContext,
+    "",
+    "Scoped historical chunks:",
+    historicalContext.context,
   ].join("\n");
 
   const startedAt = Date.now();
@@ -481,10 +568,11 @@ async function createWebSearchGenerationResponse({
       maxCompletionTokens: 1_200,
       streamed: true,
       aiGatewayLogId,
+      citations: historicalContext.citations.length,
     },
   });
 
-  return createAiSseResponse(aiStream, []);
+  return createAiSseResponse(aiStream, historicalContext.citations);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -496,8 +584,30 @@ function truncateForRagPrompt(value: string, maxLength: number) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trim()}...` : normalized;
 }
 
+async function fetchJsonWithTimeout<T>(url: string, init: RequestInit, timeoutMs: number, provider: string) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) throw new Error(`${provider} search failed with HTTP ${response.status}.`);
+    return await response.json() as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${provider} search timed out after ${timeoutMs} ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchTavilySearch(query: string, apiKey: string) {
-  const response = await fetch("https://api.tavily.com/search", {
+  return fetchJsonWithTimeout<TavilySearchPayload>("https://api.tavily.com/search", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
@@ -511,14 +621,11 @@ async function fetchTavilySearch(query: string, apiKey: string) {
       include_raw_content: false,
       max_results: 5,
     }),
-  });
-
-  if (!response.ok) throw new Error(`Tavily search failed with HTTP ${response.status}.`);
-  return await response.json() as TavilySearchPayload;
+  }, webSearchTimeoutMs, "Tavily");
 }
 
 async function fetchFirecrawlSearch(query: string, apiKey: string) {
-  const response = await fetch("https://api.firecrawl.dev/v1/search", {
+  return fetchJsonWithTimeout<FirecrawlSearchPayload>("https://api.firecrawl.dev/v1/search", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
@@ -532,10 +639,7 @@ async function fetchFirecrawlSearch(query: string, apiKey: string) {
         formats: ["markdown"],
       },
     }),
-  });
-
-  if (!response.ok) throw new Error(`Firecrawl search failed with HTTP ${response.status}.`);
-  return await response.json() as FirecrawlSearchPayload;
+  }, webSearchTimeoutMs, "Firecrawl");
 }
 
 function tavilySummaryFromPayload(payload: TavilySearchPayload) {
@@ -734,39 +838,13 @@ export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput
     });
   }
 
-  const [promptEmbedding] = await embedTexts([prompt]);
-  const vectorStartedAt = Date.now();
-  const matches = await getVectorize().query(promptEmbedding, {
-    topK: 8,
-    returnMetadata: "indexed",
-    filter: {
-      team_id: { $eq: teamId },
-      project_id: { $eq: projectId },
-    },
-  });
-  await recordAdminUsageEvent({
-    provider: "vectorize",
-    feature: "scoped-rag-query",
-    durationMs: Date.now() - vectorStartedAt,
+  const historicalContext = await fetchScopedHistoricalPromptContext({
+    prompt,
     teamId,
+    workspaceId,
     projectId,
-    metadata: {
-      workspaceId,
-      topK: 8,
-      matches: matches.matches.length,
-    },
+    feature: "scoped-rag-query",
   });
-
-  const vectorIds = matches.matches.map((match) => match.id);
-  const chunks = await fetchChunksByIds(vectorIds);
-  const context = buildContext(chunks);
-  const scoresById = new Map(matches.matches.map((match) => [match.id, typeof match.score === "number" ? match.score : null]));
-  const citations: ChatWithScopedRagCitation[] = chunks.map((chunk) => ({
-    id: chunk.id,
-    documentName: chunk.documentName,
-    r2Key: chunk.r2Key,
-    score: scoresById.get(chunk.id) ?? null,
-  }));
 
   const systemPrompt = [
     buildScopedEnvironmentContext(scopedPromptContext),
@@ -778,7 +856,7 @@ export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput
     "Do not invent citations, file names, paths, dates, or facts.",
     "",
     "Scoped historical chunks:",
-    context,
+    historicalContext.context,
   ].join("\n");
 
   const generationStartedAt = Date.now();
@@ -811,14 +889,14 @@ export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput
       workspaceId,
       maxCompletionTokens: 1_200,
       streamed: true,
-      citations: citations.length,
+      citations: historicalContext.citations.length,
       intent,
       vectorizeBypassed: false,
       aiGatewayLogId,
     },
   });
 
-  return createAiSseResponse(aiStream, citations);
+  return createAiSseResponse(aiStream, historicalContext.citations);
 }
 
 export const chatWithScopedRag = createServerFn({ method: "POST" })

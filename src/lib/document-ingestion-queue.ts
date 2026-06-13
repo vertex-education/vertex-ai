@@ -1,6 +1,6 @@
 /// <reference path="../../worker-configuration.d.ts" />
 
-import { runWorkersAiWithGateway } from "@/lib/ai-gateway";
+import { runTrackedWorkersAiWithGateway } from "@/lib/ai-gateway";
 
 export type ScopeLevel = "org" | "team" | "personal";
 
@@ -221,15 +221,31 @@ function chunkText(rawText: string) {
   )).filter(Boolean);
 }
 
-async function embedTexts(env: DocumentIngestionEnv, texts: string[]) {
+async function embedTexts(
+  env: DocumentIngestionEnv,
+  texts: string[],
+  scope: {
+    feature: string;
+    teamId?: string | null;
+    projectId?: string | null;
+    metadata?: Record<string, string | number | boolean | null>;
+  },
+) {
   const embeddings: number[][] = [];
 
   for (let index = 0; index < texts.length; index += embeddingBatchSize) {
     const batch = texts.slice(index, index + embeddingBatchSize);
-    const result = (await runWorkersAiWithGateway(env.AI, embeddingModelId, { text: batch, pooling: "cls" }, {
+    const result = (await runTrackedWorkersAiWithGateway(env.AI, embeddingModelId, { text: batch, pooling: "cls" }, {
+      feature: scope.feature,
+      usageDb: env.DB,
+      teamId: scope.teamId,
+      projectId: scope.projectId,
       metadata: {
-        feature: "document-embedding",
+        feature: scope.feature,
         model: embeddingModelId,
+        batchSize: batch.length,
+        batchIndex: index / embeddingBatchSize,
+        ...scope.metadata,
       },
     })) as EmbeddingResponse;
     if (!result.data || result.data.length !== batch.length) {
@@ -271,7 +287,16 @@ async function processRegistryUploadJob(env: DocumentIngestionEnv, job: Registry
   const chunks = chunkText(extractedText);
   if (chunks.length === 0) throw new Error("No text chunks were created.");
 
-  const embeddings = await embedTexts(env, chunks);
+  const embeddings = await embedTexts(env, chunks, {
+    feature: "document-embedding",
+    projectId: job.projectId,
+    metadata: {
+      scopeLevel: job.scopeLevel,
+      scopeId: job.scopeId,
+      documentType: job.documentType,
+      artifactId: job.artifactId,
+    },
+  });
   const createdAt = new Date().toISOString();
   const rows = chunks.map((content, index) => ({
     id: `chunk-${crypto.randomUUID()}`,
@@ -348,7 +373,14 @@ async function processScopedRagGeneratedArtifactJob(env: DocumentIngestionEnv, j
   const chunks = chunkText(rawText);
   if (chunks.length === 0) throw new Error("No text chunks were created.");
 
-  const embeddings = await embedTexts(env, chunks);
+  const embeddings = await embedTexts(env, chunks, {
+    feature: "scoped-rag-generated-artifact-embedding",
+    teamId: job.teamId,
+    projectId: job.projectId,
+    metadata: {
+      documentName: job.documentName,
+    },
+  });
   const createdAt = new Date().toISOString();
   const rows = chunks.map((content, index) => ({
     id: `chunk-${crypto.randomUUID()}`,

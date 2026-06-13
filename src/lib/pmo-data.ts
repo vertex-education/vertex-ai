@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { queryOptions } from "@tanstack/react-query";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/start-server-core";
-import { getAiGatewayLogId, runWorkersAiWithGateway } from "@/lib/ai-gateway";
+import { getAiGatewayLogId, runTrackedWorkersAiWithGateway, runWorkersAiWithGateway } from "@/lib/ai-gateway";
 import { getAuth } from "@/lib/auth";
 import { recordAdminUsageEvent } from "@/lib/admin-metrics.server";
 import { publishChatMessageInserts, type ChatMessageInsertEvent } from "@/lib/chat-sync";
@@ -80,10 +80,24 @@ export type ChatMessage = {
     meta: string;
     type: "doc" | "ppt" | "sheet";
   };
+  attachments?: ChatAttachment[];
+};
+
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  extension: "pdf" | "xlsx" | "pptx" | "docx" | "csv" | "txt";
+  mimeType: string;
+  size: number;
+  extractedText: string;
+  status: "ready" | "partial" | "error";
+  error?: string;
 };
 
 export type Artifact = {
+  id: string;
   projectId: string | null;
+  parentArtifactId?: string | null;
   sourceChatTitle?: string;
   title: string;
   type: string;
@@ -96,8 +110,13 @@ export type Artifact = {
   preview: string[];
   previewJson?: JsonValue;
   pinnedTo: WorkspaceMode[];
+  version: number;
+  commitMessage: string;
+  versionHistory?: ArtifactVersion[];
   clientStatus?: "deleting" | "pinning" | "saving";
 };
+
+export type ArtifactVersion = Omit<Artifact, "versionHistory" | "clientStatus">;
 
 export type Decision = {
   id: string;
@@ -218,6 +237,19 @@ type SendChatMessageResult = {
   llmTrace: LlmDevTrace | null;
 };
 
+type SendChatMessageInput = {
+  mode: WorkspaceMode;
+  teamId?: string | null;
+  projectId: string | null;
+  chatId: string;
+  chatTitle: string;
+  text: string;
+  model: string;
+  reasoningLevel?: ChatReasoningLevel;
+  webSearchEnabled?: boolean;
+  attachments?: ChatAttachment[];
+};
+
 const chatTitleStopWords = new Set([
   "a",
   "an",
@@ -283,7 +315,7 @@ async function generateChatTitleFromInitialMessage(context: unknown, text: strin
 
   try {
     const result = await withAiTimeout(
-      (signal) => runWorkersAiWithGateway(
+      (signal) => runTrackedWorkersAiWithGateway(
         ai,
         lightweightChatTitleModelId,
         {
@@ -302,6 +334,7 @@ async function generateChatTitleFromInitialMessage(context: unknown, text: strin
           temperature: 0.1,
         },
         {
+          feature: "chat-title",
           signal,
           metadata: {
             feature: "chat-title",
@@ -770,7 +803,9 @@ function buildArtifacts(mode: WorkspaceMode, project?: ProjectSummary): Artifact
     : workspaceSeed[mode].artifacts;
 
   return artifactRows.map(([title, type, owner, date, status, href, r2Key]) => ({
+    id: `seed-${r2Key.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "")}`,
     projectId: project?.id ?? null,
+    parentArtifactId: null,
     title,
     type,
     owner,
@@ -792,6 +827,8 @@ function buildArtifacts(mode: WorkspaceMode, project?: ProjectSummary): Artifact
       ],
     },
     pinnedTo: status === "Pinned" ? [mode] : [],
+    version: 1,
+    commitMessage: "Initial seed artifact",
   }));
 }
 
@@ -1008,7 +1045,7 @@ async function generateArtifactTitle(seedTitle: string, rows: ExportTable["rows"
   ].join("\n");
   try {
     const result = await withAiTimeout(
-      (signal) => runWorkersAiWithGateway(
+      (signal) => runTrackedWorkersAiWithGateway(
         ai,
         vertexAiModelId,
         {
@@ -1020,6 +1057,7 @@ async function generateArtifactTitle(seedTitle: string, rows: ExportTable["rows"
           temperature: 0.1,
         },
         {
+          feature: "artifact-title",
           signal,
           metadata: {
             feature: "artifact-title",
@@ -1071,7 +1109,7 @@ async function persistChatMessage({
 }): Promise<ChatMessageInsertEvent> {
   await getDb()
     .prepare(
-      "INSERT INTO chat_messages (id, chat_id, parent_id, workspace_id, author, role, avatar, message_time, body, artifact_title, artifact_type, artifact_meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO chat_messages (id, chat_id, parent_id, workspace_id, author, role, avatar, message_time, body, artifact_title, artifact_type, artifact_meta, attachments_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(
       message.id,
@@ -1086,6 +1124,7 @@ async function persistChatMessage({
       message.artifact?.title ?? null,
       message.artifact?.type ?? null,
       message.artifact?.meta ?? null,
+      message.attachments?.length ? JSON.stringify(sanitizeChatAttachments(message.attachments)) : null,
       new Date().toISOString(),
     )
     .run();
@@ -1102,15 +1141,46 @@ async function persistChatMessage({
 
 async function listPersistedChatMessages(chatId: string) {
   const result = await getDb()
-    .prepare("SELECT id, parent_id as parentId, author, role, avatar, message_time as time, body as text FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC")
+    .prepare("SELECT id, parent_id as parentId, author, role, avatar, message_time as time, body as text, attachments_json as attachmentsJson FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC")
     .bind(chatId)
-    .all<{ id: string; parentId: string | null; author: string; role: "user" | "assistant" | "system"; avatar: string | null; time: string; text: string }>();
+    .all<{ id: string; parentId: string | null; author: string; role: "user" | "assistant" | "system"; avatar: string | null; time: string; text: string; attachmentsJson: string | null }>();
 
-  return (result.results ?? []).map((message) => ({
-    ...message,
-    parentId: message.parentId ?? undefined,
-    avatar: message.avatar ?? undefined,
-  })) satisfies ChatMessage[];
+  return (result.results ?? []).map((message) => {
+    const { attachmentsJson, ...rest } = message;
+    return {
+      ...rest,
+      parentId: message.parentId ?? undefined,
+      avatar: message.avatar ?? undefined,
+      attachments: parseChatAttachments(attachmentsJson),
+    };
+  }) satisfies ChatMessage[];
+}
+
+export function sanitizeChatAttachments(attachments: ChatAttachment[] | undefined): ChatAttachment[] {
+  return (attachments ?? [])
+    .filter((attachment) => Boolean(attachment.name))
+    .slice(0, 6)
+    .map((attachment) => ({
+      id: attachment.id || createId("attachment"),
+      name: attachment.name.slice(0, 180),
+      extension: attachment.extension,
+      mimeType: attachment.mimeType.slice(0, 120),
+      size: Math.max(0, Number(attachment.size) || 0),
+      extractedText: truncateAttachmentContext(attachment.extractedText),
+      status: attachment.status,
+      error: attachment.error?.slice(0, 240),
+    }));
+}
+
+export function parseChatAttachments(value: string | null | undefined): ChatAttachment[] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as ChatAttachment[];
+    const sanitized = sanitizeChatAttachments(Array.isArray(parsed) ? parsed : []);
+    return sanitized.length ? sanitized : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function extractAiResponse(result: unknown) {
@@ -1141,6 +1211,45 @@ function extractAiResponse(result: unknown) {
 function truncateForPrompt(value: string, maxLength: number) {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trim()}...` : normalized;
+}
+
+function truncateAttachmentContext(value: string, maxLength = 20_000) {
+  const normalized = value.replace(/\r/g, "\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength).trim()}\n[Attachment text truncated for Gemma context.]`
+    : normalized;
+}
+
+function buildAttachmentPromptContext(attachments: ChatAttachment[] | undefined) {
+  const sanitized = sanitizeChatAttachments(attachments).filter((attachment) => attachment.status !== "error" && attachment.extractedText.trim());
+  if (!sanitized.length) return null;
+  let totalChars = 0;
+  const maxTotalChars = 60_000;
+  const sections: string[] = [
+    "The user attached the following files. Use their extracted text as context when it is relevant, and call out extraction limits if the status is partial.",
+  ];
+  for (const [index, attachment] of sanitized.entries()) {
+    const remaining = maxTotalChars - totalChars;
+    if (remaining <= 0) break;
+    const text = truncateAttachmentContext(attachment.extractedText, Math.min(20_000, remaining));
+    totalChars += text.length;
+    sections.push([
+      `[Attachment ${index + 1}] ${attachment.name}`,
+      `Type: ${attachment.extension.toUpperCase()}`,
+      `Status: ${attachment.status}`,
+      `Size: ${attachment.size} bytes`,
+      "Extracted text:",
+      text,
+    ].join("\n"));
+  }
+  return sections.join("\n\n");
+}
+
+function buildMessageContentForHistory(message: ChatMessage) {
+  const attachmentSummary = message.attachments?.length
+    ? `\nAttached files: ${message.attachments.map((attachment) => `${attachment.name} (${attachment.extension.toUpperCase()}, ${attachment.status})`).join("; ")}`
+    : "";
+  return `${message.author}: ${message.text}${attachmentSummary}`;
 }
 
 async function searchWebForPrompt(context: unknown, query: string, enabled?: boolean): Promise<WebSearchTrace> {
@@ -1216,7 +1325,7 @@ async function runGemmaChat({
   workspace,
 }: {
   context: unknown;
-  data: { mode: WorkspaceMode; projectId: string | null; chatId: string; chatTitle: string; text: string; reasoningLevel?: ChatReasoningLevel; webSearchEnabled?: boolean };
+  data: SendChatMessageInput;
   existingMessages: ChatMessage[];
   workspace: ScopedWorkspaceState;
 }): Promise<{ text: string; trace: LlmDevTrace }> {
@@ -1232,8 +1341,9 @@ async function runGemmaChat({
     : null;
   const recentMessages: Array<{ role: "user" | "assistant"; content: string }> = existingMessages.slice(-8).map((message) => ({
     role: message.role === "assistant" ? "assistant" : "user",
-    content: `${message.author}: ${message.text}`,
+    content: buildMessageContentForHistory(message),
   }));
+  const attachmentContext = buildAttachmentPromptContext(data.attachments);
 
   const scopeContext = [
     `Workspace scope: ${workspaceModeLabel(data.mode)} (${workspace.scope})`,
@@ -1263,6 +1373,12 @@ async function runGemmaChat({
         ? [{
           role: "user" as const,
           content: `Current web context:\n${webSearchContext}`,
+        }]
+        : []),
+      ...(attachmentContext
+        ? [{
+          role: "user" as const,
+          content: `Current file attachment context:\n${attachmentContext}`,
         }]
         : []),
       ...recentMessages,
@@ -1487,7 +1603,9 @@ export function initials(name: string) {
 
 async function mergePersistedArtifacts(root: PmoWorkspaceState) {
   let rows: Array<{
+    id: string;
     workspaceId: string;
+    parentArtifactId: string | null;
     title: string;
     type: string;
     owner: string;
@@ -1498,11 +1616,15 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
     href: string;
     previewJson: string;
     pinned: boolean | number;
+    version: number;
+    commitMessage: string;
   }>;
   try {
     const result = await getDb()
       .prepare(
-        `SELECT workspace_id as workspaceId,
+        `SELECT id,
+                workspace_id as workspaceId,
+                parent_artifact_id as parentArtifactId,
                 title,
                 file_type as type,
                 owner,
@@ -1512,7 +1634,9 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
                 r2_key as r2Key,
                 href,
                 preview_json as previewJson,
-                pinned
+                pinned,
+                version,
+                commit_message as commitMessage
          FROM artifacts`,
       )
       .all<typeof rows[number]>();
@@ -1522,30 +1646,18 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
   }
 
   const modeByWorkspaceId = new Map(Object.entries(scopeByMode).map(([mode, scope]) => [`ws-${scope}`, mode as WorkspaceMode]));
+  const workspaceIdByArtifactId = new Map(rows.map((row) => [row.id, row.workspaceId]));
+  const artifactsById = new Map<string, ArtifactVersion>();
+  const parentIds = new Set<string>();
   for (const row of rows) {
     const mode = modeByWorkspaceId.get(row.workspaceId);
     if (!mode) continue;
-    let preview: string[] = [];
-    let previewJson: JsonValue | undefined;
-    let projectId: string | null = null;
-    let sourceChatTitle: string | undefined;
-    try {
-      const parsed = JSON.parse(row.previewJson) as JsonValue;
-      previewJson = parsed;
-      if (Array.isArray(parsed)) {
-        preview = parsed.map((item) => String(item));
-      } else if (parsed && typeof parsed === "object") {
-        const record = parsed as { preview?: unknown; projectId?: unknown; sourceChatTitle?: unknown };
-        preview = Array.isArray(record.preview) ? record.preview.map((item) => String(item)) : [];
-        projectId = typeof record.projectId === "string" && record.projectId ? record.projectId : null;
-        sourceChatTitle = typeof record.sourceChatTitle === "string" && record.sourceChatTitle ? record.sourceChatTitle : undefined;
-      }
-    } catch {
-      preview = [];
-    }
-    const artifact: Artifact = {
-      projectId,
-      sourceChatTitle,
+    const parsedPreview = parseArtifactPreview(row.previewJson);
+    const artifact: ArtifactVersion = {
+      id: row.id,
+      projectId: parsedPreview.projectId,
+      parentArtifactId: row.parentArtifactId,
+      sourceChatTitle: parsedPreview.sourceChatTitle,
       title: row.title,
       type: row.type,
       owner: row.owner,
@@ -1554,17 +1666,71 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
       summary: row.summary,
       href: artifactDownloadHref(row.r2Key, row.href),
       r2Key: row.r2Key,
-      preview,
-      previewJson,
+      preview: parsedPreview.preview,
+      previewJson: parsedPreview.previewJson,
       pinnedTo: row.pinned ? [mode] : [],
+      version: row.version || 1,
+      commitMessage: row.commitMessage || "Artifact version",
     };
+    artifactsById.set(row.id, artifact);
+    if (row.parentArtifactId) parentIds.add(row.parentArtifactId);
+  }
+
+  for (const artifact of artifactsById.values()) {
+    const mode = modeByWorkspaceId.get(workspaceIdByArtifactId.get(artifact.id) ?? "");
+    if (!mode || parentIds.has(artifact.id)) continue;
+    const versionHistory = buildArtifactVersionHistory(artifact, artifactsById);
+    const latestArtifact: Artifact = { ...artifact, versionHistory };
     const workspace = root.workspaces[mode];
     workspace.artifacts = [
-      artifact,
-      ...workspace.artifacts.filter((item) => item.r2Key !== artifact.r2Key),
+      latestArtifact,
+      ...workspace.artifacts.filter((item) =>
+        item.r2Key !== latestArtifact.r2Key
+        && item.id !== latestArtifact.id
+        && !(item.title === latestArtifact.title && item.projectId === latestArtifact.projectId)
+      ),
     ];
   }
   return root;
+}
+
+function parseArtifactPreview(previewJsonText: string): {
+  preview: string[];
+  previewJson?: JsonValue;
+  projectId: string | null;
+  sourceChatTitle?: string;
+} {
+  let preview: string[] = [];
+  let previewJson: JsonValue | undefined;
+  let projectId: string | null = null;
+  let sourceChatTitle: string | undefined;
+  try {
+    const parsed = JSON.parse(previewJsonText) as JsonValue;
+    previewJson = parsed;
+    if (Array.isArray(parsed)) {
+      preview = parsed.map((item) => String(item));
+    } else if (parsed && typeof parsed === "object") {
+      const record = parsed as { preview?: unknown; projectId?: unknown; sourceChatTitle?: unknown };
+      preview = Array.isArray(record.preview) ? record.preview.map((item) => String(item)) : [];
+      projectId = typeof record.projectId === "string" && record.projectId ? record.projectId : null;
+      sourceChatTitle = typeof record.sourceChatTitle === "string" && record.sourceChatTitle ? record.sourceChatTitle : undefined;
+    }
+  } catch {
+    preview = [];
+  }
+  return { preview, previewJson, projectId, sourceChatTitle };
+}
+
+function buildArtifactVersionHistory(latest: ArtifactVersion, artifactsById: Map<string, ArtifactVersion>) {
+  const history: ArtifactVersion[] = [];
+  const seen = new Set<string>();
+  let current: ArtifactVersion | undefined = latest;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    history.push(current);
+    current = current.parentArtifactId ? artifactsById.get(current.parentArtifactId) : undefined;
+  }
+  return history.sort((left, right) => right.version - left.version);
 }
 
 export const fetchPmoWorkspace = createServerFn({ method: "GET" }).handler(async () => {
@@ -1694,7 +1860,7 @@ function chatSyncScopeKey({
 }
 
 export const sendChatMessage = createServerFn({ method: "POST" })
-  .validator((data: { mode: WorkspaceMode; teamId?: string | null; projectId: string | null; chatId: string; chatTitle: string; text: string; model: string; reasoningLevel?: ChatReasoningLevel; webSearchEnabled?: boolean }) => data)
+  .validator((data: SendChatMessageInput) => data)
   .handler(async ({ context, data }): Promise<SendChatMessageResult> => {
     const user = await requireWorkspaceEditor();
     await requireChatContributor({
@@ -1707,9 +1873,11 @@ export const sendChatMessage = createServerFn({ method: "POST" })
     const workspace = getMutableWorkspace(data.mode);
     const conversationKey = getConversationKey(data.mode, data.projectId, data.chatId);
     const text = data.text.trim();
-    if (!text) return { workspace: clone(getMutableRoot()), llmTrace: null };
+    const attachments = sanitizeChatAttachments(data.attachments);
+    if (!text && attachments.length === 0) return { workspace: clone(getMutableRoot()), llmTrace: null };
     const existingMessages = await listPersistedChatMessages(data.chatId);
-    const chatTitle = existingMessages.length === 0 ? await generateChatTitleFromInitialMessage(context, text) : data.chatTitle;
+    const titleSeed = text || attachments.map((attachment) => attachment.name).join(", ");
+    const chatTitle = existingMessages.length === 0 ? await generateChatTitleFromInitialMessage(context, titleSeed) : data.chatTitle;
 
     const userMessage: ChatMessage = {
       id: createId("msg-user"),
@@ -1717,11 +1885,12 @@ export const sendChatMessage = createServerFn({ method: "POST" })
       role: "user",
       avatar: avatarAlex,
       time: nowLabel(),
-      text,
+      text: text || "Attached files for review.",
+      attachments: attachments.length ? attachments : undefined,
     };
     const aiResult = await runGemmaChat({
       context,
-      data: { ...data, chatTitle, text },
+      data: { ...data, chatTitle, text: userMessage.text, attachments },
       existingMessages,
       workspace,
     });
@@ -1958,6 +2127,157 @@ export const deleteArtifact = createServerFn({ method: "POST" })
     return mergePersistedArtifacts(clone(getMutableRoot()));
   });
 
+type ArtifactVersionSourceRow = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  fileType: string;
+  owner: string;
+  artifactDate: string;
+  status: Artifact["status"];
+  summary: string;
+  r2Key: string;
+  href: string;
+  previewJson: string;
+  pinned: boolean | number;
+  version: number;
+};
+
+async function findArtifactVersionSource(id: string) {
+  return getDb()
+    .prepare(
+      `SELECT id,
+              workspace_id as workspaceId,
+              title,
+              file_type as fileType,
+              owner,
+              artifact_date as artifactDate,
+              status,
+              summary,
+              r2_key as r2Key,
+              href,
+              preview_json as previewJson,
+              pinned,
+              version
+       FROM artifacts
+       WHERE id = ?
+       LIMIT 1`,
+    )
+    .bind(id)
+    .first<ArtifactVersionSourceRow>();
+}
+
+function versionedR2KeyFrom(baseKey: string, nextVersion: number) {
+  const lastSlash = baseKey.lastIndexOf("/");
+  const folder = lastSlash >= 0 ? baseKey.slice(0, lastSlash + 1) : "";
+  const fileName = lastSlash >= 0 ? baseKey.slice(lastSlash + 1) : baseKey;
+  const dot = fileName.lastIndexOf(".");
+  const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const extension = dot > 0 ? fileName.slice(dot) : "";
+  return `${folder}versions/${stem}-v${nextVersion}-${crypto.randomUUID()}${extension}`;
+}
+
+export const restoreArtifactVersion = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; artifactId: string; commitMessage?: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const source = await findArtifactVersionSource(data.artifactId);
+    if (!source) throw new Error("Artifact version was not found.");
+    const workspaceId = `ws-${scopeByMode[data.mode]}`;
+    if (source.workspaceId !== workspaceId) throw new Error("Artifact version is outside the selected workspace.");
+
+    const latest = await getDb()
+      .prepare(
+        `WITH RECURSIVE descendants(id, version, pinned, r2Key) AS (
+           SELECT id, version, pinned, r2_key
+           FROM artifacts
+           WHERE id = ?
+           UNION ALL
+           SELECT artifacts.id, artifacts.version, artifacts.pinned, artifacts.r2_key
+           FROM artifacts
+           INNER JOIN descendants ON artifacts.parent_artifact_id = descendants.id
+         )
+         SELECT id, version, pinned, r2Key
+         FROM descendants
+         WHERE id NOT IN (SELECT parent_artifact_id FROM artifacts WHERE parent_artifact_id IS NOT NULL)
+         ORDER BY version DESC
+         LIMIT 1`,
+      )
+      .bind(source.id)
+      .first<{ id: string; version: number; pinned: boolean | number; r2Key: string }>();
+    if (!latest) throw new Error("Latest artifact version was not found.");
+
+    const object = await getArtifactsBucket().get(source.r2Key);
+    if (!object?.body) throw new Error("Historical artifact file was not found.");
+
+    const nextVersion = (latest.version || source.version || 1) + 1;
+    const nextId = `artifact-${crypto.randomUUID()}`;
+    const nextR2Key = versionedR2KeyFrom(latest.r2Key, nextVersion);
+    await getArtifactsBucket().put(nextR2Key, await object.arrayBuffer(), {
+      httpMetadata: object.httpMetadata,
+      customMetadata: {
+        ...(object.customMetadata ?? {}),
+        restored_from_artifact_id: source.id,
+        parent_artifact_id: latest.id,
+        version: String(nextVersion),
+      },
+    });
+    const href = artifactDownloadHref(nextR2Key, source.href);
+    const commitMessage = (data.commitMessage?.trim() || `Restored version ${source.version}`).slice(0, 160);
+
+    await getDb()
+      .prepare(
+        `INSERT INTO artifacts (
+          id,
+          workspace_id,
+          title,
+          file_type,
+          owner,
+          artifact_date,
+          status,
+          summary,
+          r2_key,
+          href,
+          preview_json,
+          pinned,
+          version,
+          parent_artifact_id,
+          commit_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        nextId,
+        source.workspaceId,
+        source.title,
+        source.fileType,
+        source.owner,
+        new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        source.status,
+        source.summary,
+        nextR2Key,
+        href,
+        source.previewJson,
+        latest.pinned ? 1 : 0,
+        nextVersion,
+        latest.id,
+        commitMessage,
+      )
+      .run();
+
+    const workspace = getMutableWorkspace(data.mode);
+    recordActivity(workspace, "Artifact restored", `${source.title} restored as version ${nextVersion}.`);
+    await recordWorkspaceMutation({
+      entity: "artifact",
+      entityId: nextId,
+      invalidates: ["workspace"],
+      mode: data.mode,
+      operation: "restore",
+      sourceClientId: user.clientId,
+      sourceUserId: user.id,
+    });
+    return mergePersistedArtifacts(clone(getMutableRoot()));
+  });
+
 export const saveTableArtifact = createServerFn({ method: "POST" })
   .validator((data: FormData) => data)
   .handler(async ({ data }) => {
@@ -1967,6 +2287,8 @@ export const saveTableArtifact = createServerFn({ method: "POST" })
     const mode = modeValue as WorkspaceMode;
     const projectId = optionalFormString(data, "project_id");
     const sourceChatTitle = optionalFormString(data, "chat_title") ?? undefined;
+    const baseArtifactId = optionalFormString(data, "base_artifact_id");
+    const commitMessage = (optionalFormString(data, "commit_message") ?? "Updated from follow-on chat").slice(0, 160);
     const seedTitle = requiredFormString(data, "title", "Artifact title").slice(0, 96);
     const rowsJson = requiredFormString(data, "rows_json", "Table rows");
     let rows: ExportTable["rows"];
@@ -1981,13 +2303,22 @@ export const saveTableArtifact = createServerFn({ method: "POST" })
 
     const workspace = getMutableWorkspace(mode);
     const workspaceId = `ws-${scopeByMode[mode]}`;
-    const title = (await generateArtifactTitle(seedTitle, rows)).slice(0, 96);
+    const baseArtifact = baseArtifactId ? await findArtifactVersionSource(baseArtifactId) : null;
+    if (baseArtifactId && (!baseArtifact || baseArtifact.workspaceId !== workspaceId)) {
+      throw new Error("The artifact being updated is not available in this workspace.");
+    }
+    const title = baseArtifact?.title ?? (await generateArtifactTitle(seedTitle, rows)).slice(0, 96);
+    const nextVersion = baseArtifact ? (baseArtifact.version || 1) + 1 : 1;
     const fileName = `${safeArtifactFileName(title)}.xlsx`;
     const xlsxBlob = await xlsxBlobFromRows(title, rows);
-    const r2Key = `${scopeByMode[mode]}/generated/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${fileName}`;
+    const r2Key = baseArtifact
+      ? versionedR2KeyFrom(baseArtifact.r2Key, nextVersion)
+      : `${scopeByMode[mode]}/generated/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${fileName}`;
     const href = artifactDownloadHref(r2Key, `/artifacts/${fileName}`);
     const artifactDate = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const artifactId = `artifact-${crypto.randomUUID()}`;
     const artifact: Artifact = {
+      id: artifactId,
       projectId,
       sourceChatTitle,
       title,
@@ -2000,7 +2331,10 @@ export const saveTableArtifact = createServerFn({ method: "POST" })
       r2Key,
       preview: ["Saved table export", fileName],
       previewJson: buildTablePreviewJson(rows, ["Saved table export", fileName], projectId, sourceChatTitle),
-      pinnedTo: [],
+      pinnedTo: baseArtifact?.pinned ? [mode] : [],
+      version: nextVersion,
+      parentArtifactId: baseArtifact?.id ?? null,
+      commitMessage: baseArtifact ? commitMessage : "Saved from chat table export",
     };
 
     await getArtifactsBucket().put(r2Key, xlsxBlob, {
@@ -2012,6 +2346,8 @@ export const saveTableArtifact = createServerFn({ method: "POST" })
         workspace_mode: mode,
         project_id: projectId ?? "",
         source_chat_title: sourceChatTitle ?? "",
+        parent_artifact_id: baseArtifact?.id ?? "",
+        version: String(nextVersion),
       },
     });
 
@@ -2029,11 +2365,14 @@ export const saveTableArtifact = createServerFn({ method: "POST" })
           r2_key,
           href,
           preview_json,
-          pinned
-        ) VALUES (?, ?, ?, 'XLSX', 'You', ?, 'Draft', ?, ?, ?, ?, 0)`,
+          pinned,
+          version,
+          parent_artifact_id,
+          commit_message
+        ) VALUES (?, ?, ?, 'XLSX', 'You', ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
-        `artifact-${crypto.randomUUID()}`,
+        artifactId,
         workspaceId,
         title,
         artifactDate,
@@ -2041,17 +2380,21 @@ export const saveTableArtifact = createServerFn({ method: "POST" })
         r2Key,
         href,
         JSON.stringify(artifact.previewJson),
+        baseArtifact?.pinned ? 1 : 0,
+        nextVersion,
+        baseArtifact?.id ?? null,
+        artifact.commitMessage,
       )
       .run();
 
-    workspace.artifacts = [artifact, ...workspace.artifacts.filter((item) => item.r2Key !== r2Key)];
-    recordActivity(workspace, "Artifact saved", `${title} saved as XLSX.`);
+    workspace.artifacts = [artifact, ...workspace.artifacts.filter((item) => item.r2Key !== r2Key && item.id !== baseArtifact?.id)];
+    recordActivity(workspace, baseArtifact ? "Artifact version saved" : "Artifact saved", `${title} saved as version ${nextVersion}.`);
     await recordWorkspaceMutation({
       entity: "artifact",
-      entityId: r2Key,
+      entityId: artifactId,
       invalidates: ["workspace"],
       mode,
-      operation: "insert",
+      operation: baseArtifact ? "version" : "insert",
       projectId,
       sourceClientId: user.clientId,
       sourceUserId: user.id,

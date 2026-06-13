@@ -158,14 +158,20 @@ The chat UI consumes this endpoint with the browser `EventSource` API and append
 
 ### Context-Aware Agentic Routing
 
-Before embedding or querying Vectorize, scoped project chat calls the lightweight intent router in [src/lib/intent-routing.ts](src/lib/intent-routing.ts). The router uses `@cf/meta/llama-3-8b-instruct` to return one strict label:
+Before retrieval work, scoped project chat calls the lightweight intent router in [src/lib/intent-routing.ts](src/lib/intent-routing.ts). The router uses `@cf/meta/llama-3-8b-instruct` to return one strict label:
 
 - `RAG_SEARCH`: embed the prompt, query Vectorize with team/project metadata filters, load cited chunks, and stream a grounded answer.
-- `WEB_SEARCH`: bypass Vectorize, call the configured external search providers, and stream an answer grounded in live web context.
+- `WEB_SEARCH`: call the configured external search providers, load scoped historical chunks, and stream an answer grounded in both live web context and project history.
 - `DIRECT_CHAT`: bypass Vectorize and web search, then send the prompt directly to the primary generation model with workspace/project context.
 - `ARTIFACT_GENERATION`: bypass Vectorize and web search, then use the primary generation model to draft the requested artifact.
 
 If intent classification fails, the route falls back to `RAG_SEARCH` so project-history questions remain evidence-first.
+
+### Hybrid External Search
+
+The hybrid web search path is implemented in [src/lib/rag.ts](src/lib/rag.ts). `fetchConsolidatedWebSearch` runs Tavily and Firecrawl requests concurrently with `Promise.allSettled()`, requests a Tavily AI summary, requests Firecrawl Markdown extraction, records provider usage, and returns successful output even when one provider fails or times out.
+
+For `WEB_SEARCH` intent, the generation prompt includes a `Real-Time Web Context` section alongside scoped D1-backed historical chunks for the active team project.
 
 ## Artifact Files
 

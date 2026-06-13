@@ -275,6 +275,7 @@ export const chatMessages = sqliteTable(
     artifactTitle: text("artifact_title"),
     artifactType: text("artifact_type", { enum: ["doc", "ppt", "sheet"] }),
     artifactMeta: text("artifact_meta"),
+    attachmentsJson: text("attachments_json"),
     createdAt: text("created_at").notNull(),
   },
   (table) => ({
@@ -327,10 +328,15 @@ export const artifacts = sqliteTable(
     href: text("href").notNull(),
     previewJson: text("preview_json").notNull(),
     pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    version: integer("version").notNull().default(1),
+    parentArtifactId: text("parent_artifact_id").references((): AnySQLiteColumn => artifacts.id, { onDelete: "set null" }),
+    commitMessage: text("commit_message").notNull().default("Initial artifact version"),
   },
   (table) => ({
     workspaceIdx: index("artifacts_workspace_idx").on(table.workspaceId),
     r2KeyIdx: uniqueIndex("artifacts_r2_key_idx").on(table.r2Key),
+    parentIdx: index("artifacts_parent_idx").on(table.parentArtifactId),
+    versionIdx: index("artifacts_version_idx").on(table.workspaceId, table.title, table.version),
   }),
 );
 

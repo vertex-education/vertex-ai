@@ -149,6 +149,11 @@ function formatMs(value: number | null | undefined) {
   return `${Math.round(number).toLocaleString()}ms`;
 }
 
+function formatCurrency(value: number | null | undefined) {
+  const number = finiteNumber(value);
+  return number === null ? "Not tracked" : `$${number.toFixed(2)}`;
+}
+
 function formatDateTime(value: number | null | undefined) {
   const number = finiteNumber(value);
   return number === null ? "No activity" : new Date(number).toLocaleString();
@@ -423,7 +428,7 @@ async function buildSingleMetricCard(metricId: string): Promise<MetricCard> {
     }
     case "ai-gateway-cost": {
       const gatewayUsage = await getGatewayUsageSummary();
-      return { id: metricId, label: "AI Gateway cost", value: gatewayUsage.cost === null ? "Not tracked" : `$${gatewayUsage.cost.toFixed(4)}`, detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`, status: gatewayUsage.requests ? "ok" : "watch" };
+      return { id: metricId, label: "AI Gateway cost", value: formatCurrency(gatewayUsage.cost), detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`, status: gatewayUsage.requests ? "ok" : "watch" };
     }
     case "tavily-credits-used": {
       const usage = await getProviderUsageRow("tavily", thirtyDaysAgo);
@@ -535,7 +540,7 @@ async function getHealthMetrics() {
     { id: "total-chats-initiated", label: "Total chats initiated", value: totalChats.toLocaleString(), detail: `${totalMessages.toLocaleString()} messages stored`, status: "ok" },
     { id: "gemma-token-usage", label: "Gemma 4 token usage", value: formatNumber(cloudflareUsage?.totalTokens), detail: `${cloudflareUsage?.requests ?? 0} Workers AI requests in 30 days`, status: cloudflareUsage ? "ok" : "watch" },
     { id: "ai-gateway-token-usage", label: "AI Gateway tokens", value: formatNumber(gatewayUsage.totalTokens), detail: `${gatewayUsage.requests.toLocaleString()} Gateway logs sampled; ${gatewayUsage.cached.toLocaleString()} cached`, status: gatewayUsage.requests ? "ok" : "watch" },
-    { id: "ai-gateway-cost", label: "AI Gateway cost", value: gatewayUsage.cost === null ? "Not tracked" : `$${gatewayUsage.cost.toFixed(4)}`, detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`, status: gatewayUsage.requests ? "ok" : "watch" },
+    { id: "ai-gateway-cost", label: "AI Gateway cost", value: formatCurrency(gatewayUsage.cost), detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`, status: gatewayUsage.requests ? "ok" : "watch" },
     { id: "tavily-credits-used", label: "Tavily credits used", value: formatNumber(tavilyUsage?.creditsUsed), detail: `${tavilyUsage?.requests ?? 0} searches tracked in 30 days`, status: tavilyUsage ? "ok" : "watch" },
     { id: "firecrawl-credits-used", label: "Firecrawl credits used", value: formatNumber(firecrawlUsage?.creditsUsed), detail: `${firecrawlUsage?.requests ?? 0} searches tracked in 30 days`, status: firecrawlUsage ? "ok" : "watch" },
     { id: "files-stored", label: "Files stored", value: totalStoredFiles.toLocaleString(), detail: `${totalChunks.toLocaleString()} searchable chunks`, status: "ok" },
@@ -559,7 +564,7 @@ async function getHealthMetrics() {
           totalTokens: gatewayUsage.totalTokens,
           averageDuration: null,
           latestAt: gatewayUsage.latestAt,
-          creditsLabel: gatewayUsage.cost === null ? "Not tracked" : `$${gatewayUsage.cost.toFixed(4)}`,
+          creditsLabel: formatCurrency(gatewayUsage.cost),
           inputTokensLabel: formatNumber(gatewayUsage.tokensIn),
           outputTokensLabel: formatNumber(gatewayUsage.tokensOut),
           totalTokensLabel: formatNumber(gatewayUsage.totalTokens),
@@ -620,7 +625,7 @@ async function getHealthMetrics() {
         gatewayStatus: gatewayLog ? `${gatewayLog.status_code} ${gatewayLog.success ? "OK" : "Failed"}` : "Not available",
         gatewayCached: gatewayLog?.cached ?? null,
         gatewayCost: gatewayLog?.cost ?? null,
-        gatewayCostLabel: gatewayLog?.cost === undefined ? "Not tracked" : `$${gatewayLog.cost.toFixed(4)}`,
+        gatewayCostLabel: formatCurrency(gatewayLog?.cost),
         creditsLabel: formatNumber(row.creditsUsed),
         inputTokensLabel: formatNumber(gatewayTokensIn ?? row.inputTokens),
         outputTokensLabel: formatNumber(gatewayTokensOut ?? row.outputTokens),

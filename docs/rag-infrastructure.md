@@ -44,7 +44,7 @@ The route calls `createScopedRagStreamResponse` in `src/lib/rag.ts`. That shared
 - fetches workspace and project context from D1
 - classifies the prompt intent with `classifyPromptIntent` from `src/lib/intent-routing.ts`
 - routes `DIRECT_CHAT` and `ARTIFACT_GENERATION` directly to the primary generation model without embeddings or Vectorize
-- routes `WEB_SEARCH` to the external search pipeline without embeddings or Vectorize
+- routes `WEB_SEARCH` to the hybrid external search pipeline and scoped historical chunk retrieval
 - routes `RAG_SEARCH` through embeddings, Vectorize, and matching chunks from D1
 - calls Workers AI with `stream: true`
 - returns `Content-Type: text/event-stream; charset=utf-8`
@@ -66,13 +66,22 @@ The frontend consumes this endpoint with the browser `EventSource` API in `src/r
 
 ## Context-Aware Agentic Routing
 
-Scoped project chat runs intent routing before any Vectorize query execution. The router uses `@cf/meta/llama-3-8b-instruct` as a fast Workers AI classifier and accepts only four labels:
+Scoped project chat runs intent routing before retrieval work. The router uses `@cf/meta/llama-3-8b-instruct` as a fast Workers AI classifier and accepts only four labels:
 
 | Intent | Runtime path | Vectorize usage |
 | --- | --- | --- |
 | `RAG_SEARCH` | Embed the prompt, query Vectorize with `team_id` and `project_id` filters, load D1 chunks, and stream a cited answer. | Required |
-| `WEB_SEARCH` | Fetch consolidated Tavily and Firecrawl context, then stream a web-grounded answer. | Bypassed |
+| `WEB_SEARCH` | Concurrently fetch consolidated Tavily and Firecrawl context, query scoped D1-backed chunks, and stream an answer grounded in both sections. | Required for historical chunks |
 | `DIRECT_CHAT` | Send the prompt plus scoped workspace/project context directly to the primary generation model. | Bypassed |
 | `ARTIFACT_GENERATION` | Send the artifact request plus scoped workspace/project context directly to the primary generation model. | Bypassed |
 
 If the classifier returns an invalid label, the router applies a lightweight deterministic fallback. If the classifier call fails, it falls back to `RAG_SEARCH` so scoped historical questions remain grounded in project artifacts.
+
+## Hybrid External Search
+
+`fetchConsolidatedWebSearch` in `src/lib/rag.ts` calls Tavily and Firecrawl concurrently with `Promise.allSettled()`. Tavily is requested with `include_answer: true` for an AI-generated summary, while Firecrawl is requested with Markdown scrape options for full-page extraction. Each provider call has a 10 second timeout; failures or timeouts are recorded as provider issues and the successful provider output is still returned.
+
+When intent routing selects `WEB_SEARCH`, the generation system prompt includes both:
+
+- `Real-Time Web Context`: the consolidated Tavily summary and Firecrawl Markdown content.
+- `Scoped historical chunks`: D1 chunk text loaded from Vectorize matches for the active team and project.
