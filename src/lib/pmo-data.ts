@@ -2257,13 +2257,17 @@ export const toggleWorkflowActionPin = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const user = await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
+    const persistedAction = await getDb()
+      .prepare("SELECT title, project_id as projectId, pinned FROM workspace_actions WHERE id = ? AND workspace_id = ? AND kind = ? LIMIT 1")
+      .bind(data.id, workspaceIdForMode(data.mode), data.kind)
+      .first<{ title: string; projectId: string | null; pinned: boolean | number }>();
     const collection = data.kind === "task"
       ? workspace.tasks
       : data.kind === "approval"
         ? workspace.approvals
         : workspace.decisions;
     const item = collection.find((entry) => entry.id === data.id);
-    const nextPinned = !item?.pinned;
+    const nextPinned = !(persistedAction ? Boolean(persistedAction.pinned) : Boolean(item?.pinned));
 
     if (data.kind === "task") {
       workspace.tasks = workspace.tasks.map((task) => task.id === data.id ? { ...task, pinned: nextPinned } : task);
@@ -2275,14 +2279,14 @@ export const toggleWorkflowActionPin = createServerFn({ method: "POST" })
 
     await updatePersistedWorkflowActionPinned(data.mode, data.kind, data.id, nextPinned);
     const label = data.kind === "task" ? "Task" : data.kind === "approval" ? "Approval" : "Decision";
-    recordActivity(workspace, nextPinned ? `${label} pinned` : `${label} unpinned`, `${item?.title ?? label} workspace pin changed.`);
+    recordActivity(workspace, nextPinned ? `${label} pinned` : `${label} unpinned`, `${item?.title ?? persistedAction?.title ?? label} workspace pin changed.`);
     await recordWorkspaceMutation({
       entity: data.kind,
       entityId: data.id,
       invalidates: ["workspace"],
       mode: data.mode,
       operation: nextPinned ? "pin" : "unpin",
-      projectId: item?.projectId ?? null,
+      projectId: item?.projectId ?? persistedAction?.projectId ?? null,
       sourceClientId: user.clientId,
       sourceUserId: user.id,
     });
