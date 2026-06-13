@@ -367,3 +367,28 @@ export const workspaceActions = sqliteTable(
     workspaceKindIdx: index("workspace_actions_workspace_kind_idx").on(table.workspaceId, table.kind),
   }),
 );
+
+export const adminUsageEvents = sqliteTable(
+  "admin_usage_events",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    feature: text("feature").notNull(),
+    model: text("model"),
+    creditsUsed: integer("credits_used"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    totalTokens: integer("total_tokens"),
+    durationMs: integer("duration_ms"),
+    teamId: text("team_id"),
+    projectId: text("project_id"),
+    chatId: text("chat_id"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    providerIdx: index("admin_usage_events_provider_idx").on(table.provider, table.createdAt),
+    scopeIdx: index("admin_usage_events_scope_idx").on(table.teamId, table.projectId, table.createdAt),
+    chatIdx: index("admin_usage_events_chat_idx").on(table.chatId, table.createdAt),
+  }),
+);

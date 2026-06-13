@@ -79,7 +79,7 @@ function UserProfilePage() {
                     Invites
                   </Button>
                   {session.user.role === "admin" ? (
-                    <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/admin/users")}>
+                    <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/admin")}>
                       <ShieldCheck className="size-4" />
                       Admin
                     </Button>

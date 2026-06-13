@@ -1,5 +1,7 @@
 /// <reference path="../../worker-configuration.d.ts" />
 
+import { runWorkersAiWithGateway } from "@/lib/ai-gateway";
+
 export type ScopeLevel = "org" | "team" | "personal";
 
 export type RegistryDocumentIngestionJob = {
@@ -224,7 +226,12 @@ async function embedTexts(env: DocumentIngestionEnv, texts: string[]) {
 
   for (let index = 0; index < texts.length; index += embeddingBatchSize) {
     const batch = texts.slice(index, index + embeddingBatchSize);
-    const result = (await env.AI.run(embeddingModelId, { text: batch, pooling: "cls" })) as EmbeddingResponse;
+    const result = (await runWorkersAiWithGateway(env.AI, embeddingModelId, { text: batch, pooling: "cls" }, {
+      metadata: {
+        feature: "document-embedding",
+        model: embeddingModelId,
+      },
+    })) as EmbeddingResponse;
     if (!result.data || result.data.length !== batch.length) {
       throw new Error("Embedding response did not match the requested chunk count.");
     }

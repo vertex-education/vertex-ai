@@ -4,13 +4,15 @@ import { env } from "cloudflare:workers";
 import { createServerFn } from "@tanstack/react-start";
 import { setResponseStatus } from "@tanstack/react-start/server";
 import { getRequest } from "@tanstack/start-server-core";
+import { getAiGatewayLogId, runWorkersAiWithGateway } from "@/lib/ai-gateway";
+import { recordAdminUsageEvent } from "@/lib/admin-metrics.server";
 import { getAuth } from "@/lib/auth";
 import type { DocumentIngestionJob } from "@/lib/document-ingestion-queue";
+import { classifyPromptIntent, type PromptIntent } from "@/lib/intent-routing";
 import { buildVertexAiSystemPrompt } from "@/lib/prompts";
 
 const embeddingModelId = "@cf/baai/bge-large-en-v1.5";
 const generationModelId = "@cf/google/gemma-4-26b-a4b-it";
-const intentRoutingModelId = "@cf/meta/llama-3.2-1b-instruct";
 const embeddingBatchSize = 50;
 
 type RagEnv = Env & {
@@ -85,8 +87,6 @@ type TavilySearchPayload = {
 type FirecrawlSearchPayload = {
   data?: unknown;
 };
-
-type PromptIntent = "RAG_SEARCH" | "DIRECT_CHAT" | "ARTIFACT_GENERATION";
 
 function getRuntimeEnv() {
   return env as RagEnv;
@@ -222,7 +222,12 @@ async function embedTexts(texts: string[]) {
 
   for (let index = 0; index < texts.length; index += embeddingBatchSize) {
     const batch = texts.slice(index, index + embeddingBatchSize);
-    const result = (await ai.run(embeddingModelId, { text: batch, pooling: "cls" })) as EmbeddingResponse;
+    const result = (await runWorkersAiWithGateway(ai, embeddingModelId, { text: batch, pooling: "cls" }, {
+      metadata: {
+        feature: "scoped-rag-embedding",
+        model: embeddingModelId,
+      },
+    })) as EmbeddingResponse;
     if (!result.data || result.data.length !== batch.length) {
       throw new Error("Embedding response did not match the requested chunk count.");
     }
@@ -230,38 +235,6 @@ async function embedTexts(texts: string[]) {
   }
 
   return embeddings;
-}
-
-function extractGeneratedText(result: unknown) {
-  if (typeof result === "string") return result;
-  if (!result || typeof result !== "object") return "";
-
-  const record = result as Record<string, unknown>;
-  const response = record.response;
-  if (typeof response === "string") return response;
-
-  const text = record.text;
-  if (typeof text === "string") return text;
-
-  const choices = record.choices;
-  if (Array.isArray(choices)) {
-    return choices
-      .map((choice) => {
-        if (!choice || typeof choice !== "object") return "";
-        const item = choice as Record<string, unknown>;
-        const message = item.message;
-        if (message && typeof message === "object") {
-          const content = (message as Record<string, unknown>).content;
-          return typeof content === "string" ? content : "";
-        }
-        return typeof item.text === "string" ? item.text : "";
-      })
-      .filter(Boolean)
-      .join("\n")
-      .trim();
-  }
-
-  return "";
 }
 
 function extractStreamToken(payload: unknown) {
@@ -296,43 +269,6 @@ function extractStreamToken(payload: unknown) {
   }
 
   return "";
-}
-
-function normalizePromptIntent(value: string): PromptIntent | null {
-  const normalized = value.trim().toUpperCase().replace(/[^A-Z_]/g, "");
-  if (normalized === "RAG_SEARCH" || normalized === "DIRECT_CHAT" || normalized === "ARTIFACT_GENERATION") return normalized;
-  return null;
-}
-
-async function classifyPromptIntent(prompt: string): Promise<PromptIntent> {
-  try {
-    const result = await getAi().run(intentRoutingModelId, {
-      messages: [
-        {
-          role: "system",
-          content: [
-            "Classify the user's latest prompt for a scoped command-center assistant.",
-            "Return exactly one label with no explanation: RAG_SEARCH, DIRECT_CHAT, or ARTIFACT_GENERATION.",
-            "Use RAG_SEARCH when the user asks about existing workspace, team, project, uploaded artifact, document, file, record, history, source, citation, or prior generated content.",
-            "Use DIRECT_CHAT for greetings, administrative questions, general conversation, planning, brainstorming, explanation, or requests that do not need scoped records.",
-            "Use ARTIFACT_GENERATION when the user asks to draft, write, create, generate, format, or produce a standalone artifact from the prompt itself.",
-            "When unsure, choose RAG_SEARCH.",
-          ].join(" "),
-        },
-        { role: "user", content: prompt },
-      ],
-      max_completion_tokens: 8,
-      temperature: 0,
-    });
-
-    const intent = normalizePromptIntent(extractGeneratedText(result));
-    return intent ?? "RAG_SEARCH";
-  } catch (error) {
-    console.warn("[ScopedRAG] Intent routing failed; falling back to RAG_SEARCH.", {
-      message: error instanceof Error ? error.message : "Unknown intent routing error.",
-    });
-    return "RAG_SEARCH";
-  }
 }
 
 function buildContext(chunks: DocumentChunkRow[]) {
@@ -430,6 +366,127 @@ function createAiSseResponse(aiStream: ReadableStream<Uint8Array>, citations: Ch
   });
 }
 
+async function createDirectGenerationResponse({
+  intent,
+  prompt,
+  projectId,
+  scopedPromptContext,
+  teamId,
+  workspaceId,
+}: {
+  intent: Extract<PromptIntent, "DIRECT_CHAT" | "ARTIFACT_GENERATION">;
+  prompt: string;
+  teamId: string;
+  workspaceId: string;
+  projectId: string;
+  scopedPromptContext: ScopedPromptContext;
+}) {
+  const startedAt = Date.now();
+  const ai = getAi();
+  const aiStream = (await runWorkersAiWithGateway(ai, generationModelId, {
+    messages: [
+      { role: "system", content: prependScopedContextToSystemPrompt(buildVertexAiSystemPrompt(), scopedPromptContext) },
+      { role: "user", content: prompt },
+    ],
+    max_completion_tokens: 1_200,
+    stream: true,
+    temperature: 0.2,
+  }, {
+    metadata: {
+      feature: intent === "ARTIFACT_GENERATION" ? "scoped-rag-artifact" : "scoped-rag-direct",
+      model: generationModelId,
+      teamId: teamId.slice(0, 80),
+      projectId: projectId.slice(0, 80),
+    },
+  })) as unknown as ReadableStream<Uint8Array>;
+  const aiGatewayLogId = getAiGatewayLogId(ai);
+  await recordAdminUsageEvent({
+    provider: "cloudflare-workers-ai",
+    feature: intent === "ARTIFACT_GENERATION" ? "scoped-rag-artifact-generation" : "scoped-rag-direct-chat",
+    model: generationModelId,
+    durationMs: Date.now() - startedAt,
+    teamId,
+    projectId,
+    metadata: {
+      workspaceId,
+      intent,
+      vectorizeBypassed: true,
+      maxCompletionTokens: 1_200,
+      streamed: true,
+      aiGatewayLogId,
+    },
+  });
+
+  return createAiSseResponse(aiStream, []);
+}
+
+async function createWebSearchGenerationResponse({
+  prompt,
+  projectId,
+  runtimeEnv,
+  scopedPromptContext,
+  teamId,
+  workspaceId,
+}: {
+  prompt: string;
+  teamId: string;
+  workspaceId: string;
+  projectId: string;
+  runtimeEnv: RagEnv;
+  scopedPromptContext: ScopedPromptContext;
+}) {
+  const webContext = await fetchConsolidatedWebSearch(prompt, runtimeEnv);
+  const systemPrompt = [
+    buildScopedEnvironmentContext(scopedPromptContext),
+    "",
+    "You are a scoped team-project assistant.",
+    "Use the real-time web context below for current or external facts.",
+    "If the web providers are unavailable or do not return useful evidence, say that live web search did not return enough usable information.",
+    "Do not invent source URLs, dates, prices, laws, policies, or public facts.",
+    "",
+    "Real-Time Web Context:",
+    webContext,
+  ].join("\n");
+
+  const startedAt = Date.now();
+  const ai = getAi();
+  const aiStream = (await runWorkersAiWithGateway(ai, generationModelId, {
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt },
+    ],
+    max_completion_tokens: 1_200,
+    stream: true,
+    temperature: 0.2,
+  }, {
+    metadata: {
+      feature: "scoped-rag-web",
+      model: generationModelId,
+      teamId: teamId.slice(0, 80),
+      projectId: projectId.slice(0, 80),
+    },
+  })) as unknown as ReadableStream<Uint8Array>;
+  const aiGatewayLogId = getAiGatewayLogId(ai);
+  await recordAdminUsageEvent({
+    provider: "cloudflare-workers-ai",
+    feature: "scoped-rag-web-search",
+    model: generationModelId,
+    durationMs: Date.now() - startedAt,
+    teamId,
+    projectId,
+    metadata: {
+      workspaceId,
+      intent: "WEB_SEARCH",
+      vectorizeBypassed: true,
+      maxCompletionTokens: 1_200,
+      streamed: true,
+      aiGatewayLogId,
+    },
+  });
+
+  return createAiSseResponse(aiStream, []);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -437,18 +494,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function truncateForRagPrompt(value: string, maxLength: number) {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trim()}...` : normalized;
-}
-
-function requiresExternalWebKnowledge(prompt: string) {
-  const normalized = prompt.toLowerCase();
-  const liveWebPatterns = [
-    /\b(today|yesterday|this week|this month|this year|currently|current|latest|recent|recently|newest|now|as of)\b/,
-    /\b(web|internet|online|search|look up|lookup|browse|google|source|sources|cite|citation)\b/,
-    /\b(news|announcement|release|released|pricing|price|stock|weather|schedule|score|law|regulation|policy)\b/,
-    /\b(202[5-9]|203\d)\b/,
-    /https?:\/\//,
-  ];
-  return liveWebPatterns.some((pattern) => pattern.test(normalized));
 }
 
 async function fetchTavilySearch(query: string, apiKey: string) {
@@ -484,7 +529,7 @@ async function fetchFirecrawlSearch(query: string, apiKey: string) {
       query,
       limit: 5,
       scrapeOptions: {
-        formats: [{ type: "markdown" }],
+        formats: ["markdown"],
       },
     }),
   });
@@ -538,11 +583,51 @@ export async function fetchConsolidatedWebSearch(query: string, env: RagEnv) {
   const tasks: Array<Promise<{ provider: "tavily" | "firecrawl"; payload: TavilySearchPayload | FirecrawlSearchPayload }>> = [];
 
   if (env.TAVILY_API_KEY) {
-    tasks.push(fetchTavilySearch(query, env.TAVILY_API_KEY).then((payload) => ({ provider: "tavily" as const, payload })));
+    const startedAt = Date.now();
+    tasks.push(fetchTavilySearch(query, env.TAVILY_API_KEY).then(async (payload) => {
+      await recordAdminUsageEvent({
+        provider: "tavily",
+        feature: "web-search",
+        durationMs: Date.now() - startedAt,
+        metadata: { queryLength: query.length },
+      });
+      return { provider: "tavily" as const, payload };
+    }).catch(async (error) => {
+      await recordAdminUsageEvent({
+        provider: "tavily",
+        feature: "web-search-error",
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          queryLength: query.length,
+          error: error instanceof Error ? error.message : "Unknown Tavily error.",
+        },
+      });
+      throw error;
+    }));
   }
 
   if (env.FIRECRAWL_API_KEY) {
-    tasks.push(fetchFirecrawlSearch(query, env.FIRECRAWL_API_KEY).then((payload) => ({ provider: "firecrawl" as const, payload })));
+    const startedAt = Date.now();
+    tasks.push(fetchFirecrawlSearch(query, env.FIRECRAWL_API_KEY).then(async (payload) => {
+      await recordAdminUsageEvent({
+        provider: "firecrawl",
+        feature: "web-search",
+        durationMs: Date.now() - startedAt,
+        metadata: { queryLength: query.length },
+      });
+      return { provider: "firecrawl" as const, payload };
+    }).catch(async (error) => {
+      await recordAdminUsageEvent({
+        provider: "firecrawl",
+        feature: "web-search-error",
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          queryLength: query.length,
+          error: error instanceof Error ? error.message : "Unknown Firecrawl error.",
+        },
+      });
+      throw error;
+    }));
   }
 
   if (tasks.length === 0) {
@@ -625,33 +710,50 @@ export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput
   await requireScopedProjectAccess(teamId, projectId);
   const scopedPromptContext = await fetchScopedPromptContext(workspaceId, projectId);
 
-  const intent = await classifyPromptIntent(prompt);
+  const runtimeEnv = getRuntimeEnv();
+  const intent = await classifyPromptIntent(prompt, getAi());
   if (intent === "DIRECT_CHAT" || intent === "ARTIFACT_GENERATION") {
-    const aiStream = (await getAi().run(generationModelId, {
-      messages: [
-        { role: "system", content: prependScopedContextToSystemPrompt(buildVertexAiSystemPrompt(), scopedPromptContext) },
-        { role: "user", content: prompt },
-      ],
-      max_completion_tokens: 1_200,
-      stream: true,
-      temperature: 0.2,
-    })) as unknown as ReadableStream<Uint8Array>;
-
-    return createAiSseResponse(aiStream, []);
+    return createDirectGenerationResponse({
+      intent,
+      prompt,
+      teamId,
+      workspaceId,
+      projectId,
+      scopedPromptContext,
+    });
   }
 
-  const runtimeEnv = getRuntimeEnv();
-  const webContext = requiresExternalWebKnowledge(prompt)
-    ? await fetchConsolidatedWebSearch(prompt, runtimeEnv)
-    : "";
+  if (intent === "WEB_SEARCH") {
+    return createWebSearchGenerationResponse({
+      prompt,
+      teamId,
+      workspaceId,
+      projectId,
+      runtimeEnv,
+      scopedPromptContext,
+    });
+  }
 
   const [promptEmbedding] = await embedTexts([prompt]);
+  const vectorStartedAt = Date.now();
   const matches = await getVectorize().query(promptEmbedding, {
     topK: 8,
     returnMetadata: "indexed",
     filter: {
       team_id: { $eq: teamId },
       project_id: { $eq: projectId },
+    },
+  });
+  await recordAdminUsageEvent({
+    provider: "vectorize",
+    feature: "scoped-rag-query",
+    durationMs: Date.now() - vectorStartedAt,
+    teamId,
+    projectId,
+    metadata: {
+      workspaceId,
+      topK: 8,
+      matches: matches.matches.length,
     },
   });
 
@@ -670,19 +772,18 @@ export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput
     buildScopedEnvironmentContext(scopedPromptContext),
     "",
     "You are a scoped team-project assistant.",
-    webContext
-      ? "Use the real-time web context for external current facts, and use the historical chunks for prior generated artifacts."
-      : "Use only the historical chunks included below when answering questions about prior generated artifacts.",
+    "Use only the historical chunks included below when answering questions about prior generated artifacts.",
     "Cite supporting artifact keys inline using the format [r2_key: path].",
     "If the chunks do not contain enough evidence, say that the scoped artifact history does not contain enough information.",
     "Do not invent citations, file names, paths, dates, or facts.",
     "",
-    ...(webContext ? ["Real-Time Web Context:", webContext, ""] : []),
     "Scoped historical chunks:",
     context,
   ].join("\n");
 
-  const aiStream = (await getAi().run(generationModelId, {
+  const generationStartedAt = Date.now();
+  const ai = getAi();
+  const aiStream = (await runWorkersAiWithGateway(ai, generationModelId, {
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },
@@ -690,7 +791,32 @@ export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput
     max_completion_tokens: 1_200,
     stream: true,
     temperature: 0.2,
+  }, {
+    metadata: {
+      feature: "scoped-rag-search",
+      model: generationModelId,
+      teamId: teamId.slice(0, 80),
+      projectId: projectId.slice(0, 80),
+    },
   })) as unknown as ReadableStream<Uint8Array>;
+  const aiGatewayLogId = getAiGatewayLogId(ai);
+  await recordAdminUsageEvent({
+    provider: "cloudflare-workers-ai",
+    feature: "scoped-rag-search",
+    model: generationModelId,
+    durationMs: Date.now() - generationStartedAt,
+    teamId,
+    projectId,
+    metadata: {
+      workspaceId,
+      maxCompletionTokens: 1_200,
+      streamed: true,
+      citations: citations.length,
+      intent,
+      vectorizeBypassed: false,
+      aiGatewayLogId,
+    },
+  });
 
   return createAiSseResponse(aiStream, citations);
 }

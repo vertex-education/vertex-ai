@@ -147,7 +147,7 @@ Team project chat can use scoped RAG when the Cloudflare bindings are configured
 GET /api/scoped-rag-stream?prompt=...&teamId=...&workspaceId=...&projectId=...
 ```
 
-The route validates access, retrieves project context, queries Vectorize-backed artifact chunks, and calls Workers AI with `stream: true`. It returns Server-Sent Events:
+The route validates access, retrieves project context, classifies the prompt intent, and then runs only the required backend path. It returns Server-Sent Events:
 
 - `citations`: matched artifact metadata
 - `token`: incremental Markdown response text
@@ -155,6 +155,17 @@ The route validates access, retrieves project context, queries Vectorize-backed 
 - `stream-error`: validation, retrieval, or model failure inside the SSE protocol
 
 The chat UI consumes this endpoint with the browser `EventSource` API and appends tokens to the optimistic assistant message as they arrive. See [docs/rag-infrastructure.md](docs/rag-infrastructure.md) for setup commands and the full event contract.
+
+### Context-Aware Agentic Routing
+
+Before embedding or querying Vectorize, scoped project chat calls the lightweight intent router in [src/lib/intent-routing.ts](src/lib/intent-routing.ts). The router uses `@cf/meta/llama-3-8b-instruct` to return one strict label:
+
+- `RAG_SEARCH`: embed the prompt, query Vectorize with team/project metadata filters, load cited chunks, and stream a grounded answer.
+- `WEB_SEARCH`: bypass Vectorize, call the configured external search providers, and stream an answer grounded in live web context.
+- `DIRECT_CHAT`: bypass Vectorize and web search, then send the prompt directly to the primary generation model with workspace/project context.
+- `ARTIFACT_GENERATION`: bypass Vectorize and web search, then use the primary generation model to draft the requested artifact.
+
+If intent classification fails, the route falls back to `RAG_SEARCH` so project-history questions remain evidence-first.
 
 ## Artifact Files
 

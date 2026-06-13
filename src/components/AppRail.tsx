@@ -168,7 +168,7 @@ function AppRailAccountMenu({ account }: { account: AppRailAccount }) {
               type="button"
               className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
               role="menuitem"
-              onClick={() => runMenuAction(() => (window.location.href = "/admin/users"))}
+              onClick={() => runMenuAction(() => (window.location.href = "/admin"))}
             >
               <ShieldCheck className="size-4" />
               Admin

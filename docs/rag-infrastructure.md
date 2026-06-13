@@ -42,9 +42,10 @@ The route calls `createScopedRagStreamResponse` in `src/lib/rag.ts`. That shared
 
 - validates team and project access
 - fetches workspace and project context from D1
-- classifies the prompt intent with Workers AI
-- optionally gathers external web context
-- embeds the prompt, queries Vectorize, and loads matching chunks from D1
+- classifies the prompt intent with `classifyPromptIntent` from `src/lib/intent-routing.ts`
+- routes `DIRECT_CHAT` and `ARTIFACT_GENERATION` directly to the primary generation model without embeddings or Vectorize
+- routes `WEB_SEARCH` to the external search pipeline without embeddings or Vectorize
+- routes `RAG_SEARCH` through embeddings, Vectorize, and matching chunks from D1
 - calls Workers AI with `stream: true`
 - returns `Content-Type: text/event-stream; charset=utf-8`
 
@@ -62,3 +63,16 @@ The stream emits named SSE events:
 The frontend consumes this endpoint with the browser `EventSource` API in `src/routes/index.tsx`. Tokens are appended to the optimistic assistant message as they arrive, so existing Markdown rendering updates incrementally. The client closes the `EventSource` on `done` or `stream-error`; network failures use the native `onerror` path.
 
 `chatWithScopedRag` remains available as a TanStack Start server function, but it delegates to `createScopedRagStreamResponse`. New browser chat streaming should use `/api/scoped-rag-stream` so connection lifecycle and termination are handled by standard SSE behavior.
+
+## Context-Aware Agentic Routing
+
+Scoped project chat runs intent routing before any Vectorize query execution. The router uses `@cf/meta/llama-3-8b-instruct` as a fast Workers AI classifier and accepts only four labels:
+
+| Intent | Runtime path | Vectorize usage |
+| --- | --- | --- |
+| `RAG_SEARCH` | Embed the prompt, query Vectorize with `team_id` and `project_id` filters, load D1 chunks, and stream a cited answer. | Required |
+| `WEB_SEARCH` | Fetch consolidated Tavily and Firecrawl context, then stream a web-grounded answer. | Bypassed |
+| `DIRECT_CHAT` | Send the prompt plus scoped workspace/project context directly to the primary generation model. | Bypassed |
+| `ARTIFACT_GENERATION` | Send the artifact request plus scoped workspace/project context directly to the primary generation model. | Bypassed |
+
+If the classifier returns an invalid label, the router applies a lightweight deterministic fallback. If the classifier call fails, it falls back to `RAG_SEARCH` so scoped historical questions remain grounded in project artifacts.

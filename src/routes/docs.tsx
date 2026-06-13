@@ -54,6 +54,20 @@ type DocSection = {
   technicalDetails: string[];
 };
 
+type DocArticle = {
+  id: string;
+  title: string;
+  category: string;
+  icon: ComponentType<{ className?: string }>;
+  summary: string;
+  status: DocStatus;
+  blocks: {
+    title: string;
+    items: string[];
+    variant?: "steps" | "notes" | "technical";
+  }[];
+};
+
 const docSections: DocSection[] = [
   {
     id: "workspaces",
@@ -144,6 +158,7 @@ const docSections: DocSection[] = [
       "When web search is enabled, the chat path can request consolidated Tavily and Firecrawl context through fetchConsolidatedWebSearch.",
       "Chat updates are published through CHAT_SYNC and consumed by /api/chat-events as server-sent events.",
       "Broader workspace mutations are also written to the D1 events table and streamed through /api/events so other open clients can invalidate their TanStack Query caches without continuous browser polling.",
+      "Project-scoped chat uses context-aware routing before RAG so direct chat, web search, artifact generation, and Vectorize retrieval use separate backend paths.",
       "Project-scoped RAG chat uses /api/scoped-rag-stream and the browser EventSource API when Team project context, AI, Vectorize, queue, DB, and R2 bindings are configured.",
       "Scoped RAG tokens are appended to the optimistic assistant message as SSE token events arrive, so Markdown renders incrementally during generation.",
     ],
@@ -442,14 +457,18 @@ const docSections: DocSection[] = [
     category: "Platform",
     icon: FileText,
     status: "Partial",
-    summary: "Artifact uploads return quickly after R2 storage and queue routing, while background workers handle parsing, chunking, embeddings, D1 chunks, and Vectorize indexing.",
+    summary: "Context-aware routing decides whether prompts need Vectorize, web search, direct chat, or artifact generation while document ingestion keeps project artifacts indexed.",
     howTo: [
       "Use Team project chat for scoped RAG behavior when the platform bindings are configured.",
       "Upload an artifact to store the raw file in R2 and queue ingestion without waiting for parsing or indexing.",
       "Ask project-specific questions to retrieve indexed chunks with citation keys.",
+      "Ask current or public-web questions when live context is needed; those prompts bypass Vectorize and use the external search pipeline.",
+      "Use simple planning or drafting prompts without naming project history when you want direct generation without Vectorize retrieval.",
     ],
     details: [
       "Use scoped RAG when a Team project needs answers grounded in previously generated or ingested project artifacts.",
+      "The prompt router runs before embeddings or Vectorize, so not every prompt pays the retrieval cost.",
+      "The router recognizes RAG_SEARCH, WEB_SEARCH, DIRECT_CHAT, and ARTIFACT_GENERATION as strict intent categories.",
       "Artifact uploads are accepted immediately after the raw asset is stored and the ingestion job is published, so the UI is not blocked by document processing.",
       "The artifact status starts as pending, moves to processing in the Queue consumer, and finishes as completed or failed after background ingestion.",
       "Ask questions that name the project artifact, decision history, or prior output you want the assistant to use.",
@@ -463,10 +482,13 @@ const docSections: DocSection[] = [
       "ingestGeneratedArtifact writes raw artifact text to R2 and queues a scoped-rag-generated-artifact job.",
       "document-ingestion-worker handles queued jobs and owns expensive ingestion work: document text extraction, semantic chunking, embedTexts execution, D1 document_chunks or document_chunks_v2 inserts, and Vectorize upserts.",
       "wrangler.jsonc binds DOCUMENT_INGESTION_QUEUE as the producer for the main app and declares a consumer for document-ingestion-queue with batch size 5, timeout 30, and max retries 3.",
-      "createScopedRagStreamResponse validates team and project access, fetches project context, classifies intent, optionally fetches web context, queries Vectorize, loads chunks from D1, and returns a Workers AI SSE response.",
+      "createScopedRagStreamResponse validates team and project access, fetches project context, classifies intent with classifyPromptIntent, and dispatches to exactly one generation path.",
+      "RAG_SEARCH embeds the prompt, queries Vectorize with team_id and project_id metadata filters, loads matching chunks from D1, and streams a cited answer.",
+      "WEB_SEARCH bypasses embeddings and Vectorize, calls fetchConsolidatedWebSearch, and streams an answer from real-time web context.",
+      "DIRECT_CHAT and ARTIFACT_GENERATION bypass embeddings, Vectorize, and web search, then stream from the primary generation model with scoped workspace and project context.",
       "chatWithScopedRag remains a TanStack Start server function wrapper, but native browser streaming uses GET /api/scoped-rag-stream with query parameters for prompt, teamId, workspaceId, and projectId.",
       "The scoped RAG SSE contract emits citations, token, done, and stream-error events. The client closes the EventSource on done or stream-error, while transport failures use the native onerror path.",
-      "Intent routing uses a small Workers AI model to choose RAG_SEARCH, DIRECT_CHAT, or ARTIFACT_GENERATION.",
+      "Intent routing uses @cf/meta/llama-3-8b-instruct to choose RAG_SEARCH, WEB_SEARCH, DIRECT_CHAT, or ARTIFACT_GENERATION.",
       "Citation metadata includes vector id, document name, R2 key, and match score when available.",
     ],
   },
@@ -501,32 +523,310 @@ const docSections: DocSection[] = [
   },
 ];
 
-const categories = ["All", ...Array.from(new Set(docSections.map((section) => section.category)))];
+const userWorkflowArticles: DocArticle[] = [
+  ...docSections
+    .filter((section) => !["storage", "rag-ingestion"].includes(section.id))
+    .map((section) => ({
+      id: `workflow-${section.id}`,
+      title: section.title,
+      category: "User Workflows",
+      icon: section.icon,
+      summary: section.summary,
+      status: section.status,
+      blocks: [
+        { title: "How To", items: section.howTo, variant: "steps" as const },
+        { title: "Usage Guidance", items: section.details, variant: "notes" as const },
+      ],
+    })),
+  {
+    id: "workflow-scoped-rag",
+    title: "Using Project Knowledge",
+    category: "User Workflows",
+    icon: FileText,
+    status: "Partial",
+    summary: "Use Team project chat to ask questions against project artifacts without needing to understand the retrieval pipeline.",
+    blocks: [
+      {
+        title: "How To",
+        variant: "steps",
+        items: [
+          "Open Team scope, select the right team, and choose the project that owns the source material.",
+          "Upload or generate the artifact that should become part of the project knowledge base.",
+          "Ask a project-specific question in the project chat and name the source, decision, artifact, or prior work you expect the assistant to use.",
+          "Review citations or source keys in the answer when they are present, then upload missing material if the answer says the available context is insufficient.",
+        ],
+      },
+      {
+        title: "Usage Guidance",
+        variant: "notes",
+        items: [
+          "Use project knowledge for questions that should be grounded in internal project outputs, not public web facts.",
+          "Use the Web toggle for current external information such as recent public policies, vendor pages, or live research.",
+          "Keep simple drafting prompts short and direct when you do not want the assistant to search project history.",
+          "Treat this workflow as partially available until richer upload status, retry visibility, and broader document parsing are exposed in the user interface.",
+        ],
+      },
+    ],
+  },
+];
+
+const technicalArticles: DocArticle[] = [
+  {
+    id: "technical-rag",
+    title: "RAG Orchestration",
+    category: "Technical Reference",
+    icon: FileText,
+    status: "Partial",
+    summary: "Scoped RAG routes project questions through embedding, Vectorize retrieval, D1 chunk lookup, and streamed cited generation.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: [
+          "Scoped RAG requires DB, ARTIFACTS_BUCKET, VECTORIZE, DOCUMENT_INGESTION_QUEUE, and AI bindings.",
+          "createScopedRagStreamResponse validates team and project access, fetches project context, classifies prompt intent, and dispatches to exactly one generation path.",
+          "RAG_SEARCH embeds the prompt, queries Vectorize with team_id and project_id metadata filters, loads matching chunks from D1, and streams a cited answer.",
+          "The scoped RAG SSE contract emits citations, token, done, and stream-error events. The client closes the EventSource on done or stream-error, while transport failures use the native onerror path.",
+          "Citation metadata includes vector id, document name, R2 key, and match score when available.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "technical-semantic-search",
+    title: "Semantic Search and Vectorize",
+    category: "Technical Reference",
+    icon: Search,
+    status: "Partial",
+    summary: "Semantic search stores embedded document chunks in Vectorize and retrieves them with team and project metadata filters.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: [
+          "Document ingestion creates semantic chunks, embeds chunk text, writes chunk records to D1, and upserts corresponding vectors into Vectorize.",
+          "Vector queries are filtered by team_id and project_id so project chat retrieval stays scoped to the active team project.",
+          "D1 remains the source of chunk metadata and readable content, while Vectorize provides similarity search and match scores.",
+          "Prompt embedding happens only for RAG_SEARCH intent; web search, direct chat, and artifact generation bypass embeddings and Vectorize.",
+          "Retrieved matches are converted into cited context before generation so the answer can expose source keys instead of only free-form prose.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "technical-intent-routing",
+    title: "Intent Routing",
+    category: "Technical Reference",
+    icon: GitBranch,
+    status: "Available",
+    summary: "The prompt router separates RAG, web search, direct chat, and artifact generation before expensive retrieval work starts.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: [
+          "Project-scoped chat uses context-aware routing before RAG so direct chat, web search, artifact generation, and Vectorize retrieval use separate backend paths.",
+          "Intent routing chooses RAG_SEARCH, WEB_SEARCH, DIRECT_CHAT, or ARTIFACT_GENERATION.",
+          "WEB_SEARCH bypasses embeddings and Vectorize, calls fetchConsolidatedWebSearch, and streams an answer from real-time web context.",
+          "DIRECT_CHAT and ARTIFACT_GENERATION bypass embeddings, Vectorize, and web search, then stream from the primary generation model with scoped workspace and project context.",
+          "Reasoning profiles map to max completion tokens, timeout values, optional reasoning_effort, and thinking visibility settings.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "technical-document-ingestion",
+    title: "Document Ingestion Queue",
+    category: "Technical Reference",
+    icon: ClipboardList,
+    status: "Partial",
+    summary: "Artifact uploads are accepted quickly, then background queue consumers handle parsing, chunking, embedding, and indexing.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: [
+          "uploadArtifact writes the raw file to ARTIFACTS_BUCKET, inserts an artifacts_registry row with pending status, publishes a DocumentIngestionJob to DOCUMENT_INGESTION_QUEUE, sets HTTP 202 Accepted, and returns queued.",
+          "ingestGeneratedArtifact writes raw artifact text to R2 and queues a scoped-rag-generated-artifact job.",
+          "document-ingestion-worker handles queued jobs and owns expensive ingestion work: document text extraction, semantic chunking, embedTexts execution, D1 chunk inserts, and Vectorize upserts.",
+          "wrangler.jsonc binds DOCUMENT_INGESTION_QUEUE as the producer for the main app and declares a consumer for document-ingestion-queue with batch size 5, timeout 30, and max retries 3.",
+          "The artifact status starts as pending, moves to processing in the Queue consumer, and finishes as completed or failed after background ingestion.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "technical-chat-streaming",
+    title: "Chat Streaming and Sync",
+    category: "Technical Reference",
+    icon: MessageCircle,
+    status: "Available",
+    summary: "Chat uses optimistic React Query updates, server-side message persistence, SSE token streaming, and database-backed mutation events.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: [
+          "Chat send uses a TanStack Query v5 useMutation onMutate handler to cancel scoped chat queries, snapshot the previous cache, and append an optimistic user message with clientStatus sending.",
+          "sendChatMessage persists both the user message and assistant response to chat_messages after permission checks pass.",
+          "Project-scoped RAG chat uses /api/scoped-rag-stream and the browser EventSource API when Team project context, AI, Vectorize, queue, DB, and R2 bindings are configured.",
+          "Scoped RAG tokens are appended to the optimistic assistant message as SSE token events arrive, so Markdown renders incrementally during generation.",
+          "Chat updates are published through CHAT_SYNC and consumed by /api/chat-events as server-sent events.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "technical-state-sync",
+    title: "Real-Time State Sync",
+    category: "Technical Reference",
+    icon: Zap,
+    status: "Available",
+    summary: "D1 mutation events and SSE keep workspace clients current without broad browser polling.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: docSections.find((section) => section.id === "realtime-sync")?.technicalDetails ?? [],
+      },
+    ],
+  },
+  {
+    id: "technical-storage",
+    title: "D1, R2, and Seed Data",
+    category: "Technical Reference",
+    icon: Database,
+    status: "Available",
+    summary: "Structured records live in D1, artifact bytes live in R2, and local seed commands mirror hosted bindings.",
+    blocks: [
+      {
+        title: "Setup Instructions",
+        variant: "steps",
+        items: docSections.find((section) => section.id === "storage")?.howTo ?? [],
+      },
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: docSections.find((section) => section.id === "storage")?.technicalDetails ?? [],
+      },
+    ],
+  },
+  {
+    id: "technical-artifacts",
+    title: "Artifacts, Previews, and Exports",
+    category: "Technical Reference",
+    icon: Archive,
+    status: "Available",
+    summary: "Artifact metadata, R2 files, preview rendering, pin/delete mutations, and generated XLSX exports share one storage model.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: docSections.find((section) => section.id === "artifacts")?.technicalDetails ?? [],
+      },
+      {
+        title: "Export Details",
+        variant: "technical",
+        items: docSections.find((section) => section.id === "tables-exports")?.technicalDetails ?? [],
+      },
+    ],
+  },
+  {
+    id: "technical-auth-access",
+    title: "Authentication and Access Control",
+    category: "Technical Reference",
+    icon: KeyRound,
+    status: "Available",
+    summary: "Protected routes, Better Auth sessions, roles, team memberships, project memberships, and invites gate access.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: [
+          ...(docSections.find((section) => section.id === "profile-auth")?.technicalDetails ?? []),
+          ...(docSections.find((section) => section.id === "teams-invites")?.technicalDetails ?? []),
+          ...(docSections.find((section) => section.id === "admin")?.technicalDetails ?? []),
+        ],
+      },
+    ],
+  },
+  {
+    id: "technical-deployment",
+    title: "Infrastructure and Deployment",
+    category: "Technical Reference",
+    icon: ShieldCheck,
+    status: "Available",
+    summary: "The app is a Cloudflare Worker-compatible Sites build with D1, R2, Queue, Vectorize, and AI bindings.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: [
+          "npm run build runs vite build and tsc --noEmit for local validation.",
+          "npm run deploy runs the production build and then deploys through scripts/run-wrangler.mjs with wrangler.jsonc.",
+          "Cloudflare Worker deployment reads DB and ARTIFACTS_BUCKET from wrangler.jsonc, while Sites declares logical bindings in .openai/hosting.json.",
+          "Use local db:setup, db:seed, and r2:seed commands for local development; use remote variants only when intentionally changing Cloudflare account resources.",
+          "worker-configuration.d.ts is generated from Wrangler types and should be refreshed after binding changes.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "technical-roadmap-stubs",
+    title: "Roadmap Stubs and Partial Wiring",
+    category: "Technical Reference",
+    icon: Sparkles,
+    status: "Coming soon",
+    summary: "Some visible UI controls are intentionally stubbed while their durable backend workflows are completed.",
+    blocks: [
+      {
+        title: "Implementation Details",
+        variant: "technical",
+        items: docSections.find((section) => section.id === "coming-soon")?.technicalDetails ?? [],
+      },
+    ],
+  },
+];
+
+const docArticles = [...userWorkflowArticles, ...technicalArticles];
+const docCategories = [
+  {
+    title: "User Workflows",
+    description: "Feature-by-feature usage instructions without implementation detail.",
+    articles: userWorkflowArticles,
+  },
+  {
+    title: "Technical Reference",
+    description: "RAG, semantic search, infrastructure, deployment, and implementation details.",
+    articles: technicalArticles,
+  },
+];
 
 function DocsPage() {
   const { session } = Route.useLoaderData();
-  const [activeCategory, setActiveCategory] = useState("All");
-  const [activeSectionId, setActiveSectionId] = useState(docSections[0].id);
+  const [activeArticleId, setActiveArticleId] = useState(docArticles[0].id);
   const [searchTerm, setSearchTerm] = useState("");
   const [showTokenUsage, setShowTokenUsage] = useState(() => {
     if (typeof window === "undefined") return true;
     return window.localStorage.getItem("vertex-show-token-usage") !== "0";
   });
-  const activeSection = docSections.find((section) => section.id === activeSectionId) ?? docSections[0];
+  const activeArticle = docArticles.find((article) => article.id === activeArticleId) ?? docArticles[0];
 
-  const filteredSections = useMemo(() => {
+  const filteredCategories = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase();
-    return docSections.filter((section) => {
-      const categoryMatches = activeCategory === "All" || section.category === activeCategory;
-      const textMatches =
-        !normalized ||
-        [section.title, section.category, section.summary, ...section.howTo, ...section.details, ...section.technicalDetails]
+    return docCategories
+      .map((category) => ({
+        ...category,
+        articles: category.articles.filter((article) => {
+          if (!normalized) return true;
+          return [article.title, article.category, article.summary, ...article.blocks.flatMap((block) => block.items)]
           .join(" ")
           .toLowerCase()
           .includes(normalized);
-      return categoryMatches && textMatches;
-    });
-  }, [activeCategory, searchTerm]);
+        }),
+      }))
+      .filter((category) => category.articles.length > 0);
+  }, [searchTerm]);
 
   useEffect(() => {
     window.localStorage.setItem("vertex-show-token-usage", showTokenUsage ? "1" : "0");
@@ -584,40 +884,13 @@ function DocsPage() {
                     onChange={(event) => setSearchTerm(event.target.value)}
                   />
                 </label>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {categories.map((category) => (
-                    <Button
-                      key={category}
-                      type="button"
-                      size="sm"
-                      variant={activeCategory === category ? "default" : "outline"}
-                      onClick={() => setActiveCategory(category)}
-                    >
-                      {category}
-                    </Button>
-                  ))}
-                </div>
               </div>
               <nav className="scrollbar-thin min-h-0 flex-1 overflow-auto p-3">
-                <div className="space-y-1">
-                  {filteredSections.map((section) => (
-                    <button
-                      key={section.id}
-                      type="button"
-                      className={cn(
-                        "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
-                        activeSection.id === section.id && "bg-accent text-accent-foreground",
-                      )}
-                      onClick={() => setActiveSectionId(section.id)}
-                    >
-                      <section.icon className="mt-0.5 size-4 shrink-0 text-primary" />
-                      <span className="min-w-0">
-                        <strong className="block truncate">{section.title}</strong>
-                        <span className="block truncate text-xs text-muted-foreground">{section.category}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                <DocNav
+                  activeArticleId={activeArticle.id}
+                  categories={filteredCategories}
+                  onSelectArticle={setActiveArticleId}
+                />
               </nav>
             </aside>
 
@@ -633,54 +906,25 @@ function DocsPage() {
                       onChange={(event) => setSearchTerm(event.target.value)}
                     />
                   </label>
-                  <div className="flex gap-2 overflow-auto pb-1">
-                    {filteredSections.map((section) => (
-                      <Button
-                        key={section.id}
-                        type="button"
-                        size="sm"
-                        variant={activeSection.id === section.id ? "default" : "outline"}
-                        onClick={() => setActiveSectionId(section.id)}
-                      >
-                        {section.title}
-                      </Button>
-                    ))}
-                  </div>
+                  <MobileDocNav
+                    activeArticleId={activeArticle.id}
+                    categories={filteredCategories}
+                    onSelectArticle={setActiveArticleId}
+                  />
                 </div>
 
-                <DocHero section={activeSection} />
+                <DocHero article={activeArticle} />
                 <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
                   <div className="grid gap-5">
-                    <DocBlock title="How To">
-                      <ol className="grid gap-3">
-                        {activeSection.howTo.map((item, index) => (
-                          <li key={item} className="grid grid-cols-[32px_minmax(0,1fr)] gap-3">
-                            <span className="grid size-8 place-items-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-                              {index + 1}
-                            </span>
-                            <p className="pt-1 text-sm leading-6 text-muted-foreground">{item}</p>
-                          </li>
-                        ))}
-                      </ol>
-                    </DocBlock>
-                    <DocBlock title="Usage Details">
-                      <div className="grid gap-3">
-                        {activeSection.details.map((item) => (
-                          <div key={item} className="rounded-md border bg-muted/25 p-3 text-sm leading-6 text-muted-foreground">
-                            {item}
-                          </div>
-                        ))}
-                      </div>
-                    </DocBlock>
-                    <DocBlock title="Technical Notes" audience="Technical audience">
-                      <div className="grid gap-3">
-                        {activeSection.technicalDetails.map((item) => (
-                          <div key={item} className="rounded-md border border-primary/15 bg-primary/5 p-3 font-mono text-xs leading-6 text-foreground">
-                            {item}
-                          </div>
-                        ))}
-                      </div>
-                    </DocBlock>
+                    {activeArticle.blocks.map((block) => (
+                      <DocBlock
+                        key={block.title}
+                        audience={block.variant === "technical" ? "Technical reference" : undefined}
+                        title={block.title}
+                      >
+                        <DocItems items={block.items} variant={block.variant ?? "notes"} />
+                      </DocBlock>
+                    ))}
                   </div>
                   <aside className="grid content-start gap-4">
                     <Card>
@@ -698,11 +942,14 @@ function DocsPage() {
                       <CardContent className="space-y-3 p-4">
                         <div className="flex items-center gap-2">
                           <BookOpen className="size-4 text-primary" />
-                          <strong className="text-sm">Topics</strong>
+                          <strong className="text-sm">Documentation Sections</strong>
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {categories.slice(1).map((category) => (
-                            <Badge key={category} variant="secondary">{category}</Badge>
+                        <div className="grid gap-2">
+                          {docCategories.map((category) => (
+                            <div key={category.title} className="rounded-md border bg-muted/25 p-3">
+                              <strong className="block text-sm">{category.title}</strong>
+                              <p className="mt-1 text-xs leading-5 text-muted-foreground">{category.description}</p>
+                            </div>
                           ))}
                         </div>
                       </CardContent>
@@ -718,21 +965,139 @@ function DocsPage() {
   );
 }
 
-function DocHero({ section }: { section: DocSection }) {
+function DocNav({
+  activeArticleId,
+  categories,
+  onSelectArticle,
+}: {
+  activeArticleId: string;
+  categories: typeof docCategories;
+  onSelectArticle: (articleId: string) => void;
+}) {
+  if (categories.length === 0) {
+    return <p className="px-3 py-2 text-sm text-muted-foreground">No docs match your search.</p>;
+  }
+
+  return (
+    <div className="space-y-5">
+      {categories.map((category) => (
+        <section key={category.title}>
+          <div className="mb-2 px-3">
+            <h2 className="text-xs font-semibold uppercase tracking-normal text-primary">{category.title}</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{category.description}</p>
+          </div>
+          <div className="space-y-1">
+            {category.articles.map((article) => (
+              <button
+                key={article.id}
+                type="button"
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                  activeArticleId === article.id && "bg-accent text-accent-foreground",
+                )}
+                onClick={() => onSelectArticle(article.id)}
+              >
+                <article.icon className="mt-0.5 size-4 shrink-0 text-primary" />
+                <span className="min-w-0">
+                  <strong className="block truncate">{article.title}</strong>
+                  <span className="block truncate text-xs text-muted-foreground">{article.status}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function MobileDocNav({
+  activeArticleId,
+  categories,
+  onSelectArticle,
+}: {
+  activeArticleId: string;
+  categories: typeof docCategories;
+  onSelectArticle: (articleId: string) => void;
+}) {
+  if (categories.length === 0) {
+    return <p className="text-sm text-muted-foreground">No docs match your search.</p>;
+  }
+
+  return (
+    <div className="grid gap-3">
+      {categories.map((category) => (
+        <section key={category.title} className="grid gap-2">
+          <h2 className="px-1 text-xs font-semibold uppercase text-primary">{category.title}</h2>
+          <div className="flex gap-2 overflow-auto pb-1">
+            {category.articles.map((article) => (
+              <Button
+                key={article.id}
+                type="button"
+                size="sm"
+                variant={activeArticleId === article.id ? "default" : "outline"}
+                onClick={() => onSelectArticle(article.id)}
+              >
+                {article.title}
+              </Button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function DocItems({ items, variant }: { items: string[]; variant: "steps" | "notes" | "technical" }) {
+  if (variant === "steps") {
+    return (
+      <ol className="grid gap-3">
+        {items.map((item, index) => (
+          <li key={item} className="grid grid-cols-[32px_minmax(0,1fr)] gap-3">
+            <span className="grid size-8 place-items-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
+              {index + 1}
+            </span>
+            <p className="pt-1 text-sm leading-6 text-muted-foreground">{item}</p>
+          </li>
+        ))}
+      </ol>
+    );
+  }
+
+  return (
+    <div className="grid gap-3">
+      {items.map((item) => (
+        <div
+          key={item}
+          className={cn(
+            "rounded-md border p-3 leading-6",
+            variant === "technical"
+              ? "border-primary/15 bg-primary/5 font-mono text-xs text-foreground"
+              : "bg-muted/25 text-sm text-muted-foreground",
+          )}
+        >
+          {item}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DocHero({ article }: { article: DocArticle }) {
   return (
     <section className="rounded-lg border bg-card p-5 lg:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-4">
           <span className="grid size-12 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
-            <section.icon className="size-6" />
+            <article.icon className="size-6" />
           </span>
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{section.category}</Badge>
-              <StatusBadge status={section.status} />
+              <Badge variant="secondary">{article.category}</Badge>
+              <StatusBadge status={article.status} />
             </div>
-            <h2 className="text-2xl font-semibold tracking-normal lg:text-3xl">{section.title}</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground lg:text-base">{section.summary}</p>
+            <h2 className="text-2xl font-semibold tracking-normal lg:text-3xl">{article.title}</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground lg:text-base">{article.summary}</p>
           </div>
         </div>
       </div>

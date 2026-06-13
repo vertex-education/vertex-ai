@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
+import { runWorkersAiWithGateway } from "@/lib/ai-gateway";
 import { getAuth } from "@/lib/auth";
 import { lightweightChatTitleModelId } from "@/lib/prompts";
 import { getConversationKey, type ChatMessage, type ChatSection, type ChatSummary, type ProjectSummary, type WorkspaceMode } from "@/lib/pmo-data";
@@ -189,7 +190,7 @@ async function generateBranchChatTitle(context: unknown, sourceChatTitle: string
 
   try {
     const result = await Promise.race([
-      ai.run(lightweightChatTitleModelId, {
+      runWorkersAiWithGateway(ai, lightweightChatTitleModelId, {
         messages: [
           {
             role: "system",
@@ -203,6 +204,11 @@ async function generateBranchChatTitle(context: unknown, sourceChatTitle: string
         ],
         max_completion_tokens: 24,
         temperature: 0.1,
+      }, {
+        metadata: {
+          feature: "branch-title",
+          model: lightweightChatTitleModelId,
+        },
       }),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("Chat title model timed out.")), 5_000);

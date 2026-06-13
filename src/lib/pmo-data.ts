@@ -4,7 +4,9 @@ import { env } from "cloudflare:workers";
 import { queryOptions } from "@tanstack/react-query";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/start-server-core";
+import { getAiGatewayLogId, runWorkersAiWithGateway } from "@/lib/ai-gateway";
 import { getAuth } from "@/lib/auth";
+import { recordAdminUsageEvent } from "@/lib/admin-metrics.server";
 import { publishChatMessageInserts, type ChatMessageInsertEvent } from "@/lib/chat-sync";
 import { recordRealtimeMutationEvent, type RealtimeInvalidationTarget } from "@/lib/realtime-events";
 import {
@@ -281,7 +283,8 @@ async function generateChatTitleFromInitialMessage(context: unknown, text: strin
 
   try {
     const result = await withAiTimeout(
-      (signal) => ai.run(
+      (signal) => runWorkersAiWithGateway(
+        ai,
         lightweightChatTitleModelId,
         {
           messages: [
@@ -298,7 +301,13 @@ async function generateChatTitleFromInitialMessage(context: unknown, text: strin
           max_completion_tokens: 24,
           temperature: 0.1,
         },
-        { signal },
+        {
+          signal,
+          metadata: {
+            feature: "chat-title",
+            model: lightweightChatTitleModelId,
+          },
+        },
       ),
       5_000,
     );
@@ -999,14 +1008,25 @@ async function generateArtifactTitle(seedTitle: string, rows: ExportTable["rows"
   ].join("\n");
   try {
     const result = await withAiTimeout(
-      (signal) => ai.run(vertexAiModelId, {
-        messages: [
-          { role: "system", content: "You name files clearly and briefly." },
-          { role: "user", content: prompt },
-        ],
-        max_completion_tokens: 32,
-        temperature: 0.1,
-      }, { signal }),
+      (signal) => runWorkersAiWithGateway(
+        ai,
+        vertexAiModelId,
+        {
+          messages: [
+            { role: "system", content: "You name files clearly and briefly." },
+            { role: "user", content: prompt },
+          ],
+          max_completion_tokens: 32,
+          temperature: 0.1,
+        },
+        {
+          signal,
+          metadata: {
+            feature: "artifact-title",
+            model: vertexAiModelId,
+          },
+        },
+      ),
       4500,
     );
     const generated = extractAiResponse(result)
@@ -1311,7 +1331,24 @@ async function runGemmaChat({
 
   const startedAt = Date.now();
   try {
-    const result = await withAiTimeout((signal) => ai.run(vertexAiModelId, requestPayload, { signal }), reasoningProfile.timeoutMs);
+    const result = await withAiTimeout(
+      (signal) => runWorkersAiWithGateway(
+        ai,
+        vertexAiModelId,
+        requestPayload,
+        {
+          signal,
+          metadata: {
+            feature: webSearch ? "gemma-chat-web" : "gemma-chat",
+            mode: data.mode,
+            chatId: data.chatId.slice(0, 80),
+            projectId: data.projectId?.slice(0, 80) ?? null,
+          },
+        },
+      ),
+      reasoningProfile.timeoutMs,
+    );
+    const aiGatewayLogId = getAiGatewayLogId(ai);
 
     const responseText = extractAiResponse(result).trim();
     const thinkingText = extractThinkingFromResponse(result);
@@ -1327,16 +1364,35 @@ async function runGemmaChat({
         responseShape: summarizeAiResponseShape(result),
       });
     }
+    const trace = {
+      ...traceBase,
+      durationMs: Date.now() - startedAt,
+      responseText: text,
+      thinkingText,
+      diagnostics: getAiDiagnostics(result, responseText, thinkingText),
+      rawResponse: cloneJsonValue(result),
+    };
+    await recordAdminUsageEvent({
+      provider: "cloudflare-workers-ai",
+      feature: webSearch ? "gemma-chat-with-web-search" : "gemma-chat",
+      model: vertexAiModelId,
+      inputTokens: trace.diagnostics.tokenUsage.inputTokens,
+      outputTokens: trace.diagnostics.tokenUsage.outputTokens,
+      totalTokens: trace.diagnostics.tokenUsage.totalTokens,
+      durationMs: trace.durationMs,
+      projectId: data.projectId,
+      chatId: data.chatId,
+      metadata: {
+        mode: data.mode,
+        reasoningLevel,
+        maxCompletionTokens: requestPayload.max_completion_tokens,
+        webSearch,
+        aiGatewayLogId,
+      },
+    });
     return {
       text,
-      trace: {
-        ...traceBase,
-        durationMs: Date.now() - startedAt,
-        responseText: text,
-        thinkingText,
-        diagnostics: getAiDiagnostics(result, responseText, thinkingText),
-        rawResponse: cloneJsonValue(result),
-      },
+      trace,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Workers AI request failed.";
@@ -1345,11 +1401,29 @@ async function runGemmaChat({
       message: detail,
     });
     const text = `I could not complete the Workers AI request. ${detail}`;
+    const durationMs = Date.now() - startedAt;
+    const aiGatewayLogId = getAiGatewayLogId(ai);
+    await recordAdminUsageEvent({
+      provider: "cloudflare-workers-ai",
+      feature: webSearch ? "gemma-chat-with-web-search-error" : "gemma-chat-error",
+      model: vertexAiModelId,
+      durationMs,
+      projectId: data.projectId,
+      chatId: data.chatId,
+      metadata: {
+        mode: data.mode,
+        reasoningLevel,
+        maxCompletionTokens: requestPayload.max_completion_tokens,
+        webSearch,
+        aiGatewayLogId,
+        error: detail,
+      },
+    });
     return {
       text,
       trace: {
         ...traceBase,
-        durationMs: Date.now() - startedAt,
+        durationMs,
         responseText: text,
         thinkingText: "",
         diagnostics: {
