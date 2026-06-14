@@ -137,3 +137,12 @@ When intent routing selects `WEB_SEARCH`, the generation system prompt includes 
 
 - `Real-Time Web Context`: the consolidated Tavily summary and Firecrawl Markdown content.
 - `Scoped historical chunks`: D1 chunk text loaded from Vectorize matches for the active team and project.
+
+## Asana Snapshot Memory
+
+When Asana search is enabled for a mapped project chat, the app fetches current Asana tasks, recent status updates, and the same recent task stories used in prompt context. The normalized snapshot is hashed and compared to the latest row in `asana_project_snapshots`.
+
+- The first Asana-enabled chat stores a baseline snapshot.
+- Later Asana-enabled chats store a new snapshot only when task, status update, or tracked story content changes.
+- Changed snapshots are written to R2 as Markdown and queued through `DOCUMENT_INGESTION_QUEUE` with `kind: "scoped-rag-generated-artifact"`, so the existing document ingestion worker embeds them into Vectorize and writes D1 `document_chunks`.
+- The current chat prompt also receives a concise snapshot comparison, so the model can distinguish live Asana context from changes since the previous captured snapshot.

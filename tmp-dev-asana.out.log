@@ -591,3 +591,19 @@ Using secrets defined in .dev.vars
 [2m6:59:21 AM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mhmr update [39m[2m/@id/virtual:cloudflare/worker-entry, /src/lib/auth-workflow.ts?tss-serverfn-split, /src/styles/app.css[22m
 [vite] hot updated: virtual:cloudflare/worker-entry
 [vite] hot updated: /src/lib/auth-workflow.ts?tss-serverfn-split
+[2m7:05:46 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css[22m
+[2m7:05:46 AM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mhmr update [39m[2m/src/styles/app.css, /@id/virtual:cloudflare/worker-entry, /src/lib/auth-workflow.ts?tss-serverfn-split[22m
+[vite] hot updated: virtual:cloudflare/worker-entry
+[vite] hot updated: /src/lib/auth-workflow.ts?tss-serverfn-split
+[2m7:05:58 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css[22m
+[2m7:05:58 AM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mhmr update [39m[2m/src/styles/app.css, /@id/virtual:cloudflare/worker-entry, /src/lib/auth-workflow.ts?tss-serverfn-split[22m
+[vite] hot updated: virtual:cloudflare/worker-entry
+[vite] hot updated: /src/lib/auth-workflow.ts?tss-serverfn-split
+[2m7:07:26 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css[22m
+[2m7:07:26 AM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mhmr update [39m[2m/src/styles/app.css, /@id/virtual:cloudflare/worker-entry, /src/lib/auth-workflow.ts?tss-serverfn-split[22m
+[vite] hot updated: virtual:cloudflare/worker-entry
+[vite] hot updated: /src/lib/auth-workflow.ts?tss-serverfn-split
+[2m7:08:48 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css[22m
+[2m7:08:48 AM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mhmr update [39m[2m/src/styles/app.css, /@id/virtual:cloudflare/worker-entry, /src/lib/auth-workflow.ts?tss-serverfn-split[22m
+[vite] hot updated: virtual:cloudflare/worker-entry
+[vite] hot updated: /src/lib/auth-workflow.ts?tss-serverfn-split

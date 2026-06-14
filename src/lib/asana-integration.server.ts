@@ -4,12 +4,15 @@ import { env } from "cloudflare:workers";
 import { getRequest } from "@tanstack/start-server-core";
 import { getAuth } from "@/lib/auth";
 import { deleteAsanaTokens, getValidAsanaTokens, storeAsanaTokens, type AsanaTokenVaultEnv } from "@/lib/asana-token-vault";
+import type { DocumentIngestionJob } from "@/lib/document-ingestion-queue";
 import type { ProjectStatus, WorkspaceMode, WorkspaceScope } from "@/lib/pmo-data";
 
 type AsanaIntegrationEnv = AsanaTokenVaultEnv & {
   ASANA_CLIENT_ID?: string;
   ASANA_CLIENT_SECRET?: string;
   ASANA_USE_FULL_PERMISSIONS?: string;
+  ARTIFACTS_BUCKET?: R2Bucket;
+  DOCUMENT_INGESTION_QUEUE?: Queue<DocumentIngestionJob>;
 };
 
 type AuthSession = {
@@ -211,6 +214,71 @@ type AsanaContextStatusUpdate = AsanaStatusUpdateContextRow & {
   sourceName: string;
   sourceDepth?: number;
   sourcePath?: string[];
+};
+
+type NormalizedAsanaSnapshot = {
+  asanaProjectGid: string;
+  asanaProjectName: string;
+  asanaWorkspaceName: string;
+  taskStatusSource: string;
+  tasks: NormalizedAsanaTaskSnapshot[];
+  statusUpdates: NormalizedAsanaStatusUpdateSnapshot[];
+  stories: NormalizedAsanaStorySnapshot[];
+};
+
+type NormalizedAsanaTaskSnapshot = {
+  gid: string;
+  name: string;
+  status: string;
+  completed: boolean;
+  assignee: string;
+  due: string;
+  modifiedAt: string;
+  section: string;
+  notesPreview: string;
+  notesHash: string;
+  customFieldsHash: string;
+  fingerprint: string;
+};
+
+type NormalizedAsanaStatusUpdateSnapshot = {
+  gid: string;
+  sourceType: "project" | "portfolio";
+  sourceName: string;
+  title: string;
+  color: string;
+  createdAt: string;
+  textPreview: string;
+  textHash: string;
+  fingerprint: string;
+};
+
+type NormalizedAsanaStorySnapshot = {
+  gid: string;
+  taskGid: string;
+  createdAt: string;
+  author: string;
+  textPreview: string;
+  textHash: string;
+  fingerprint: string;
+};
+
+type AsanaSnapshotDiff = {
+  initial: boolean;
+  addedTasks: NormalizedAsanaTaskSnapshot[];
+  removedTasks: NormalizedAsanaTaskSnapshot[];
+  changedTasks: Array<{
+    previous: NormalizedAsanaTaskSnapshot;
+    current: NormalizedAsanaTaskSnapshot;
+    fields: string[];
+  }>;
+  addedStatusUpdates: NormalizedAsanaStatusUpdateSnapshot[];
+  changedStatusUpdates: Array<{
+    previous: NormalizedAsanaStatusUpdateSnapshot;
+    current: NormalizedAsanaStatusUpdateSnapshot;
+    fields: string[];
+  }>;
+  addedStories: NormalizedAsanaStorySnapshot[];
 };
 
 type AsanaPortfolioContext = AsanaPortfolio & {
@@ -582,9 +650,15 @@ export async function fetchAsanaProjectContextForCurrentUser({
   const mapping = await getDb()
     .prepare(
       `SELECT m.asana_project_gid as asanaProjectGid,
+              m.id as mappingId,
+              m.user_id as userId,
               m.asana_project_name as asanaProjectName,
               m.asana_workspace_gid as asanaWorkspaceGid,
               m.asana_workspace_name as asanaWorkspaceName,
+              m.vertex_workspace_id as vertexWorkspaceId,
+              m.vertex_team_id as vertexTeamId,
+              m.vertex_mode as vertexMode,
+              m.vertex_project_id as vertexProjectId,
               m.permission_level as permissionLevel,
               COALESCE(p.asana_task_status_source, 'native') as taskStatusSource,
               p.asana_task_status_custom_field_gid as taskStatusCustomFieldGid,
@@ -597,10 +671,16 @@ export async function fetchAsanaProjectContextForCurrentUser({
     )
     .bind(user.id, vertexProjectId)
     .first<{
+      mappingId: string;
+      userId: string;
       asanaProjectGid: string;
       asanaProjectName: string;
       asanaWorkspaceGid: string;
       asanaWorkspaceName: string;
+      vertexWorkspaceId: string;
+      vertexTeamId: string | null;
+      vertexMode: WorkspaceMode;
+      vertexProjectId: string;
       permissionLevel: string;
       taskStatusSource: "native" | "custom_field";
       taskStatusCustomFieldGid: string | null;
@@ -623,9 +703,17 @@ export async function fetchAsanaProjectContextForCurrentUser({
       fetchStoriesForContextTasks(tokenSet.accessToken, rankedTasks.slice(0, asanaContextStoryTaskLimit)),
       listAsanaStatusUpdatesForMappedProject(tokenSet.accessToken, mapping, scopes),
     ]);
+    const snapshotComparison = await persistAsanaSnapshotForRag({
+      mapping,
+      statusUpdates,
+      storiesByTaskGid,
+      taskStatusSettings,
+      tasks,
+    });
     return buildAsanaProjectContext({
       mapping,
       maxContextChars,
+      snapshotComparison,
       statusUpdates,
       taskStatusSettings,
       storiesByTaskGid,
@@ -1332,9 +1420,451 @@ function buildAsanaTaskStatusSummary(tasks: AsanaTaskContextRow[], settings: Asa
   };
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function cleanSnapshotText(value: string | null | undefined, maxLength = 260) {
+  const text = value?.replace(/\s+/g, " ").trim() ?? "";
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}...` : text;
+}
+
+function taskSection(task: AsanaTaskContextRow) {
+  return task.memberships?.map((membership) => membership.section?.name).filter(Boolean).join(", ") ?? "";
+}
+
+function normalizeCustomFields(fields: AsanaTaskCustomFieldContextRow[] | undefined) {
+  return (fields ?? [])
+    .map((field) => ({
+      gid: field.gid,
+      name: field.name ?? "",
+      value: asanaCustomFieldValue(field) ?? "",
+    }))
+    .sort((left, right) => left.gid.localeCompare(right.gid));
+}
+
+async function normalizeAsanaSnapshot({
+  mapping,
+  statusUpdates,
+  storiesByTaskGid,
+  taskStatusSettings,
+  tasks,
+}: {
+  mapping: {
+    asanaProjectGid: string;
+    asanaProjectName: string;
+    asanaWorkspaceName: string;
+  };
+  statusUpdates: AsanaContextStatusUpdate[];
+  storiesByTaskGid: Map<string, AsanaStoryContextRow[]>;
+  taskStatusSettings: AsanaTaskStatusSettings;
+  tasks: AsanaTaskContextRow[];
+}): Promise<NormalizedAsanaSnapshot> {
+  const normalizedTasks = await Promise.all(tasks.map(async (task) => {
+    const customFieldsHash = await sha256Hex(stableJson(normalizeCustomFields(task.custom_fields)));
+    const notesHash = await sha256Hex(task.notes?.trim() ?? "");
+    const status = resolveAsanaTaskStatus(task, taskStatusSettings).label;
+    const snapshotBase = {
+      gid: task.gid,
+      name: task.name,
+      status,
+      completed: Boolean(task.completed),
+      assignee: task.assignee?.name?.trim() ?? "",
+      due: task.due_on ?? task.due_at ?? "",
+      modifiedAt: task.modified_at ?? "",
+      section: taskSection(task),
+      notesPreview: cleanSnapshotText(task.notes),
+      notesHash,
+      customFieldsHash,
+    };
+    return {
+      ...snapshotBase,
+      fingerprint: await sha256Hex(stableJson(snapshotBase)),
+    };
+  }));
+
+  const normalizedStatusUpdates = await Promise.all(statusUpdates.map(async (update) => {
+    const textHash = await sha256Hex(update.text?.trim() ?? "");
+    const snapshotBase = {
+      gid: update.gid,
+      sourceType: update.sourceType,
+      sourceName: update.sourceName,
+      title: update.title?.trim() ?? "",
+      color: update.color?.trim() ?? "",
+      createdAt: update.created_at ?? "",
+      textPreview: cleanSnapshotText(update.text),
+      textHash,
+    };
+    return {
+      ...snapshotBase,
+      fingerprint: await sha256Hex(stableJson(snapshotBase)),
+    };
+  }));
+
+  const storyEntries = [...storiesByTaskGid.entries()].flatMap(([taskGid, stories]) =>
+    stories.map((story) => ({ taskGid, story })),
+  );
+  const normalizedStories = await Promise.all(storyEntries.map(async ({ taskGid, story }) => {
+    const textHash = await sha256Hex(story.text?.trim() ?? "");
+    const snapshotBase = {
+      gid: story.gid,
+      taskGid,
+      createdAt: story.created_at ?? "",
+      author: story.created_by?.name?.trim() ?? "",
+      textPreview: cleanSnapshotText(story.text),
+      textHash,
+    };
+    return {
+      ...snapshotBase,
+      fingerprint: await sha256Hex(stableJson(snapshotBase)),
+    };
+  }));
+
+  return {
+    asanaProjectGid: mapping.asanaProjectGid,
+    asanaProjectName: mapping.asanaProjectName,
+    asanaWorkspaceName: mapping.asanaWorkspaceName,
+    taskStatusSource: taskStatusSettings.source === "custom_field"
+      ? `custom_field:${taskStatusSettings.customFieldName ?? taskStatusSettings.customFieldGid ?? ""}`
+      : "native",
+    tasks: normalizedTasks.sort((left, right) => left.gid.localeCompare(right.gid)),
+    statusUpdates: normalizedStatusUpdates.sort((left, right) => left.gid.localeCompare(right.gid)),
+    stories: normalizedStories.sort((left, right) => left.gid.localeCompare(right.gid)),
+  };
+}
+
+function diffRecords<T extends { gid: string; fingerprint: string }>(
+  previous: T[],
+  current: T[],
+) {
+  const previousByGid = new Map(previous.map((item) => [item.gid, item]));
+  const currentByGid = new Map(current.map((item) => [item.gid, item]));
+  const added = current.filter((item) => !previousByGid.has(item.gid));
+  const removed = previous.filter((item) => !currentByGid.has(item.gid));
+  const changed = current
+    .map((item) => {
+      const oldItem = previousByGid.get(item.gid);
+      return oldItem && oldItem.fingerprint !== item.fingerprint ? { previous: oldItem, current: item } : null;
+    })
+    .filter((item): item is { previous: T; current: T } => Boolean(item));
+  return { added, removed, changed };
+}
+
+function changedFields<T extends Record<string, unknown>>(previous: T, current: T, ignored: string[] = ["fingerprint"]) {
+  const ignoredSet = new Set(ignored);
+  return Object.keys(current)
+    .filter((key) => !ignoredSet.has(key) && stableJson(previous[key]) !== stableJson(current[key]));
+}
+
+function buildSnapshotDiff(previous: NormalizedAsanaSnapshot | null, current: NormalizedAsanaSnapshot): AsanaSnapshotDiff {
+  if (!previous) {
+    return {
+      initial: true,
+      addedTasks: current.tasks,
+      removedTasks: [],
+      changedTasks: [],
+      addedStatusUpdates: current.statusUpdates,
+      changedStatusUpdates: [],
+      addedStories: current.stories,
+    };
+  }
+
+  const taskDiff = diffRecords(previous.tasks, current.tasks);
+  const statusUpdateDiff = diffRecords(previous.statusUpdates, current.statusUpdates);
+  const storyDiff = diffRecords(previous.stories, current.stories);
+
+  return {
+    initial: false,
+    addedTasks: taskDiff.added,
+    removedTasks: taskDiff.removed,
+    changedTasks: taskDiff.changed.map((item) => ({
+      ...item,
+      fields: changedFields(item.previous, item.current),
+    })),
+    addedStatusUpdates: statusUpdateDiff.added,
+    changedStatusUpdates: statusUpdateDiff.changed.map((item) => ({
+      ...item,
+      fields: changedFields(item.previous, item.current),
+    })),
+    addedStories: storyDiff.added,
+  };
+}
+
+function hasSnapshotDiff(diff: AsanaSnapshotDiff) {
+  return diff.initial
+    || diff.addedTasks.length > 0
+    || diff.removedTasks.length > 0
+    || diff.changedTasks.length > 0
+    || diff.addedStatusUpdates.length > 0
+    || diff.changedStatusUpdates.length > 0
+    || diff.addedStories.length > 0;
+}
+
+function taskSnapshotLine(task: NormalizedAsanaTaskSnapshot) {
+  return [
+    `${task.name} (${task.gid})`,
+    `status=${task.status}`,
+    task.assignee ? `assignee=${task.assignee}` : "",
+    task.due ? `due=${task.due}` : "",
+    task.section ? `section=${task.section}` : "",
+    task.modifiedAt ? `modified=${task.modifiedAt}` : "",
+  ].filter(Boolean).join("; ");
+}
+
+function buildSnapshotDiffSummary(diff: AsanaSnapshotDiff) {
+  if (diff.initial) {
+    return `Initial Asana snapshot captured with ${diff.addedTasks.length} tasks, ${diff.addedStatusUpdates.length} status updates, and ${diff.addedStories.length} recent task stories.`;
+  }
+
+  const parts = [
+    diff.addedTasks.length ? `${diff.addedTasks.length} task(s) added` : "",
+    diff.removedTasks.length ? `${diff.removedTasks.length} task(s) removed` : "",
+    diff.changedTasks.length ? `${diff.changedTasks.length} task(s) changed` : "",
+    diff.addedStatusUpdates.length ? `${diff.addedStatusUpdates.length} status update(s) added` : "",
+    diff.changedStatusUpdates.length ? `${diff.changedStatusUpdates.length} status update(s) changed` : "",
+    diff.addedStories.length ? `${diff.addedStories.length} story/comment(s) added` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join("; ") : "No material Asana changes since the previous snapshot.";
+}
+
+function buildAsanaSnapshotDocument({
+  capturedAt,
+  current,
+  diff,
+  mapping,
+}: {
+  capturedAt: string;
+  current: NormalizedAsanaSnapshot;
+  diff: AsanaSnapshotDiff;
+  mapping: {
+    asanaProjectGid: string;
+    asanaProjectName: string;
+    asanaWorkspaceName: string;
+    vertexProjectId: string;
+  };
+}) {
+  const lines = [
+    `# Asana Snapshot - ${mapping.asanaProjectName}`,
+    "",
+    `Captured at: ${capturedAt}`,
+    `Asana project: ${mapping.asanaProjectName} (${mapping.asanaProjectGid})`,
+    `Asana workspace: ${mapping.asanaWorkspaceName}`,
+    `Vertex project ID: ${mapping.vertexProjectId}`,
+    `Task status source: ${current.taskStatusSource}`,
+    "",
+    "## Snapshot Summary",
+    `- Tasks: ${current.tasks.length}`,
+    `- Status updates tracked: ${current.statusUpdates.length}`,
+    `- Recent task stories tracked: ${current.stories.length}`,
+    `- Change summary: ${buildSnapshotDiffSummary(diff)}`,
+    "",
+    "## Task Changes",
+  ];
+
+  if (diff.initial) {
+    lines.push("- Baseline snapshot. Future snapshots will list deltas against this baseline.");
+  }
+  for (const task of diff.addedTasks.slice(0, 80)) lines.push(`- Added: ${taskSnapshotLine(task)}`);
+  for (const task of diff.removedTasks.slice(0, 80)) lines.push(`- Removed: ${taskSnapshotLine(task)}`);
+  for (const change of diff.changedTasks.slice(0, 80)) {
+    lines.push(`- Changed: ${taskSnapshotLine(change.current)}; fields changed=${change.fields.join(", ") || "unknown"}`);
+  }
+  if (!diff.addedTasks.length && !diff.removedTasks.length && !diff.changedTasks.length) lines.push("- No task changes detected.");
+
+  lines.push("", "## Status Update Changes");
+  for (const update of diff.addedStatusUpdates.slice(0, 30)) {
+    lines.push(`- Added: [${update.sourceType}] ${update.sourceName}; ${update.title || "Untitled"}; ${update.createdAt}; ${update.color}; ${update.textPreview}`);
+  }
+  for (const update of diff.changedStatusUpdates.slice(0, 30)) {
+    lines.push(`- Changed: [${update.current.sourceType}] ${update.current.sourceName}; ${update.current.title || "Untitled"}; fields changed=${update.fields.join(", ") || "unknown"}; ${update.current.textPreview}`);
+  }
+  if (!diff.addedStatusUpdates.length && !diff.changedStatusUpdates.length) lines.push("- No status update changes detected.");
+
+  lines.push("", "## New Task Stories");
+  for (const story of diff.addedStories.slice(0, 40)) {
+    lines.push(`- Task ${story.taskGid}; ${story.createdAt}; ${story.author}: ${story.textPreview}`);
+  }
+  if (!diff.addedStories.length) lines.push("- No new tracked task stories detected.");
+
+  lines.push("", "## Current Task Snapshot");
+  for (const task of current.tasks.slice(0, 250)) lines.push(`- ${taskSnapshotLine(task)}; notes=${task.notesPreview}`);
+  if (current.tasks.length > 250) lines.push(`- ${current.tasks.length - 250} additional tasks omitted from this snapshot document.`);
+
+  return lines.join("\n");
+}
+
+async function latestAsanaSnapshot(mappingId: string) {
+  return getDb()
+    .prepare(
+      `SELECT snapshot_json as snapshotJson,
+              snapshot_hash as snapshotHash,
+              created_at as createdAt
+       FROM asana_project_snapshots
+       WHERE mapping_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .bind(mappingId)
+    .first<{ snapshotJson: string; snapshotHash: string; createdAt: number }>();
+}
+
+function parseSnapshot(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as NormalizedAsanaSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotTeamId(mapping: { vertexTeamId: string | null; vertexWorkspaceId: string }) {
+  return mapping.vertexTeamId?.trim() || `workspace-${mapping.vertexWorkspaceId}`;
+}
+
+function asanaSnapshotR2Key(teamId: string, projectId: string, hash: string) {
+  return `rag-asana/${teamId}/${projectId}/${Date.now()}-${hash.slice(0, 12)}.md`;
+}
+
+async function persistAsanaSnapshotForRag({
+  mapping,
+  statusUpdates,
+  storiesByTaskGid,
+  taskStatusSettings,
+  tasks,
+}: {
+  mapping: {
+    mappingId: string;
+    userId: string;
+    asanaProjectGid: string;
+    asanaProjectName: string;
+    asanaWorkspaceName: string;
+    vertexWorkspaceId: string;
+    vertexTeamId: string | null;
+    vertexMode: WorkspaceMode;
+    vertexProjectId: string;
+  };
+  statusUpdates: AsanaContextStatusUpdate[];
+  storiesByTaskGid: Map<string, AsanaStoryContextRow[]>;
+  taskStatusSettings: AsanaTaskStatusSettings;
+  tasks: AsanaTaskContextRow[];
+}) {
+  try {
+    const snapshot = await normalizeAsanaSnapshot({ mapping, statusUpdates, storiesByTaskGid, taskStatusSettings, tasks });
+    const snapshotJson = stableJson(snapshot);
+    const snapshotHash = await sha256Hex(snapshotJson);
+    const previousRow = await latestAsanaSnapshot(mapping.mappingId);
+    if (previousRow?.snapshotHash === snapshotHash) {
+      return `Asana snapshot comparison: no material changes since the previous snapshot captured at ${new Date(previousRow.createdAt).toISOString()}.`;
+    }
+
+    const previousSnapshot = parseSnapshot(previousRow?.snapshotJson);
+    const diff = buildSnapshotDiff(previousSnapshot, snapshot);
+    if (!hasSnapshotDiff(diff)) {
+      return "Asana snapshot comparison: no material changes since the previous snapshot.";
+    }
+
+    const capturedAt = new Date().toISOString();
+    const diffSummary = buildSnapshotDiffSummary(diff);
+    const teamId = snapshotTeamId(mapping);
+    const r2Key = asanaSnapshotR2Key(teamId, mapping.vertexProjectId, snapshotHash);
+    const documentName = `Asana Snapshot - ${mapping.asanaProjectName} - ${capturedAt.slice(0, 10)}.md`;
+    const documentText = buildAsanaSnapshotDocument({ capturedAt, current: snapshot, diff, mapping });
+    const snapshotEnv = integrationEnv();
+    let queued = false;
+
+    if (snapshotEnv.ARTIFACTS_BUCKET && snapshotEnv.DOCUMENT_INGESTION_QUEUE) {
+      await snapshotEnv.ARTIFACTS_BUCKET.put(r2Key, documentText, {
+        httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+        customMetadata: {
+          team_id: teamId,
+          project_id: mapping.vertexProjectId,
+          document_name: documentName,
+          source: "asana-snapshot",
+          asana_project_gid: mapping.asanaProjectGid,
+          confidentiality: "Standard",
+          restricted: "false",
+        },
+      });
+      await snapshotEnv.DOCUMENT_INGESTION_QUEUE.send({
+        kind: "scoped-rag-generated-artifact",
+        r2Key,
+        documentName,
+        teamId,
+        projectId: mapping.vertexProjectId,
+      });
+      queued = true;
+    } else {
+      console.warn(JSON.stringify({
+        event: "asana_snapshot_rag_bindings_missing",
+        vertexProjectId: mapping.vertexProjectId,
+        asanaProjectGid: mapping.asanaProjectGid,
+      }));
+    }
+
+    await getDb()
+      .prepare(
+        `INSERT INTO asana_project_snapshots (
+          id,
+          mapping_id,
+          user_id,
+          vertex_workspace_id,
+          vertex_team_id,
+          vertex_mode,
+          vertex_project_id,
+          asana_project_gid,
+          asana_project_name,
+          snapshot_hash,
+          snapshot_json,
+          task_count,
+          status_update_count,
+          story_count,
+          diff_summary,
+          r2_key,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        `asana-snapshot-${crypto.randomUUID()}`,
+        mapping.mappingId,
+        mapping.userId,
+        mapping.vertexWorkspaceId,
+        mapping.vertexTeamId,
+        mapping.vertexMode,
+        mapping.vertexProjectId,
+        mapping.asanaProjectGid,
+        mapping.asanaProjectName,
+        snapshotHash,
+        snapshotJson,
+        snapshot.tasks.length,
+        snapshot.statusUpdates.length,
+        snapshot.stories.length,
+        diffSummary,
+        queued ? r2Key : null,
+        Date.now(),
+      )
+      .run();
+
+    return `Asana snapshot comparison: ${diffSummary}${queued ? " The changed snapshot was queued for future RAG vector search." : " Snapshot metadata was stored, but RAG ingestion was skipped because storage/queue bindings were unavailable."}`;
+  } catch (error) {
+    console.warn(JSON.stringify({
+      event: "asana_snapshot_persist_failed",
+      vertexProjectId: mapping.vertexProjectId,
+      asanaProjectGid: mapping.asanaProjectGid,
+      error: error instanceof Error ? error.message : "Unknown Asana snapshot persistence failure",
+    }));
+    return "Asana snapshot comparison: unavailable because snapshot persistence failed.";
+  }
+}
+
 function buildAsanaProjectContext({
   mapping,
   maxContextChars,
+  snapshotComparison,
   statusUpdates,
   taskStatusSettings,
   storiesByTaskGid,
@@ -1348,6 +1878,7 @@ function buildAsanaProjectContext({
     permissionLevel: string;
   };
   maxContextChars: number;
+  snapshotComparison?: string | null;
   statusUpdates: AsanaContextStatusUpdate[];
   taskStatusSettings: AsanaTaskStatusSettings;
   storiesByTaskGid: Map<string, AsanaStoryContextRow[]>;
@@ -1375,6 +1906,10 @@ function buildAsanaProjectContext({
     "Use these aggregate counts for task-status/count questions. The detailed tasks below are only a relevance-ranked sample.",
     ...(taskStatusSummary.lines.length ? taskStatusSummary.lines : ["- No tasks returned"]),
   );
+
+  if (snapshotComparison) {
+    lines.push("", snapshotComparison);
+  }
 
   if (statusUpdates.length) {
     lines.push(

@@ -250,6 +250,8 @@ The Cloudflare Worker exposes `POST /api/asana-webhook` for Asana task update we
 - Verified task updates are resolved through `asana_project_mappings` first, then the legacy optional env map. Matching updates are inserted as system chat messages, published through `CHAT_SYNC`, and recorded in the D1 `events` table so `/api/chat-events` and `/api/events` subscribers refresh through the existing SSE sync path.
 - If the signature is valid but the payload cannot be mapped to a local project chat, the route returns `202` with `delivered: false` instead of guessing the destination.
 
+Asana-enabled project chats also create durable Asana snapshots. The first retrieval stores a baseline in `asana_project_snapshots`; later retrievals compare the current tasks/status updates/stories to the latest snapshot. Changed snapshots are saved to R2 and queued through `DOCUMENT_INGESTION_QUEUE`, which embeds them into Vectorize through the existing scoped RAG document ingestion path.
+
 Set the required secret with Wrangler:
 
 ```powershell

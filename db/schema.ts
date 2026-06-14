@@ -510,3 +510,31 @@ export const asanaProjectMappings = sqliteTable(
     userIdx: index("asana_project_mappings_user_idx").on(table.userId, table.updatedAt),
   }),
 );
+
+export const asanaProjectSnapshots = sqliteTable(
+  "asana_project_snapshots",
+  {
+    id: text("id").primaryKey(),
+    mappingId: text("mapping_id").notNull().references(() => asanaProjectMappings.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    vertexWorkspaceId: text("vertex_workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    vertexTeamId: text("vertex_team_id"),
+    vertexMode: text("vertex_mode", { enum: ["Personal", "Team", "Org"] }).notNull(),
+    vertexProjectId: text("vertex_project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    asanaProjectGid: text("asana_project_gid").notNull(),
+    asanaProjectName: text("asana_project_name").notNull(),
+    snapshotHash: text("snapshot_hash").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+    taskCount: integer("task_count").notNull(),
+    statusUpdateCount: integer("status_update_count").notNull(),
+    storyCount: integer("story_count").notNull(),
+    diffSummary: text("diff_summary").notNull(),
+    r2Key: text("r2_key"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    mappingCreatedIdx: index("asana_project_snapshots_mapping_created_idx").on(table.mappingId, table.createdAt),
+    mappingHashIdx: uniqueIndex("asana_project_snapshots_mapping_hash_idx").on(table.mappingId, table.snapshotHash),
+    vertexProjectIdx: index("asana_project_snapshots_vertex_project_idx").on(table.vertexProjectId, table.createdAt),
+  }),
+);
