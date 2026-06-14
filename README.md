@@ -111,7 +111,7 @@ Core tables:
 - `chat_messages`: chat history.
 - `ideas`: scoped improvement ideas, owner attribution, AI analysis scores, rationale text, status, explicit pin state, and shareable authenticated route targets.
 - `artifacts`: immutable artifact metadata, version lineage, commit messages, and R2 object keys.
-- `workspace_actions`: decisions, approvals, and tasks, including status, original assistant text, project scope, and explicit pin state.
+- `workspace_actions`: decisions, approvals, and tasks, including status, original assistant text, project scope, explicit pin state, and one-way Asana task sync metadata.
 - `microsoft_graph_subscriptions`: Teams and Outlook Graph webhook subscription tracking, including active Teams subscription counts for the 10,000 tenant limit.
 - `microsoft_graph_webhook_deliveries`: audit rows for queued Graph webhook deliveries.
 - `asana_project_webhooks`: project-level Asana webhook registry used to prevent duplicate subscriptions and repair failed setup.
@@ -223,6 +223,8 @@ Asana account setup starts in Profile settings at `/profile/asana`.
 - The wizard lists projects discovered through the connected user's Asana team project memberships and portfolio memberships. Project write access is verified for selected mappings at save time and combined with the granted OAuth scopes.
 - Users can map an Asana project to an existing VertexAI project or scaffold a new VertexAI project and project chat from the selected Asana project.
 - Each saved mapping stores `can_write_tasks`. Task submission back to Asana is blocked unless the connected user has both `tasks:write` OAuth scope and confirmed Asana project-level write access.
+- Tasks created from VertexAI workflow suggestions stay local until the user clicks Sync to Asana, unless the user enables auto-sync in Profile > Asana. Project-scoped tasks are added to the mapped Asana project without selecting a section, so Asana places them in the project's default task location. Non-project tasks are created in the connected user's Asana task list by setting `assignee` to that Asana user and using a single resolvable Asana workspace. Once a task has an Asana task gid, the Sync to Asana button is disabled and displayed as synced.
+- Task sync is intentionally one-way: VertexAI can push new tasks to Asana. Asana webhook events provide visibility, chat updates, and briefing context, but they do not create or update VertexAI task records.
 - Asana's project membership and portfolio discovery endpoints currently require the OAuth app's Full permissions mode for this integration. Set `ASANA_USE_FULL_PERMISSIONS=true` and reconnect after enabling Full permissions in the Asana developer console when the mapping wizard must enforce membership/write-access guardrails.
 
 Configure the Asana OAuth app with this redirect URI:
@@ -242,7 +244,7 @@ Create and manage required secrets with Wrangler:
 The D1 schema for this flow lives in [drizzle/0013_asana_oauth_integration.sql](drizzle/0013_asana_oauth_integration.sql) and [db/schema.ts](db/schema.ts):
 
 - `asana_oauth_states`: short-lived state and PKCE verifier records.
-- `asana_connections`: connected Asana account metadata and granted scopes.
+- `asana_connections`: connected Asana account metadata, granted scopes, and the user's auto-sync preference for newly created tasks.
 - `asana_project_mappings`: Asana-to-VertexAI project links, project chat routing, and captured task-write permission.
 - `asana_project_webhooks`: Asana project webhook gid, target URL, status, and last setup error.
 
@@ -252,7 +254,7 @@ The Cloudflare Worker exposes `POST /api/webhooks/asana` for Asana task update w
 
 - Configure each project-level Asana webhook target URL with `asanaWorkspaceGid` and `asanaProjectGid`, for example `https://<app-origin>/api/webhooks/asana?asanaWorkspaceGid=<asana-workspace-gid>&asanaProjectGid=<asana-project-gid>`. The workspace value is stored with task state, and the workspace plus project pair is the lookup key for that webhook's signing secret.
 - New Asana project mappings automatically call Asana's webhook API after the mapping is saved. The receiver first checks `asana_project_webhooks`, then checks existing Asana webhooks for the same project/target when the connected token can read webhooks, and only creates a new webhook when no active matching webhook exists.
-- The Profile > Asana page includes a Repair webhooks action that re-runs this idempotent ensure flow for all mapped projects available to the connected user.
+- The Profile > Asana page shows webhook status for each mapped project and includes a Repair webhooks action that re-runs this idempotent ensure flow for all mapped projects available to the connected user.
 - During Asana's webhook handshake, the route stores the exact `X-Hook-Secret` value in the `ASANA_WEBHOOK_SECRETS` KV namespace and returns `200 OK` with the same `X-Hook-Secret` response header.
 - For event deliveries, the route reads the raw request body, extracts `X-Hook-Signature` or `X-Asana-Request-Signature`, retrieves the stored workspace secret from KV, imports it with `crypto.subtle.importKey("raw", secretKeyData, { name: "HMAC", hash: "SHA-256" }, false, ["verify"])`, and validates the signature with `crypto.subtle.verify` before parsing JSON.
 - Verified task updates are upserted into `asana_webhook_task_states` through Drizzle, then resolved through `asana_project_mappings` first and the optional env map second. Matching updates are inserted as system chat messages, published through `CHAT_SYNC`, and recorded in the D1 `events` table so `/api/chat-events` and `/api/events` subscribers refresh through the existing SSE sync path.

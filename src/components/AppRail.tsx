@@ -2,28 +2,23 @@ import { useState, type ComponentType, type ReactNode } from "react";
 import {
   Archive,
   BookOpen,
-  CheckCircle2,
   FolderOpen,
-  KeyRound,
   Lightbulb,
   LogOut,
   MessageCircle,
+  ShieldAlert,
   ShieldCheck,
   UserRound,
-  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type AppRailItem = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Docs";
+export type AppRailItem = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Risks" | "Docs";
 
 export type AppRailAccount = {
   canAdmin: boolean;
-  showTokenUsage: boolean;
   userEmail: string;
   userName: string;
-  onShowTokenUsageChange: (value: boolean) => void;
   onSignOut: () => void;
-  onStartTutorial?: () => void;
 };
 
 const appRailItems: Array<{ label: AppRailItem; icon: ComponentType<{ className?: string }> }> = [
@@ -31,6 +26,7 @@ const appRailItems: Array<{ label: AppRailItem; icon: ComponentType<{ className?
   { label: "Chats", icon: MessageCircle },
   { label: "Ideas", icon: Lightbulb },
   { label: "Artifacts", icon: Archive },
+  { label: "Risks", icon: ShieldAlert },
   { label: "Docs", icon: BookOpen },
 ];
 
@@ -53,7 +49,7 @@ export function AppRail({
   account?: AppRailAccount;
   activeItem?: AppRailItem;
   children?: ReactNode;
-  onRailClick?: (label: Extract<AppRailItem, "Workspaces" | "Chats" | "Ideas" | "Artifacts">) => void;
+  onRailClick?: (label: Extract<AppRailItem, "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Risks">) => void;
   persist?: boolean;
 }) {
   return (
@@ -65,7 +61,7 @@ export function AppRail({
         <img alt="Vertex" className="size-7" src="/vertex-mountain-blue.svg" />
       </div>
       {appRailItems.map(({ label, icon: Icon }) => {
-        const isWorkspaceItem = label === "Workspaces" || label === "Chats" || label === "Ideas" || label === "Artifacts";
+        const isWorkspaceItem = label === "Workspaces" || label === "Chats" || label === "Ideas" || label === "Artifacts" || label === "Risks";
         return (
           <button
             key={label}
@@ -141,27 +137,7 @@ function AppRailAccountMenu({ account }: { account: AppRailAccount }) {
             onClick={() => runMenuAction(() => (window.location.href = "/profile"))}
           >
             <UserRound className="size-4" />
-            User settings
-          </button>
-          {account.onStartTutorial ? (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-              role="menuitem"
-              onClick={() => runMenuAction(account.onStartTutorial ?? (() => undefined))}
-            >
-              <CheckCircle2 className="size-4" />
-              Relaunch tutorial
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-            role="menuitem"
-            onClick={() => runMenuAction(() => (window.location.href = "/profile/password"))}
-          >
-            <KeyRound className="size-4" />
-            Reset password
+            User Settings
           </button>
           {account.canAdmin ? (
             <button
@@ -171,35 +147,9 @@ function AppRailAccountMenu({ account }: { account: AppRailAccount }) {
               onClick={() => runMenuAction(() => (window.location.href = "/admin"))}
             >
               <ShieldCheck className="size-4" />
-              Admin
+              Admin Settings
             </button>
           ) : null}
-          <div className="my-2 border-t" />
-          <label className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent">
-            <span className="flex items-center gap-2">
-              <Zap className="size-4" />
-              Show token usage
-            </span>
-            <input
-              checked={account.showTokenUsage}
-              className="sr-only"
-              type="checkbox"
-              onChange={(event) => account.onShowTokenUsageChange(event.target.checked)}
-            />
-            <span
-              className={cn(
-                "flex h-5 w-9 items-center rounded-full border p-0.5 transition-colors",
-                account.showTokenUsage ? "border-primary bg-primary" : "border-input bg-muted",
-              )}
-            >
-              <span
-                className={cn(
-                  "size-3.5 rounded-full bg-background shadow-sm transition-transform",
-                  account.showTokenUsage && "translate-x-4",
-                )}
-              />
-            </span>
-          </label>
           <div className="my-2 border-t" />
           <button
             type="button"

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { Eye, EyeOff, LogIn } from "lucide-react";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -95,7 +96,7 @@ function SignInPage() {
     <main className="grid min-h-screen place-items-center bg-muted/30 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <img className="mb-3 h-10 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
+          <VertexAIBrand className="mb-3" logoClassName="h-10 w-fit" aiClassName="text-[1.75rem]" />
           <CardTitle>Vertex AI Command Center</CardTitle>
           <CardDescription>Sign in with your invited account.</CardDescription>
         </CardHeader>

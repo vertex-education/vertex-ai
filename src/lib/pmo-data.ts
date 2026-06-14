@@ -5,7 +5,16 @@ import { queryOptions } from "@tanstack/react-query";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/start-server-core";
 import { runTrackedAiGateway } from "@/lib/ai-gateway";
-import { fetchAsanaProjectContextForCurrentUser } from "@/lib/asana-integration.server";
+import {
+  createAsanaTaskForWorkflowTaskForCurrentUser,
+  fetchAsanaProjectContextForCurrentUser,
+  getAsanaTaskAutoSyncEnabledForCurrentUser,
+} from "@/lib/asana-integration.server";
+import {
+  isMissingAsanaSyncColumnError,
+  normalizePersistedTaskStatus,
+  withDefaultAsanaSyncState,
+} from "@/lib/asana-task-sync-state";
 import { getAuth } from "@/lib/auth";
 import { publishChatMessageInserts, type ChatMessageInsertEvent } from "@/lib/chat-sync";
 import { recordRealtimeMutationEvent, type RealtimeInvalidationTarget } from "@/lib/realtime-events";
@@ -13,6 +22,7 @@ import {
   xlsxBlobFromRows,
   type ExportTable,
 } from "@/lib/chat-export";
+import type { ChatOperationalEntity } from "@/lib/chat-entities";
 import {
   aiUnavailableMessage,
   buildVertexAiSystemPrompt,
@@ -26,8 +36,8 @@ import {
 import { fetchConsolidatedWebSearch } from "@/lib/rag";
 
 export type IdeaStatus = "Not Started" | "Reviewing" | "Convert to Project" | "Dismiss";
-export type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
-export type RailName = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Prompts";
+export type TabName = "Chat" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Risks" | "Prompts";
+export type RailName = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Decisions" | "Approvals" | "Tasks" | "Risks" | "Prompts";
 export type WorkspaceMode = "Personal" | "Team" | "Org";
 export type WorkspaceScope = "personal" | "team" | "org";
 export type ChatSection = "project" | "workspace";
@@ -91,6 +101,7 @@ export type ChatMessage = {
     type: "doc" | "ppt" | "sheet";
   };
   attachments?: ChatAttachment[];
+  entities?: ChatOperationalEntity[];
 };
 
 export type ChatAttachment = {
@@ -159,8 +170,22 @@ export type Task = {
   owner: string;
   source: string;
   status: "Open" | "Completed";
+  asanaTaskGid?: string | null;
+  asanaSyncedAt?: number | null;
+  asanaSyncError?: string | null;
   pinned?: boolean;
   clientStatus?: "pending";
+};
+
+export type RiskSeverity = "low" | "medium" | "high" | "critical";
+
+export type Risk = {
+  id: string;
+  projectId: string | null;
+  description: string;
+  severity: RiskSeverity;
+  status: string;
+  mitigationStrategy: string;
 };
 
 export type CreateTaskInput = {
@@ -196,6 +221,7 @@ export type ScopedWorkspaceState = {
   decisions: Decision[];
   approvals: Approval[];
   tasks: Task[];
+  risks: Risk[];
   pinnedIdeaIds: string[];
   accessLevel: "Read / Write" | "View only";
   activity: ActivityItem[];
@@ -423,7 +449,7 @@ export const statusMeta: Record<IdeaStatus, { label: string; tone: "info" | "war
   Dismiss: { label: "Dismiss", tone: "destructive", description: "Dismissed from consideration." },
 };
 
-export const tabs: TabName[] = ["Chat", "Artifacts", "Ideas", "Decisions", "Approvals", "Tasks", "Prompts"];
+export const tabs: TabName[] = ["Chat", "Artifacts", "Ideas", "Decisions", "Approvals", "Tasks", "Risks", "Prompts"];
 export const workspaceModes: WorkspaceMode[] = ["Personal", "Team", "Org"];
 export const statusFilters: Array<IdeaStatus | "All"> = ["All", "Not Started", "Reviewing", "Convert to Project", "Dismiss"];
 export { modelOptions, promptTemplates };
@@ -735,6 +761,7 @@ function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
     decisions: [],
     approvals: [],
     tasks: [],
+    risks: [],
     pinnedIdeaIds: [],
     accessLevel: "Read / Write",
     activity: [],
@@ -1483,6 +1510,28 @@ function titleMatchesTask(left: string, right: string) {
   return normalize(left) === normalize(right);
 }
 
+function buildAsanaNotesForWorkflowTask(task: Task) {
+  return [
+    task.originalText ? `Original text: ${task.originalText}` : "",
+    task.owner ? `Owner: ${task.owner}` : "",
+    task.source ? `Source: ${task.source}` : "",
+    "Created from VertexAI Command Center.",
+  ].filter(Boolean).join("\n");
+}
+
+async function createAsanaSyncStateForTask(task: Task) {
+  const asanaTask = await createAsanaTaskForWorkflowTaskForCurrentUser({
+    notes: buildAsanaNotesForWorkflowTask(task),
+    title: task.title,
+    vertexProjectId: task.projectId,
+  });
+  return {
+    asanaTaskGid: asanaTask.gid,
+    asanaSyncedAt: Date.now(),
+    asanaSyncError: null,
+  } satisfies Pick<Task, "asanaTaskGid" | "asanaSyncedAt" | "asanaSyncError">;
+}
+
 function boundedScore(value: unknown, fallback: number) {
   const score = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(score)) return fallback;
@@ -1837,6 +1886,9 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
     source: string | null;
     status: string;
     pinned: boolean | number;
+    asanaTaskGid: string | null;
+    asanaSyncedAt: number | null;
+    asanaSyncError: string | null;
   }>;
   try {
     const result = await getDb()
@@ -1851,13 +1903,33 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
                 due,
                 source,
                 status,
-                pinned
+                pinned,
+                asana_task_gid as asanaTaskGid,
+                asana_synced_at as asanaSyncedAt,
+                asana_sync_error as asanaSyncError
          FROM workspace_actions`,
       )
       .all<typeof rows[number]>();
     rows = result.results ?? [];
-  } catch {
-    return root;
+  } catch (error) {
+    if (!isMissingAsanaSyncColumnError(error)) return root;
+    const fallback = await getDb()
+      .prepare(
+        `SELECT id,
+                workspace_id as workspaceId,
+                kind,
+                project_id as projectId,
+                title,
+                original_text as originalText,
+                owner,
+                due,
+                source,
+                status,
+                pinned
+         FROM workspace_actions`,
+      )
+      .all<Omit<typeof rows[number], "asanaTaskGid" | "asanaSyncedAt" | "asanaSyncError">>();
+    rows = (fallback.results ?? []).map(withDefaultAsanaSyncState);
   }
 
   for (const row of rows) {
@@ -1873,7 +1945,10 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
         originalText: row.originalText || undefined,
         owner: row.owner,
         source: row.source || "VertexAI suggestion",
-        status: row.status === "Completed" ? "Completed" : "Open",
+        status: normalizePersistedTaskStatus(),
+        asanaTaskGid: row.asanaTaskGid,
+        asanaSyncedAt: row.asanaSyncedAt,
+        asanaSyncError: row.asanaSyncError,
         pinned: Boolean(row.pinned),
       };
       workspace.tasks = [task, ...workspace.tasks.filter((item) => item.id !== task.id)];
@@ -1909,6 +1984,51 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
   return root;
 }
 
+async function mergePersistedRisks(root: PmoWorkspaceState) {
+  let rows: Array<{
+    id: string;
+    workspaceId: string;
+    projectId: string | null;
+    description: string;
+    severity: RiskSeverity;
+    status: string;
+    mitigationStrategy: string;
+  }>;
+  try {
+    const result = await getDb()
+      .prepare(
+        `SELECT id,
+                workspace_id as workspaceId,
+                project_id as projectId,
+                description,
+                severity,
+                status,
+                mitigation_strategy as mitigationStrategy
+         FROM risks`,
+      )
+      .all<typeof rows[number]>();
+    rows = result.results ?? [];
+  } catch {
+    return root;
+  }
+
+  for (const row of rows) {
+    const mode = modeForWorkspaceId(row.workspaceId);
+    if (!mode) continue;
+    const workspace = root.workspaces[mode];
+    const risk: Risk = {
+      id: row.id,
+      projectId: row.projectId,
+      description: row.description,
+      severity: row.severity,
+      status: row.status,
+      mitigationStrategy: row.mitigationStrategy,
+    };
+    workspace.risks = [risk, ...workspace.risks.filter((item) => item.id !== risk.id)];
+  }
+  return root;
+}
+
 async function mergePersistedWorkspace(root: PmoWorkspaceState) {
   const withArtifacts = await mergePersistedArtifacts(root);
   for (const workspace of Object.values(withArtifacts.workspaces)) {
@@ -1917,8 +2037,9 @@ async function mergePersistedWorkspace(root: PmoWorkspaceState) {
     workspace.decisions = [];
     workspace.approvals = [];
     workspace.tasks = [];
+    workspace.risks = [];
   }
-  return mergePersistedWorkflowActions(await mergePersistedIdeas(withArtifacts));
+  return mergePersistedRisks(await mergePersistedWorkflowActions(await mergePersistedIdeas(withArtifacts)));
 }
 
 function parseStringArray(value: string) {
@@ -2039,8 +2160,8 @@ async function persistWorkflowAction(
   await getDb()
     .prepare(
       `INSERT OR REPLACE INTO workspace_actions (
-         id, workspace_id, kind, project_id, title, original_text, owner, due, source, status, pinned, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         id, workspace_id, kind, project_id, title, original_text, owner, due, source, status, pinned, asana_task_gid, asana_synced_at, asana_sync_error, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       item.id,
@@ -2054,6 +2175,9 @@ async function persistWorkflowAction(
       kind === "task" ? (item as Task).source : null,
       item.status,
       item.pinned ? 1 : 0,
+      kind === "task" ? (item as Task).asanaTaskGid ?? null : null,
+      kind === "task" ? (item as Task).asanaSyncedAt ?? null : null,
+      kind === "task" ? (item as Task).asanaSyncError ?? null : null,
       Date.now(),
     )
     .run();
@@ -2069,6 +2193,73 @@ async function updatePersistedWorkflowActionStatus(
     .prepare("UPDATE workspace_actions SET status = ? WHERE id = ? AND workspace_id = ? AND kind = ?")
     .bind(status, id, workspaceIdForMode(mode), kind)
     .run();
+}
+
+async function updatePersistedTaskAsanaSync(
+  mode: WorkspaceMode,
+  id: string,
+  sync: { asanaTaskGid: string | null; asanaSyncedAt: number | null; asanaSyncError: string | null },
+) {
+  await getDb()
+    .prepare(
+      `UPDATE workspace_actions
+       SET asana_task_gid = ?,
+           asana_synced_at = ?,
+           asana_sync_error = ?
+       WHERE id = ?
+         AND workspace_id = ?
+         AND kind = 'task'`,
+    )
+    .bind(sync.asanaTaskGid, sync.asanaSyncedAt, sync.asanaSyncError, id, workspaceIdForMode(mode))
+    .run();
+}
+
+async function getPersistedTask(mode: WorkspaceMode, id: string): Promise<Task | null> {
+  const row = await getDb()
+    .prepare(
+      `SELECT id,
+              project_id as projectId,
+              title,
+              original_text as originalText,
+              owner,
+              source,
+              pinned,
+              asana_task_gid as asanaTaskGid,
+              asana_synced_at as asanaSyncedAt,
+              asana_sync_error as asanaSyncError
+       FROM workspace_actions
+       WHERE id = ?
+         AND workspace_id = ?
+         AND kind = 'task'
+       LIMIT 1`,
+    )
+    .bind(id, workspaceIdForMode(mode))
+    .first<{
+      id: string;
+      projectId: string | null;
+      title: string;
+      originalText: string;
+      owner: string;
+      source: string | null;
+      pinned: boolean | number;
+      asanaTaskGid: string | null;
+      asanaSyncedAt: number | null;
+      asanaSyncError: string | null;
+    }>();
+  if (!row) return null;
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    title: row.title,
+    originalText: row.originalText || undefined,
+    owner: row.owner,
+    source: row.source || "VertexAI suggestion",
+    status: "Open",
+    pinned: Boolean(row.pinned),
+    asanaTaskGid: row.asanaTaskGid,
+    asanaSyncedAt: row.asanaSyncedAt,
+    asanaSyncError: row.asanaSyncError,
+  };
 }
 
 async function deletePersistedWorkflowAction(mode: WorkspaceMode, kind: "approval" | "decision" | "task", id: string) {
@@ -2989,6 +3180,9 @@ export const createTaskFromSuggestion = createServerFn({ method: "POST" })
       source: data.source?.trim().slice(0, 96) || "VertexAI suggestion",
       status: "Open",
     };
+    if (await getAsanaTaskAutoSyncEnabledForCurrentUser()) {
+      Object.assign(task, await createAsanaSyncStateForTask(task));
+    }
     workspace.tasks = [task, ...workspace.tasks];
     await persistWorkflowAction(data.mode, "task", task);
     recordActivity(workspace, "Task created", `${task.title} was added from VertexAI suggestions.`);
@@ -3003,6 +3197,43 @@ export const createTaskFromSuggestion = createServerFn({ method: "POST" })
       sourceUserId: user.id,
     });
     return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), task };
+  });
+
+export const syncTaskToAsana = createServerFn({ method: "POST" })
+  .validator((data: { mode: WorkspaceMode; id: string }) => data)
+  .handler(async ({ data }) => {
+    const user = await requireWorkspaceEditor();
+    const workspace = getMutableWorkspace(data.mode);
+    let task = workspace.tasks.find((item) => item.id === data.id) ?? null;
+    if (!task) task = await getPersistedTask(data.mode, data.id);
+    if (!task) throw new Error("Task was not found.");
+    if (task.asanaTaskGid) return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), task };
+
+    try {
+      const syncState = await createAsanaSyncStateForTask(task);
+      workspace.tasks = workspace.tasks.map((item) => (item.id === task.id ? { ...item, ...syncState } : item));
+      await updatePersistedTaskAsanaSync(data.mode, task.id, syncState);
+      recordActivity(workspace, "Task synced to Asana", `${task.title} was pushed to Asana.`);
+      await recordWorkspaceMutation({
+        entity: "task",
+        entityId: task.id,
+        invalidates: ["workspace"],
+        mode: data.mode,
+        operation: "update",
+        projectId: task.projectId,
+        sourceClientId: user.clientId,
+        sourceUserId: user.id,
+      });
+      return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), task: { ...task, ...syncState } };
+    } catch (error) {
+      const syncError = error instanceof Error ? error.message : "Unknown Asana sync failure";
+      await updatePersistedTaskAsanaSync(data.mode, task.id, {
+        asanaTaskGid: null,
+        asanaSyncedAt: null,
+        asanaSyncError: syncError,
+      });
+      throw error;
+    }
   });
 
 export const createApprovalFromSuggestion = createServerFn({ method: "POST" })

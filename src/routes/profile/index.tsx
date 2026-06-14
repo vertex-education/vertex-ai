@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { CalendarClock, Gauge, Inbox, KeyRound, PlayCircle, Plug, ShieldCheck, UserRound } from "lucide-react";
 import { AuthenticatedAppRail } from "@/components/AuthenticatedAppRail";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +15,7 @@ export const Route = createFileRoute("/profile/")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "User profile | Vertex AI Command Center" }],
+    meta: [{ title: "User Profile | Vertex AI Command Center" }],
   }),
   component: UserProfilePage,
 });
@@ -41,7 +42,7 @@ function UserProfilePage() {
               <Button type="button" variant="outline" onClick={() => (window.location.href = "/")}>
                 Back
               </Button>
-              <img className="h-9 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
+              <VertexAIBrand />
             </div>
 
             <Card>
@@ -49,7 +50,7 @@ function UserProfilePage() {
                 <div className="mb-2 grid size-12 place-items-center rounded-full bg-primary text-base font-semibold text-primary-foreground">
                   {getInitials(displayName)}
                 </div>
-                <CardTitle>User settings</CardTitle>
+                <CardTitle>User Settings</CardTitle>
                 <CardDescription>Manage your account details, password, invites, integrations, and personal display preferences.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -68,9 +69,9 @@ function UserProfilePage() {
                       <Badge variant="secondary">{session.user.role}</Badge>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-muted-foreground">Email verification</p>
+                      <p className="text-xs font-medium text-muted-foreground">Email Verification</p>
                       <Badge variant={session.user.emailVerified ? "default" : "secondary"}>
-                        {session.user.emailVerified ? "Verified" : "Not verified"}
+                        {session.user.emailVerified ? "Verified" : "Not Verified"}
                       </Badge>
                     </div>
                   </div>
@@ -78,11 +79,11 @@ function UserProfilePage() {
                   <div className="space-y-2">
                     <Button className="w-full justify-start" type="button" variant="outline" onClick={() => relaunchTutorial()}>
                       <PlayCircle className="size-4" />
-                      Relaunch tutorial
+                      Relaunch Tutorial
                     </Button>
                     <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/password")}>
                       <KeyRound className="size-4" />
-                      Reset password
+                      Reset Password
                     </Button>
                     <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/invites")}>
                       <Inbox className="size-4" />
@@ -90,21 +91,21 @@ function UserProfilePage() {
                     </Button>
                     <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/asana")}>
                       <Plug className="size-4" />
-                      Asana integration
+                      Asana Integration
                     </Button>
                     <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/briefings")}>
                       <CalendarClock className="size-4" />
-                      Automated briefings
+                      Automated Briefings
                     </Button>
                     {session.user.role === "admin" ? (
                       <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/admin")}>
                         <ShieldCheck className="size-4" />
-                        Admin
+                        Admin Settings
                       </Button>
                     ) : null}
                     <Button className="w-full justify-start" type="button" variant="outline" disabled>
                       <UserRound className="size-4" />
-                      More settings coming soon
+                      More Settings Coming Soon
                     </Button>
                   </div>
                 </div>
@@ -114,7 +115,7 @@ function UserProfilePage() {
                     <div className="flex min-w-0 items-start gap-3">
                       <Gauge className="mt-0.5 size-5 text-primary" />
                       <div className="min-w-0">
-                        <p className="font-semibold">Show token usage</p>
+                        <p className="font-semibold">Show Token Usage</p>
                         <p className="text-sm text-muted-foreground">Display token estimates, response token badges, and chat budget details.</p>
                       </div>
                     </div>

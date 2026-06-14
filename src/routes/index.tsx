@@ -27,7 +27,6 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
-  KeyRound,
   Lightbulb,
   LogOut,
   Maximize2,
@@ -35,6 +34,7 @@ import {
   Minimize2,
   MessageCircle,
   MoreHorizontal,
+  UploadCloud,
   Paperclip,
   PanelRightClose,
   PanelRightOpen,
@@ -45,6 +45,7 @@ import {
   Search,
   Send,
   Share2,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Star,
@@ -57,6 +58,7 @@ import type { ExtractedChatAttachment } from "@/lib/attachment-extraction";
 import { ArtifactUploader } from "@/components/ArtifactUploader";
 import { ArtifactRenderer } from "@/components/ArtifactRenderer";
 import { AppRail } from "@/components/AppRail";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,9 +89,11 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { listAsanaTaskStatusCustomFields, type AsanaTaskStatusCustomFieldOption } from "@/lib/asana-integration";
+import { getTaskAsanaSyncControlState } from "@/lib/asana-task-sync-state";
 import { authClient } from "@/lib/auth-client";
 import { getSessionSnapshot } from "@/lib/auth-workflow";
 import type { ChatMessageInsertEvent, WorkspacePresenceUser } from "@/lib/chat-sync";
+import { normalizeChatOperationalEntities, type ChatOperationalEntity, type ChatEntityStatus, type ChatEntityType } from "@/lib/chat-entities";
 import {
   downloadChatExport,
   downloadHtmlTable,
@@ -100,6 +104,7 @@ import {
   type ChatExportFormat,
 } from "@/lib/chat-export";
 import { cn } from "@/lib/utils";
+import { getRiskStats, getScopedRisks, riskManagementHref } from "@/lib/risk-feature";
 import {
   type AddIdeaInput,
   type Approval,
@@ -118,6 +123,7 @@ import {
   type PmoWorkspaceState,
   type ProjectSummary,
   type RailName,
+  type Risk,
   type ScopedWorkspaceState,
   type TabName,
   type Task,
@@ -145,6 +151,7 @@ import {
   removeSuggestedTask,
   statusFilters,
   statusMeta,
+  syncTaskToAsana,
   tabs,
   toggleArtifactPin,
   toggleIdeaPin,
@@ -152,7 +159,6 @@ import {
   updateApprovalStatus,
   updateDecisionStatus,
   updateIdeaStatus,
-  updateTaskStatus,
   workspaceModeLabel,
   workspaceModes,
 } from "@/lib/pmo-data";
@@ -286,7 +292,7 @@ function updateChatMessageInCache(
   conversationKey: string,
   messageId: string,
   text: string,
-  options?: { clientStatus?: ChatMessage["clientStatus"] | null },
+  options?: { clientStatus?: ChatMessage["clientStatus"] | null; entities?: ChatOperationalEntity[] },
 ) {
   if (!current) return current;
   return {
@@ -301,6 +307,9 @@ function updateChatMessageInCache(
               delete nextMessage.clientStatus;
             } else if (options?.clientStatus) {
               nextMessage.clientStatus = options.clientStatus;
+            }
+            if (options?.entities) {
+              nextMessage.entities = options.entities;
             }
             return nextMessage;
           })()
@@ -447,7 +456,7 @@ type InputDialogState = {
 } | null;
 
 type WorkflowPreviewState = {
-  kind: "Approval" | "Decision" | "Idea" | "Task";
+  kind: "Approval" | "Decision" | "Idea" | "Task" | "Risk";
   title: string;
   originalText: string;
   meta: string;
@@ -471,6 +480,7 @@ function getDetailMetrics({
   messages,
   pinnedArtifacts,
   queryState,
+  risks,
   scopeContextLabel,
   tasks,
   updatedAt,
@@ -483,6 +493,7 @@ function getDetailMetrics({
   messages: ChatMessage[];
   pinnedArtifacts: Artifact[];
   queryState: string;
+  risks: Risk[];
   scopeContextLabel: string;
   tasks: Task[];
   updatedAt: string;
@@ -522,8 +533,17 @@ function getDetailMetrics({
   if (activeTab === "Tasks") {
     return [
       { icon: CheckCircle2, label: "Tasks", value: String(tasks.length), detail: scopeContextLabel },
-      { icon: Activity, label: "Open", value: String(tasks.filter((task) => task.status !== "Completed").length), detail: "Follow-ups" },
+      { icon: UploadCloud, label: "Synced", value: String(tasks.filter((task) => task.asanaTaskGid).length), detail: "In Asana" },
       { icon: Folder, label: "Sources", value: String(new Set(tasks.map((task) => task.source)).size), detail: "Distinct sources" },
+      { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
+    ];
+  }
+  if (activeTab === "Risks") {
+    const riskStats = getRiskStats(risks);
+    return [
+      { icon: ShieldAlert, label: "Risks", value: String(riskStats.total), detail: scopeContextLabel },
+      { icon: Bell, label: "Critical", value: String(riskStats.critical), detail: "Highest severity" },
+      { icon: ShieldCheck, label: "Mitigated", value: String(riskStats.mitigated), detail: "Has plan" },
       { icon: Activity, label: "Query state", value: queryState, detail: updatedAt },
     ];
   }
@@ -625,6 +645,7 @@ function PMOCommandCenter() {
   const [selectedDecisionId, setSelectedDecisionId] = useState(visibleWorkspace.decisions[0]?.id ?? "");
   const [selectedApprovalId, setSelectedApprovalId] = useState(visibleWorkspace.approvals[0]?.id ?? "");
   const [selectedTaskId, setSelectedTaskId] = useState(visibleWorkspace.tasks[0]?.id ?? "");
+  const [selectedRiskId, setSelectedRiskId] = useState(visibleWorkspace.risks[0]?.id ?? "");
   const [selectedArtifactTitle, setSelectedArtifactTitle] = useState(visibleWorkspace.artifacts[1]?.title ?? visibleWorkspace.artifacts[0]?.title ?? "");
   const [statusFilter, setStatusFilter] = useState<IdeaStatus | "All">("All");
   const [searchTerm, setSearchTerm] = useState("");
@@ -772,10 +793,16 @@ function PMOCommandCenter() {
     mutationFn: (input: { id: string; status: IdeaStatus }) => updateIdeaStatus({ data: { ...input, mode: activeMode } }),
     onSuccess: invalidateWorkspace,
   });
-  const updateTaskStatusMutation = useMutation({
-    mutationFn: (input: { id: string; status: Task["status"] }) => updateTaskStatus({ data: { ...input, mode: activeMode } }),
-    onSuccess: invalidateWorkspace,
-    onError: (error) => updateToast(error instanceof Error ? error.message : "Could not update task status."),
+  const syncTaskToAsanaMutation = useMutation({
+    mutationFn: (id: string) => syncTaskToAsana({ data: { id, mode: activeMode } }),
+    onSuccess: (result) => {
+      queryClient.setQueryData(pmoWorkspaceQueryKey, result.workspace);
+      updateToast("Task synced to Asana");
+    },
+    onError: (error) => {
+      updateToast(error instanceof Error ? error.message : "Could not sync task to Asana.");
+      void invalidateWorkspace();
+    },
   });
   const updateApprovalStatusMutation = useMutation({
     mutationFn: (input: { id: string; status: Approval["status"] }) => updateApprovalStatus({ data: { ...input, mode: activeMode } }),
@@ -926,6 +953,19 @@ function PMOCommandCenter() {
       await invalidateWorkspace();
     },
   });
+  async function handleSyncEntityToAsana(entity: ChatOperationalEntity) {
+    const titlePrefix = entity.type === "Task" ? "" : `${entity.type}: `;
+    const result = await createTaskMutation.mutateAsync({
+      mode: activeMode,
+      projectId: scopedProjectId,
+      title: `${titlePrefix}${entity.title}`,
+      originalText: [entity.description, entity.sourceQuote ? `Source: ${entity.sourceQuote}` : ""].filter(Boolean).join("\n"),
+      owner: entity.owner ?? "You",
+      source: "Chat entity extraction",
+    });
+    await syncTaskToAsanaMutation.mutateAsync(result.task.id);
+    updateToast("Entity synced to Asana");
+  }
   const createApprovalMutation = useMutation({
     mutationFn: (input: CreateWorkflowSuggestionInput) => createApprovalFromSuggestion({ data: input }),
     onSuccess: (result) => {
@@ -1089,6 +1129,10 @@ function PMOCommandCenter() {
     () => visibleWorkspace.tasks.filter((task) => task.projectId === scopedProjectId),
     [scopedProjectId, visibleWorkspace.tasks],
   );
+  const scopedRisks = useMemo(
+    () => getScopedRisks(visibleWorkspace.risks, scopedProjectId),
+    [scopedProjectId, visibleWorkspace.risks],
+  );
   const scopedPrompts = useMemo(
     () => promptTemplates.map((prompt) => `${scopeContextLabel}: ${prompt}`),
     [scopeContextLabel],
@@ -1108,8 +1152,10 @@ function PMOCommandCenter() {
     ?? scopedApprovals[0];
   const selectedTask =
     scopedTasks.find((task) => task.id === selectedTaskId)
-    ?? scopedTasks.find((task) => task.status !== "Completed")
     ?? scopedTasks[0];
+  const selectedRisk =
+    scopedRisks.find((risk) => risk.id === selectedRiskId)
+    ?? scopedRisks[0];
 
   const pinnedIdeas = visibleWorkspace.pinnedIdeaIds
     .map((id) => scopedIdeas.find((idea) => idea.id === id))
@@ -1143,6 +1189,7 @@ function PMOCommandCenter() {
     pinnedArtifacts,
     queryState: workspaceQuery.isFetching ? "Syncing" : "Fresh",
     scopeContextLabel,
+    risks: scopedRisks,
     tasks: scopedTasks,
     updatedAt: visibleWorkspace.updatedAt,
   });
@@ -1171,9 +1218,14 @@ function PMOCommandCenter() {
     setSelectedTaskId((current) =>
       current && scopedTasks.some((task) => task.id === current)
         ? current
-        : scopedTasks.find((task) => task.status !== "Completed")?.id ?? scopedTasks[0]?.id ?? "",
+        : scopedTasks[0]?.id ?? "",
     );
-  }, [scopedApprovals, scopedArtifacts, scopedDecisions, scopedIdeas, scopedTasks]);
+    setSelectedRiskId((current) =>
+      current && scopedRisks.some((risk) => risk.id === current)
+        ? current
+        : scopedRisks[0]?.id ?? "",
+    );
+  }, [scopedApprovals, scopedArtifacts, scopedDecisions, scopedIdeas, scopedRisks, scopedTasks]);
 
   useEffect(() => {
     const activeProjectExists = activeProjectId
@@ -1360,6 +1412,11 @@ function PMOCommandCenter() {
   }
 
   function handleRailClick(label: RailName) {
+    if (label === "Risks" && activeProject) {
+      const href = riskManagementHref(visibleWorkspace.scope, activeProject.id);
+      if (href) window.location.href = href;
+      return;
+    }
     setActiveRail(label);
     const nextTab: Partial<Record<RailName, TabName>> = {
       Workspaces: "Chat",
@@ -1369,6 +1426,7 @@ function PMOCommandCenter() {
       Decisions: "Decisions",
       Approvals: "Approvals",
       Tasks: "Tasks",
+      Risks: "Risks",
       Prompts: "Prompts",
     };
     setActiveTab(nextTab[label] ?? "Ideas");
@@ -1389,20 +1447,20 @@ function PMOCommandCenter() {
 
   const tutorialSteps: TutorialStep[] = [
     {
-      title: "Start in your workspace",
+      title: "Start in Your Workspace",
       description: "The blue rail stays with you as you move through the app. Use it to return to Workspaces, Chats, Ideas, Artifacts, Docs, and Settings.",
       detail: "The main workspace opens in Personal scope so new users can try the assistant without exposing work to a team.",
-      actionLabel: "Show workspace",
+      actionLabel: "Show Workspace",
       onAction: () => {
         setActiveMode("Personal");
         handleRailClick("Workspaces");
       },
     },
     {
-      title: "Create your first chat",
+      title: "Create Your First Chat",
       description: "Chats keep AI conversations organized by personal, team, org, or project context.",
       detail: "Create separate chats for different workstreams so history, artifacts, and future branches stay easy to find.",
-      actionLabel: "Open new chat form",
+      actionLabel: "Open New Chat Form",
       onAction: () => {
         setActiveMode("Personal");
         handleRailClick("Workspaces");
@@ -1410,37 +1468,37 @@ function PMOCommandCenter() {
       },
     },
     {
-      title: "Create your first team",
+      title: "Create Your First Team",
       description: "Team workspaces let a group share projects, chats, artifacts, and scoped invites.",
       detail: "After a team exists, switch to Team scope and create shared project work inside that team.",
-      actionLabel: "Open team form",
+      actionLabel: "Open Team Form",
       onAction: () => {
         setActiveMode("Team");
         setIsCreateTeamOpen(true);
       },
     },
     {
-      title: "Create your first project",
+      title: "Create Your First Project",
       description: "Projects collect focused chats, artifacts, decisions, approvals, tasks, and prompts under one delivery scope.",
       detail: "Use projects when work has a clear owner, timeline, or artifact set.",
-      actionLabel: "Open project form",
+      actionLabel: "Open Project Form",
       onAction: () => {
         handleRailClick("Workspaces");
         setIsCreateProjectOpen(true);
       },
     },
     {
-      title: "Review artifacts and actions",
+      title: "Review Artifacts and Actions",
       description: "Artifacts, Ideas, Decisions, Approvals, and Tasks are available from the workspace tabs and the blue rail.",
       detail: "Pinned outputs appear at the top of the workspace so important files and ideas stay visible.",
-      actionLabel: "Show artifacts",
+      actionLabel: "Show Artifacts",
       onAction: () => handleRailClick("Artifacts"),
     },
     {
-      title: "Use prompts and settings later",
+      title: "Use Prompts and Settings Later",
       description: "Prompt templates help start structured assistant requests. Settings lets you relaunch this tutorial whenever you need a reset.",
       detail: "The tutorial is skippable now and available again from User Settings.",
-      actionLabel: "Open settings",
+      actionLabel: "Open Settings",
       onAction: () => (window.location.href = "/profile"),
     },
   ];
@@ -1672,6 +1730,7 @@ function PMOCommandCenter() {
     };
     let tokenText = "";
     let citations: ChatWithScopedRagCitation[] = [];
+    let detectedEntities: ChatOperationalEntity[] = [];
     let thinkingText = "";
     let traceContext: LlmDevTrace["rawResponse"] | null = null;
     let traceMessages: LlmDevTrace["request"]["messages"] = [{ role: "user", content: prompt }];
@@ -1704,6 +1763,12 @@ function PMOCommandCenter() {
         onThinking: (thinking) => {
           thinkingText += thinking;
         },
+        onEntities: (entities) => {
+          detectedEntities = entities;
+          queryClient.setQueryData<ScopedChatsResult>(scopedChatsQueryKey, (current) =>
+            updateChatMessageInCache(current, key, assistantMessageId, renderStreamingTextOrPlaceholder(), { entities }),
+          );
+        },
         onToken: (token) => {
           tokenText += token;
           queryClient.setQueryData<ScopedChatsResult>(scopedChatsQueryKey, (current) =>
@@ -1716,7 +1781,7 @@ function PMOCommandCenter() {
       });
 
       queryClient.setQueryData<ScopedChatsResult>(scopedChatsQueryKey, (current) =>
-        updateChatMessageInCache(current, key, assistantMessageId, renderStreamingText() || "The model did not return a response.", { clientStatus: null }),
+        updateChatMessageInCache(current, key, assistantMessageId, renderStreamingText() || "The model did not return a response.", { clientStatus: null, entities: detectedEntities }),
       );
       const responseText = renderStreamingText() || "The model did not return a response.";
       const estimatedInputTokens = estimateTextTokens(prompt);
@@ -1822,7 +1887,7 @@ function PMOCommandCenter() {
     setConfirmDialog({
       title: `Delete ${project.name}`,
       description: "This removes the project, its project chats, and all messages in those chats.",
-      actionLabel: "Delete project",
+      actionLabel: "Delete Project",
       destructive: true,
       onConfirm: async () => {
         await deleteProjectMutation.mutateAsync({
@@ -1895,7 +1960,7 @@ function PMOCommandCenter() {
     setConfirmDialog({
       title: `Delete ${chat.title}`,
       description: "This removes the chat and all messages in it.",
-      actionLabel: "Delete chat",
+      actionLabel: "Delete Chat",
       destructive: true,
       onConfirm: async () => {
         await deleteChatMutation.mutateAsync({
@@ -1946,12 +2011,12 @@ function PMOCommandCenter() {
       return;
     }
     setInputDialog({
-      title: "Rename chat",
+      title: "Rename Chat",
       description: "Update the chat name shown in the sidebar.",
-      label: "Chat name",
+      label: "Chat Name",
       defaultValue: chat.title,
       placeholder: "Example: Launch planning assistant",
-      actionLabel: "Rename chat",
+      actionLabel: "Rename Chat",
       onSubmit: async (value) => {
         const title = value.trim();
         if (!title || title === chat.title) return;
@@ -2041,11 +2106,11 @@ function PMOCommandCenter() {
       return;
     }
     setInputDialog({
-      title: `Invite user to ${team.name}`,
+      title: `Invite User to ${team.name}`,
       description: "Send an invitation to this team workspace.",
-      label: "Email address",
+      label: "Email Address",
       placeholder: "name@example.com",
-      actionLabel: "Send invite",
+      actionLabel: "Send Invite",
       inputType: "email",
       onSubmit: async (value) => {
         const email = value.trim();
@@ -2056,7 +2121,7 @@ function PMOCommandCenter() {
           targetName: team.name,
           email,
         });
-        updateToast(`Invited ${email} to ${team.name}.`, { href: "/profile/invites", label: "Manage invites" });
+        updateToast(`Invited ${email} to ${team.name}.`, { href: "/profile/invites", label: "Manage Invites" });
       },
     });
   }
@@ -2067,11 +2132,11 @@ function PMOCommandCenter() {
       return;
     }
     setInputDialog({
-      title: `Invite user to ${project.name}`,
+      title: `Invite User to ${project.name}`,
       description: "Send an invitation to this project workspace.",
-      label: "Email address",
+      label: "Email Address",
       placeholder: "name@example.com",
-      actionLabel: "Send invite",
+      actionLabel: "Send Invite",
       inputType: "email",
       onSubmit: async (value) => {
         const email = value.trim();
@@ -2083,7 +2148,7 @@ function PMOCommandCenter() {
           targetName: project.name,
           email,
         });
-        updateToast(`Invited ${email} to ${project.name}.`, { href: "/profile/invites", label: "Manage invites" });
+        updateToast(`Invited ${email} to ${project.name}.`, { href: "/profile/invites", label: "Manage Invites" });
       },
     });
   }
@@ -2213,13 +2278,10 @@ function PMOCommandCenter() {
         <PrimaryRail
           activeRail={activeRail}
           canAdmin={session.user.role === "admin"}
-          showTokenUsage={showTokenUsage}
           userEmail={session.user.email}
           userName={session.user.name}
           onRailClick={handleRailClick}
-          onShowTokenUsageChange={setShowTokenUsage}
           onSignOut={handleSignOut}
-          onStartTutorial={startTutorial}
         />
 
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
@@ -2229,11 +2291,8 @@ function PMOCommandCenter() {
             searchTerm={searchTerm}
             userEmail={session.user.email}
             userName={session.user.name}
-            showTokenUsage={showTokenUsage}
             onSearchTerm={setSearchTerm}
-            onShowTokenUsageChange={setShowTokenUsage}
             onSignOut={handleSignOut}
-            onStartTutorial={startTutorial}
             onMobileMenu={() => handleRailClick("Workspaces")}
             onNotify={() => updateToast("Decision taxonomy is still blocked")}
           />
@@ -2361,6 +2420,7 @@ function PMOCommandCenter() {
                             onCreateDecision={(input) => createDecisionMutation.mutate(input)}
                             onCreateIdea={(input) => createIdeaMutation.mutate(input)}
                             onCreateTask={(input) => createTaskMutation.mutate(input)}
+                            onSyncEntityToAsana={handleSyncEntityToAsana}
                             onToggleApproval={() => undefined}
                             onToggleTask={() => undefined}
                           />
@@ -2429,15 +2489,35 @@ function PMOCommandCenter() {
                     {activeTab === "Tasks" ? (
                       <TaskView
                         canEdit={canEdit}
+                        syncingTaskId={syncTaskToAsanaMutation.variables ?? null}
                         tasks={scopedTasks}
                         onDelete={(id) => removeTaskMutation.mutate(id)}
-                        onStatusChange={(id, status) => updateTaskStatusMutation.mutate({ id, status })}
                         onPreview={(task) => setWorkflowPreview(workflowPreviewFromTask(task))}
                         onSelect={(task) => {
                           setSelectedTaskId(task.id);
                           setRightOpen(true);
                         }}
+                        onSyncToAsana={(id) => syncTaskToAsanaMutation.mutate(id)}
                         onTogglePin={(id) => toggleWorkflowActionPinMutation.mutate({ kind: "task", id })}
+                      />
+                    ) : null}
+                    {activeTab === "Risks" ? (
+                      <RiskView
+                        activeProject={activeProject}
+                        risks={scopedRisks}
+                        onManage={() => {
+                          const href = riskManagementHref(visibleWorkspace.scope, activeProject?.id);
+                          if (!href) {
+                            updateToast("Select a project to open risk management.");
+                            return;
+                          }
+                          window.location.href = href;
+                        }}
+                        onPreview={(risk) => setWorkflowPreview(workflowPreviewFromRisk(risk))}
+                        onSelect={(risk) => {
+                          setSelectedRiskId(risk.id);
+                          setRightOpen(true);
+                        }}
                       />
                     ) : null}
                         {activeTab === "Prompts" ? (
@@ -2646,6 +2726,7 @@ function PMOCommandCenter() {
                       messages={currentMessages}
                       metrics={metrics}
                       prompts={scopedPrompts}
+                      risk={selectedRisk}
                       scopeContextLabel={scopeContextLabel}
                       task={selectedTask}
                       workspaceTitle={workspaceTitle}
@@ -2672,6 +2753,14 @@ function PMOCommandCenter() {
                       onDeleteIdea={(id) => removeIdeaMutation.mutate(id)}
                       onDeleteTask={(id) => removeTaskMutation.mutate(id)}
                       onPreviewWorkflow={(preview) => setWorkflowPreview(preview)}
+                      onManageRisks={() => {
+                        const href = riskManagementHref(visibleWorkspace.scope, activeProject?.id);
+                        if (!href) {
+                          updateToast("Select a project to open risk management.");
+                          return;
+                        }
+                        window.location.href = href;
+                      }}
                       onRefreshIdeaAssessment={() => selectedIdea && refreshIdeaAssessmentMutation.mutate(selectedIdea.id)}
                       onUsePrompt={(prompt) => {
                         setChatInput(prompt);
@@ -3255,36 +3344,27 @@ function LlmTraceDiagnostics({ trace }: { trace: LlmDevTrace }) {
 function PrimaryRail({
   activeRail,
   canAdmin,
-  showTokenUsage,
   userEmail,
   userName,
   onRailClick,
-  onShowTokenUsageChange,
   onSignOut,
-  onStartTutorial,
 }: {
   activeRail: RailName;
   canAdmin: boolean;
-  showTokenUsage: boolean;
   userEmail: string;
   userName: string;
   onRailClick: (rail: RailName) => void;
-  onShowTokenUsageChange: (value: boolean) => void;
   onSignOut: () => void;
-  onStartTutorial: () => void;
 }) {
   return (
     <AppRail
       account={{
         canAdmin,
-        showTokenUsage,
         userEmail,
         userName,
-        onShowTokenUsageChange,
         onSignOut,
-        onStartTutorial,
       }}
-      activeItem={activeRail === "Workspaces" || activeRail === "Chats" || activeRail === "Ideas" || activeRail === "Artifacts" ? activeRail : undefined}
+      activeItem={activeRail === "Workspaces" || activeRail === "Chats" || activeRail === "Ideas" || activeRail === "Artifacts" || activeRail === "Risks" ? activeRail : undefined}
       onRailClick={onRailClick}
     />
   );
@@ -3294,28 +3374,22 @@ function Topbar({
   canAdmin,
   presenceUsers,
   searchTerm,
-  showTokenUsage,
   userEmail,
   userName,
   onMobileMenu,
   onNotify,
   onSearchTerm,
-  onShowTokenUsageChange,
   onSignOut,
-  onStartTutorial,
 }: {
   canAdmin: boolean;
   presenceUsers: WorkspacePresenceUser[];
   searchTerm: string;
-  showTokenUsage: boolean;
   userEmail: string;
   userName: string;
   onMobileMenu: () => void;
   onNotify: () => void;
   onSearchTerm: (value: string) => void;
-  onShowTokenUsageChange: (value: boolean) => void;
   onSignOut: () => void;
-  onStartTutorial: () => void;
 }) {
   return (
     <header className="grid min-h-16 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b bg-card px-3 lg:min-h-19.5 lg:grid-cols-[minmax(200px,1fr)_minmax(340px,460px)_auto] lg:px-5">
@@ -3323,10 +3397,7 @@ function Topbar({
         <Button className="lg:hidden" type="button" variant="outline" size="icon" aria-label="Open menu" onClick={onMobileMenu}>
           <Menu />
         </Button>
-        <img alt="Vertex Education" className="hidden h-7 w-auto sm:block" src="/vertex-horizontal.svg" />
-        <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold lg:text-xl">AI Command Center</h1>
-        </div>
+        <VertexAIBrand className="hidden sm:flex" logoClassName="h-7 w-fit" aiClassName="text-xl" />
       </div>
       <div className="hidden min-w-0 items-center justify-end gap-3 lg:flex">
         <WorkspacePresence users={presenceUsers} />
@@ -3344,20 +3415,13 @@ function Topbar({
         <Button type="button" variant="outline" size="icon" aria-label="Notifications" onClick={onNotify}>
           <Bell />
         </Button>
-        <Button type="button" variant="outline" className="hidden md:inline-flex">
-          <Users />
-          AI Ops
-        </Button>
         <div className="lg:hidden">
           <AccountMenu
             align="topbar"
             canAdmin={canAdmin}
-            showTokenUsage={showTokenUsage}
             userEmail={userEmail}
             userName={userName}
-            onShowTokenUsageChange={onShowTokenUsageChange}
             onSignOut={onSignOut}
-            onStartTutorial={onStartTutorial}
           />
         </div>
       </div>
@@ -3442,21 +3506,15 @@ function WorkspacePresenceAvatar({ user, swatch }: { user: WorkspacePresenceUser
 function AccountMenu({
   align,
   canAdmin,
-  showTokenUsage,
   userEmail,
   userName,
-  onShowTokenUsageChange,
   onSignOut,
-  onStartTutorial,
 }: {
   align: "rail" | "topbar";
   canAdmin: boolean;
-  showTokenUsage: boolean;
   userEmail: string;
   userName: string;
-  onShowTokenUsageChange: (value: boolean) => void;
   onSignOut: () => void;
-  onStartTutorial: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const displayName = userName || userEmail;
@@ -3509,25 +3567,7 @@ function AccountMenu({
             onClick={() => runMenuAction(() => (window.location.href = "/profile"))}
           >
             <Settings className="size-4" />
-            User settings
-          </button>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-            role="menuitem"
-            onClick={() => runMenuAction(onStartTutorial)}
-          >
-            <CheckCircle2 className="size-4" />
-            Relaunch tutorial
-          </button>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-            role="menuitem"
-            onClick={() => runMenuAction(() => (window.location.href = "/profile/password"))}
-          >
-            <KeyRound className="size-4" />
-            Reset password
+            User Settings
           </button>
           {canAdmin ? (
             <button
@@ -3537,35 +3577,9 @@ function AccountMenu({
               onClick={() => runMenuAction(() => (window.location.href = "/admin/users"))}
             >
               <ShieldCheck className="size-4" />
-              Admin
+              Admin Settings
             </button>
           ) : null}
-          <div className="my-2 border-t" />
-          <label className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent">
-            <span className="flex items-center gap-2">
-              <Zap className="size-4" />
-              Show token usage
-            </span>
-            <input
-              checked={showTokenUsage}
-              className="sr-only"
-              type="checkbox"
-              onChange={(event) => onShowTokenUsageChange(event.target.checked)}
-            />
-            <span
-              className={cn(
-                "flex h-5 w-9 items-center rounded-full border p-0.5 transition-colors",
-                showTokenUsage ? "border-primary bg-primary" : "border-input bg-muted",
-              )}
-            >
-              <span
-                className={cn(
-                  "size-3.5 rounded-full bg-background shadow-sm transition-transform",
-                  showTokenUsage && "translate-x-4",
-                )}
-              />
-            </span>
-          </label>
           <div className="my-2 border-t" />
           <button
             type="button"
@@ -3639,8 +3653,8 @@ function Contextbar({
             </Label>
             <select
               id="team-select"
-              aria-label="Select team"
-              title="Select team"
+              aria-label="Select Team"
+              title="Select Team"
               className="h-9 min-w-56 rounded-md border bg-background px-3 text-sm"
               value={activeTeamId}
               onChange={(event) => onTeamChange(event.target.value)}
@@ -3656,7 +3670,7 @@ function Contextbar({
               <>
                 <Button type="button" variant="outline" size="sm" onClick={onCreateTeam}>
                   <Plus />
-                  New team
+                  New Team
                 </Button>
                 <Button
                   type="button"
@@ -3666,7 +3680,7 @@ function Contextbar({
                   onClick={() => selectedTeam && onInviteTeam(selectedTeam)}
                 >
                   <Users />
-                  Invite user
+                  Invite User
                 </Button>
               </>
             ) : null}
@@ -3755,7 +3769,7 @@ function ProjectNav({
                     onClick={() => onAddProjectChat(project)}
                   >
                     <MessageCircle className="size-4" />
-                    New chat
+                    New Chat
                   </button>
                   <button
                     className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
@@ -3763,7 +3777,7 @@ function ProjectNav({
                     onClick={() => onEditProjectInstructions(project)}
                   >
                     <Settings className="size-4" />
-                    Project instructions
+                    Project Instructions
                   </button>
                   {showProjectInvite ? (
                     <button
@@ -3772,7 +3786,7 @@ function ProjectNav({
                       onClick={() => onInviteProject(project)}
                     >
                       <Users className="size-4" />
-                      Invite user
+                      Invite User
                     </button>
                   ) : null}
                   <button
@@ -3781,7 +3795,7 @@ function ProjectNav({
                     onClick={() => onDeleteProject(project)}
                   >
                     <Trash2 className="size-4" />
-                    Delete project
+                    Delete Project
                   </button>
                 </div>
               </details>
@@ -3813,7 +3827,7 @@ function ProjectNav({
                         onClick={() => onRenameChat({ chat, project, section: "project" })}
                       >
                         <Pencil className="size-4" />
-                        Rename chat
+                        Rename Chat
                       </button>
                       <button
                         className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
@@ -3821,7 +3835,7 @@ function ProjectNav({
                         onClick={() => onDeleteChat({ chat, project, section: "project" })}
                       >
                         <Trash2 className="size-4" />
-                        Delete chat
+                        Delete Chat
                       </button>
                     </div>
                   </details>
@@ -3879,7 +3893,7 @@ function ProjectNav({
                     onClick={() => onRenameChat({ chat, section: "workspace" })}
                   >
                     <Pencil className="size-4" />
-                    Rename chat
+                    Rename Chat
                   </button>
                   <button
                     className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
@@ -3887,7 +3901,7 @@ function ProjectNav({
                     onClick={() => onDeleteChat({ chat, section: "workspace" })}
                   >
                     <Trash2 className="size-4" />
-                    Delete chat
+                    Delete Chat
                   </button>
                 </div>
               </details>
@@ -4064,7 +4078,7 @@ function PinnedStrip({
               </span>
               <span className="min-w-0">
                 <strong className="line-clamp-2 text-sm leading-snug">{task.title}</strong>
-                <em className="mt-0.5 block text-xs not-italic text-muted-foreground">Task / {task.status}</em>
+                <em className="mt-0.5 block text-xs not-italic text-muted-foreground">Task / {task.asanaTaskGid ? "Synced" : "Not synced"}</em>
               </span>
             </button>
           ))}
@@ -4185,6 +4199,7 @@ function ChatView({
   onCreateDecision,
   onCreateIdea,
   onCreateTask,
+  onSyncEntityToAsana,
   onToggleApproval,
   onToggleTask,
   showTokenUsage,
@@ -4210,11 +4225,13 @@ function ChatView({
   onCreateDecision: (input: CreateWorkflowSuggestionInput) => void;
   onCreateIdea: (input: CreateWorkflowSuggestionInput) => void;
   onCreateTask: (input: CreateTaskInput) => void;
+  onSyncEntityToAsana: (entity: ChatOperationalEntity) => Promise<void>;
   onToggleApproval: (id: string) => void;
   onToggleTask: (id: string) => void;
   showTokenUsage: boolean;
 }) {
   const messageEndRef = useRef<HTMLDivElement>(null);
+  const [entityStatuses, setEntityStatuses] = useState<Record<string, ChatEntityStatus>>({});
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: "end" });
@@ -4234,7 +4251,7 @@ function ChatView({
               className="mb-5 h-32 w-44 object-contain"
               src={emptyChatImageSrc}
             />
-            <h2 className="text-lg font-semibold text-foreground">Start a new chat</h2>
+            <h2 className="text-lg font-semibold text-foreground">Start a New Chat</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Send a message to begin. The chat name will update after the first response is complete.
             </p>
@@ -4317,6 +4334,24 @@ function ChatView({
                   ))}
                 </div>
               ) : null}
+              {!isUser && message.entities?.length ? (
+                <ChatEntityCards
+                  canEdit={canEdit}
+                  entities={message.entities}
+                  statuses={entityStatuses}
+                  onAcknowledge={(id) => setEntityStatuses((current) => ({ ...current, [id]: "acknowledged" }))}
+                  onReject={(id) => setEntityStatuses((current) => ({ ...current, [id]: "rejected" }))}
+                  onSyncToAsana={async (entity) => {
+                    setEntityStatuses((current) => ({ ...current, [entity.id]: "acknowledged" }));
+                    try {
+                      await onSyncEntityToAsana(entity);
+                      setEntityStatuses((current) => ({ ...current, [entity.id]: "synced" }));
+                    } catch {
+                      setEntityStatuses((current) => ({ ...current, [entity.id]: "active" }));
+                    }
+                  }}
+                />
+              ) : null}
               {canBranch && message.clientStatus !== "sending" ? (
                 <div className="flex justify-start">
                   <Button
@@ -4365,6 +4400,102 @@ function ChatView({
   );
 }
 
+const entityTypeStyles: Record<ChatEntityType, { icon: ComponentType<{ className?: string }>; label: string; tone: string }> = {
+  Task: { icon: ClipboardList, label: "Task", tone: "border-blue-200 bg-blue-50 text-blue-900" },
+  Approval: { icon: ShieldCheck, label: "Approval", tone: "border-emerald-200 bg-emerald-50 text-emerald-900" },
+  Idea: { icon: Lightbulb, label: "Idea", tone: "border-amber-200 bg-amber-50 text-amber-900" },
+  Risk: { icon: Bug, label: "Risk", tone: "border-rose-200 bg-rose-50 text-rose-900" },
+};
+
+function ChatEntityCards({
+  canEdit,
+  entities,
+  statuses,
+  onAcknowledge,
+  onReject,
+  onSyncToAsana,
+}: {
+  canEdit: boolean;
+  entities: ChatOperationalEntity[];
+  statuses: Record<string, ChatEntityStatus>;
+  onAcknowledge: (id: string) => void;
+  onReject: (id: string) => void;
+  onSyncToAsana: (entity: ChatOperationalEntity) => Promise<void>;
+}) {
+  const [syncingEntityId, setSyncingEntityId] = useState<string | null>(null);
+  const visibleEntities = entities.filter((entity) => statuses[entity.id] !== "rejected");
+  if (!visibleEntities.length) return null;
+
+  return (
+    <div className="mt-2 grid gap-2">
+      {visibleEntities.map((entity) => {
+        const style = entityTypeStyles[entity.type];
+        const Icon = style.icon;
+        const status = statuses[entity.id] ?? entity.status ?? "active";
+        const isSyncing = syncingEntityId === entity.id;
+        const confidence = `${Math.round(entity.confidence * 100)}%`;
+        return (
+          <Card className="max-w-xl rounded-md border bg-card shadow-xs" key={entity.id}>
+            <CardContent className="p-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className={cn("grid size-9 shrink-0 place-items-center rounded-md border", style.tone)}>
+                  <Icon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="rounded-md">{style.label}</Badge>
+                    {entity.priority ? <Badge variant="secondary" className="rounded-md">{entity.priority}</Badge> : null}
+                    <span className="text-xs text-muted-foreground">{confidence} confidence</span>
+                    {status !== "active" ? (
+                      <span className="text-xs font-medium capitalize text-muted-foreground">{status}</span>
+                    ) : null}
+                  </div>
+                  <h3 className="mt-1 text-sm font-semibold leading-5">{entity.title}</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{entity.description}</p>
+                  {(entity.owner || entity.dueDate) ? (
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      {entity.owner ? <span>Owner: {entity.owner}</span> : null}
+                      {entity.dueDate ? <span>Due: {entity.dueDate}</span> : null}
+                    </div>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => onAcknowledge(entity.id)}>
+                      <CheckCircle2 className="size-3.5" />
+                      <span>Acknowledge</span>
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => onReject(entity.id)}>
+                      <X className="size-3.5" />
+                      <span>Reject</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 gap-1.5"
+                      disabled={!canEdit || isSyncing || status === "synced"}
+                      title={canEdit ? "Create a task from this entity and sync it to Asana" : "Viewer access is read-only"}
+                      onClick={async () => {
+                        setSyncingEntityId(entity.id);
+                        try {
+                          await onSyncToAsana(entity);
+                        } finally {
+                          setSyncingEntityId(null);
+                        }
+                      }}
+                    >
+                      <Share2 className="size-3.5" />
+                      <span>{isSyncing ? "Syncing..." : "Sync to Asana"}</span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 type MessageTokenUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
@@ -4401,6 +4532,7 @@ function estimateTextTokens(value: string) {
 
 type ScopedRagSseHandlers = {
   onCitations: (citations: ChatWithScopedRagCitation[]) => void;
+  onEntities: (entities: ChatOperationalEntity[]) => void;
   onError: (message: string) => void;
   onThinking: (thinking: string) => void;
   onToken: (token: string) => void;
@@ -4439,6 +4571,12 @@ function consumeScopedRagEventSource(input: {
       const payload = parseScopedRagSsePayload(event as MessageEvent);
       const thinking = typeof payload === "object" && payload ? (payload as { thinking?: unknown }).thinking : payload;
       if (typeof thinking === "string") handlers.onThinking(thinking);
+    });
+
+    eventSource.addEventListener("entities", (event) => {
+      const payload = parseScopedRagSsePayload(event as MessageEvent);
+      const entities = typeof payload === "object" && payload ? (payload as { entities?: unknown }).entities : null;
+      handlers.onEntities(normalizeChatOperationalEntities(entities));
     });
 
     eventSource.addEventListener("token", (event) => {
@@ -5538,54 +5676,51 @@ function ApprovalView({
 
 function TaskView({
   canEdit,
+  syncingTaskId,
   tasks,
-  onStatusChange,
   onDelete,
   onPreview,
   onSelect,
+  onSyncToAsana,
   onTogglePin,
 }: {
   canEdit: boolean;
+  syncingTaskId: string | null;
   tasks: Task[];
-  onStatusChange: (id: string, status: Task["status"]) => void;
   onDelete: (id: string) => void;
   onPreview: (task: Task) => void;
   onSelect: (task: Task) => void;
+  onSyncToAsana: (id: string) => void;
   onTogglePin: (id: string) => void;
 }) {
   const tasksById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const items = useMemo<WorkflowLineItem[]>(
-    () => tasks.map((task) => ({
-      id: task.id,
-      title: task.title,
-      originalText: task.originalText,
-      meta: `${task.owner} / ${task.source}`,
-      complete: task.status === "Completed" ? "success" : undefined,
-      pinned: task.pinned,
-      statusControl: task.status === "Completed" ? (
-        canEdit ? (
-          <Button type="button" variant="outline" size="sm" onClick={() => onStatusChange(task.id, "Open")}>
-            <RotateCcw />
-            Mark Open
+    () => tasks.map((task) => {
+      const syncControl = getTaskAsanaSyncControlState({
+        asanaTaskGid: task.asanaTaskGid,
+        canEdit,
+        isSyncing: syncingTaskId === task.id,
+      });
+      return {
+        id: task.id,
+        title: task.title,
+        originalText: task.originalText,
+        meta: `${task.owner} / ${task.source}${task.asanaSyncError ? ` / Sync error: ${task.asanaSyncError}` : ""}`,
+        pinned: task.pinned,
+        statusControl: syncControl.visible ? (
+          <Button type="button" variant="outline" size="sm" disabled={syncControl.disabled} onClick={() => onSyncToAsana(task.id)}>
+            {task.asanaTaskGid ? <CheckCircle2 /> : <UploadCloud />}
+            {syncControl.label}
           </Button>
-        ) : (
-          <Badge variant="success">Completed</Badge>
-        )
-      ) : canEdit ? (
-        <Button type="button" variant="outline" size="sm" onClick={() => onStatusChange(task.id, "Completed")}>
-          <CheckCircle2 />
-          Complete
-        </Button>
-      ) : (
-        <Badge variant="info">Open</Badge>
-      ),
-    })),
-    [canEdit, onStatusChange, tasks],
+        ) : null,
+      };
+    }),
+    [canEdit, onSyncToAsana, syncingTaskId, tasks],
   );
 
   return (
     <div className="space-y-4">
-      <SectionHeader eyebrow="Workflow status" title="Tasks surfaced from chats" description={`${tasks.filter((task) => task.status !== "Completed").length} open follow-ups`} />
+      <SectionHeader eyebrow="Workflow status" title="Tasks surfaced from chats" description={`${tasks.length} follow-up${tasks.length === 1 ? "" : "s"}`} />
       <WorkflowLineList
         canEdit={canEdit}
         emptyLabel="No tasks in this scope."
@@ -5600,6 +5735,69 @@ function TaskView({
           if (task) onSelect(task);
         }}
         onTogglePin={onTogglePin}
+      />
+    </div>
+  );
+}
+
+function RiskView({
+  activeProject,
+  risks,
+  onManage,
+  onPreview,
+  onSelect,
+}: {
+  activeProject?: ProjectSummary;
+  risks: Risk[];
+  onManage: () => void;
+  onPreview: (risk: Risk) => void;
+  onSelect: (risk: Risk) => void;
+}) {
+  const risksById = useMemo(() => new Map(risks.map((risk) => [risk.id, risk])), [risks]);
+  const criticalCount = risks.filter((risk) => risk.severity === "critical").length;
+  const items = useMemo<WorkflowLineItem[]>(
+    () => risks.map((risk) => ({
+      id: risk.id,
+      title: risk.description,
+      originalText: risk.mitigationStrategy || risk.description,
+      meta: `${risk.severity.toUpperCase()} / ${risk.status}${risk.mitigationStrategy ? " / Mitigation drafted" : ""}`,
+      complete: risk.severity === "critical" ? "destructive" : undefined,
+      statusControl: <SeverityBadge severity={risk.severity} />,
+    })),
+    [risks],
+  );
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        eyebrow="Risk status"
+        title="Scoped operational risks"
+        description={activeProject ? `${risks.length} risks tied to ${activeProject.name}` : `${risks.length} workspace-level risks`}
+        actions={
+          <Button type="button" variant="outline" onClick={onManage}>
+            <ShieldAlert />
+            Manage Risks
+          </Button>
+        }
+      />
+      {criticalCount > 0 ? (
+        <div className="rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {criticalCount} critical risk{criticalCount === 1 ? "" : "s"} in this scope.
+        </div>
+      ) : null}
+      <WorkflowLineList
+        canEdit={false}
+        emptyLabel="No risks in this scope."
+        items={items}
+        onDelete={() => undefined}
+        onPreview={(item) => {
+          const risk = risksById.get(item.id);
+          if (risk) onPreview(risk);
+        }}
+        onSelect={(item) => {
+          const risk = risksById.get(item.id);
+          if (risk) onSelect(risk);
+        }}
       />
     </div>
   );
@@ -5637,7 +5835,16 @@ function workflowPreviewFromTask(task: Task): NonNullable<WorkflowPreviewState> 
     kind: "Task",
     title: task.title,
     originalText: task.originalText || task.title,
-    meta: `${task.owner} / ${task.status} / ${task.source}`,
+    meta: `${task.owner} / ${task.source}${task.asanaTaskGid ? " / Synced to Asana" : ""}`,
+  };
+}
+
+function workflowPreviewFromRisk(risk: Risk): NonNullable<WorkflowPreviewState> {
+  return {
+    kind: "Risk",
+    title: risk.description,
+    originalText: risk.mitigationStrategy || risk.description,
+    meta: `${risk.severity.toUpperCase()} / ${risk.status}${risk.mitigationStrategy ? " / Mitigation drafted" : ""}`,
   };
 }
 
@@ -5707,6 +5914,7 @@ function CategoryTablePage({
       {rail === "Decisions" ? <DecisionsTable decisions={workspace.decisions} /> : null}
       {rail === "Approvals" ? <ApprovalsTable approvals={workspace.approvals} /> : null}
       {rail === "Tasks" ? <TasksTable tasks={workspace.tasks} /> : null}
+      {rail === "Risks" ? <RisksTable risks={workspace.risks} /> : null}
       {rail === "Prompts" ? <PromptsTable canEdit={canEdit} scopeLabel={scopeLabel} onUsePrompt={onUsePrompt} /> : null}
     </section>
   );
@@ -5821,12 +6029,30 @@ function TasksTable({ tasks }: { tasks: Task[] }) {
       { accessorKey: "title", header: "Task" },
       { accessorKey: "owner", header: "Owner" },
       { accessorKey: "source", header: "Source" },
-      { accessorKey: "status", header: "Status" },
+      { accessorKey: "asanaTaskGid", header: "Asana Task" },
     ],
     [],
   );
 
   return <DataTable columns={columns} data={tasks} getRowId={(task) => task.id} />;
+}
+
+function RisksTable({ risks }: { risks: Risk[] }) {
+  const columns = useMemo<ColumnDef<Risk>[]>(
+    () => [
+      { accessorKey: "description", header: "Risk" },
+      { accessorKey: "severity", header: "Severity", cell: ({ row }) => <SeverityBadge severity={row.original.severity} /> },
+      { accessorKey: "status", header: "Status" },
+      {
+        accessorKey: "mitigationStrategy",
+        header: "Mitigation",
+        cell: ({ row }) => row.original.mitigationStrategy ? "Drafted" : "Not drafted",
+      },
+    ],
+    [],
+  );
+
+  return <DataTable columns={columns} data={risks} getRowId={(risk) => risk.id} />;
 }
 
 function PromptsTable({
@@ -5883,6 +6109,7 @@ function DetailPanel({
   messages,
   metrics,
   prompts,
+  risk,
   scopeContextLabel,
   task,
   workspaceTitle,
@@ -5899,6 +6126,7 @@ function DetailPanel({
   onDeleteDecision,
   onDeleteIdea,
   onDeleteTask,
+  onManageRisks,
   onUsePrompt,
   onRefreshIdeaAssessment,
 }: {
@@ -5915,6 +6143,7 @@ function DetailPanel({
   messages: ChatMessage[];
   metrics: DetailMetric[];
   prompts: string[];
+  risk?: Risk;
   scopeContextLabel: string;
   task?: Task;
   workspaceTitle: string;
@@ -5931,6 +6160,7 @@ function DetailPanel({
   onDeleteDecision: (id: string) => void;
   onDeleteIdea: (id: string) => void;
   onDeleteTask: (id: string) => void;
+  onManageRisks: () => void;
   onUsePrompt: (prompt: string) => void;
   onRefreshIdeaAssessment: () => void;
 }) {
@@ -6017,13 +6247,33 @@ function DetailPanel({
           icon={CheckCircle2}
           label="Task"
           title={task.title}
-          detail={`${task.owner} / ${task.status} / ${task.source}`}
+          detail={`${task.owner} / ${task.source}${task.asanaTaskGid ? " / Synced to Asana" : ""}`}
           originalText={task.originalText}
           isPinned={Boolean(task.pinned)}
           canEdit={canEdit}
           onDelete={() => onDeleteTask(task.id)}
           onPreview={() => onPreviewWorkflow(workflowPreviewFromTask(task))}
           onTogglePin={() => onToggleWorkflowPin("task", task.id)}
+        />
+      ) : null}
+      {activeTab === "Risks" && risk ? (
+        <WorkflowMetadata
+          icon={ShieldAlert}
+          label="Risk"
+          title={risk.description}
+          detail={`${risk.severity.toUpperCase()} / ${risk.status}${risk.mitigationStrategy ? " / Mitigation drafted" : ""}`}
+          originalText={risk.mitigationStrategy || risk.description}
+          isPinned={false}
+          canEdit={canEdit}
+          onDelete={undefined}
+          onPreview={() => onPreviewWorkflow(workflowPreviewFromRisk(risk))}
+          onTogglePin={undefined}
+          action={
+            <Button type="button" variant="outline" size="sm" onClick={onManageRisks}>
+              <ShieldAlert />
+              Manage Risks
+            </Button>
+          }
         />
       ) : null}
       {activeTab === "Prompts" ? <PromptMetadata canEdit={canEdit} prompts={prompts} scopeContextLabel={scopeContextLabel} onUsePrompt={onUsePrompt} /> : null}
@@ -6045,7 +6295,7 @@ function ChatMetadata({
   return (
     <Card className="mb-3">
       <CardHeader>
-        <CardTitle className="text-lg leading-6">{activeChat?.title ?? "No chat selected"}</CardTitle>
+        <CardTitle className="text-lg leading-6">{activeChat?.title ?? "No Chat Selected"}</CardTitle>
         <CardDescription>{workspaceTitle} / {scopeContextLabel}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 pt-4">
@@ -6066,6 +6316,7 @@ function ChatMetadata({
 }
 
 function WorkflowMetadata({
+  action,
   canEdit,
   detail,
   icon: Icon,
@@ -6077,14 +6328,15 @@ function WorkflowMetadata({
   originalText,
   title,
 }: {
+  action?: ReactNode;
   canEdit: boolean;
   detail: string;
   icon: ComponentType<{ className?: string }>;
   isPinned: boolean;
   label: string;
-  onDelete: () => void;
+  onDelete?: () => void;
   onPreview: () => void;
-  onTogglePin: () => void;
+  onTogglePin?: () => void;
   originalText?: string;
   title: string;
 }) {
@@ -6110,16 +6362,21 @@ function WorkflowMetadata({
           <Eye />
           Preview
         </Button>
+        {action}
         {canEdit ? (
           <>
-            <Button type="button" variant="outline" className="ml-2" onClick={onTogglePin}>
-              <Star className={cn(isPinned && "fill-warning text-warning")} />
-              {isPinned ? "Unpin" : "Pin"}
-            </Button>
-            <Button type="button" variant="outline" className="ml-2 text-destructive hover:text-destructive" onClick={onDelete}>
-              <Trash2 />
-              Delete
-            </Button>
+            {onTogglePin ? (
+              <Button type="button" variant="outline" className="ml-2" onClick={onTogglePin}>
+                <Star className={cn(isPinned && "fill-warning text-warning")} />
+                {isPinned ? "Unpin" : "Pin"}
+              </Button>
+            ) : null}
+            {onDelete ? (
+              <Button type="button" variant="outline" className="ml-2 text-destructive hover:text-destructive" onClick={onDelete}>
+                <Trash2 />
+                Delete
+              </Button>
+            ) : null}
           </>
         ) : null}
       </CardContent>
@@ -6592,11 +6849,11 @@ function CreateTeamDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New team</DialogTitle>
+          <DialogTitle>New Team</DialogTitle>
           <DialogDescription>Create a team workspace for shared projects and assigned users.</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <FieldBlock label="Team name">
+          <FieldBlock label="Team Name">
             <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Example: AI Operations" autoFocus />
           </FieldBlock>
           <FieldBlock label="Description">
@@ -6608,7 +6865,7 @@ function CreateTeamDialog({
             </Button>
             <Button type="submit" disabled={pending || !name.trim()}>
               <Plus />
-              Create team
+              Create Team
             </Button>
           </DialogFooter>
         </form>
@@ -6741,11 +6998,11 @@ function CreateProjectDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
+          <DialogTitle>New Project</DialogTitle>
           <DialogDescription>Add a project to {scopeLabel}.</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <FieldBlock label="Project name">
+          <FieldBlock label="Project Name">
             <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Example: Enrollment Assistant" autoFocus />
           </FieldBlock>
           <FieldBlock label="Description">
@@ -6757,7 +7014,7 @@ function CreateProjectDialog({
             </Button>
             <Button type="submit" disabled={pending || !name.trim()}>
               <Plus />
-              Create project
+              Create Project
             </Button>
           </DialogFooter>
         </form>
@@ -6842,7 +7099,7 @@ function ProjectInstructionsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Project instructions</DialogTitle>
+          <DialogTitle>Project Instructions</DialogTitle>
           <DialogDescription>
             Set chat guidance for {project?.name ?? "this project"}.
           </DialogDescription>
@@ -6864,7 +7121,7 @@ function ProjectInstructionsDialog({
               autoFocus
             />
           </FieldBlock>
-          <FieldBlock label="Asana task status source">
+          <FieldBlock label="Asana Task Status Source">
             <div className="grid gap-3 rounded-md border bg-muted/30 p-3">
               <div className="grid gap-2 sm:grid-cols-2">
                 <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-background p-3 text-sm">
@@ -6875,7 +7132,7 @@ function ProjectInstructionsDialog({
                     onChange={() => setAsanaTaskStatusSource("native")}
                   />
                   <span>
-                    <span className="block font-medium">Native completion</span>
+                    <span className="block font-medium">Native Completion</span>
                     <span className="block text-xs text-muted-foreground">Use Asana completed/open state.</span>
                   </span>
                 </label>
@@ -6888,7 +7145,7 @@ function ProjectInstructionsDialog({
                     onChange={() => setAsanaTaskStatusSource("custom_field")}
                   />
                   <span>
-                    <span className="block font-medium">Custom field</span>
+                    <span className="block font-medium">Custom Field</span>
                     <span className="block text-xs text-muted-foreground">Use a selected Asana task custom field as status.</span>
                   </span>
                 </label>
@@ -6897,14 +7154,14 @@ function ProjectInstructionsDialog({
                 <>
                   <select
                     aria-label="Asana task status custom field"
-                    title="Asana task status custom field"
+                    title="Asana Task Status Custom Field"
                     className="h-10 rounded-md border bg-background px-3 text-sm"
                     disabled={!canUseCustomField}
                     value={asanaTaskStatusCustomFieldGid}
                     onChange={(event) => setAsanaTaskStatusCustomFieldGid(event.target.value)}
                   >
                     <option value="">
-                      {customFieldsQuery.isLoading ? "Loading Asana fields..." : canUseCustomField ? "Select custom field" : "No mapped Asana fields found"}
+                      {customFieldsQuery.isLoading ? "Loading Asana fields..." : canUseCustomField ? "Select Custom Field" : "No Mapped Asana Fields Found"}
                     </option>
                     {customFieldOptions.map((field) => (
                       <option key={field.gid} value={field.gid}>
@@ -6928,7 +7185,7 @@ function ProjectInstructionsDialog({
             </Button>
             <Button type="submit" disabled={pending || !project || customFieldRequired}>
               <Settings />
-              Save instructions
+              Save Instructions
             </Button>
           </DialogFooter>
         </form>
@@ -6969,13 +7226,13 @@ function CreateChatDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New chat</DialogTitle>
+          <DialogTitle>New Chat</DialogTitle>
           <DialogDescription>
             Create a fresh {chatType} for {contextLabel}.
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <FieldBlock label="Chat name">
+          <FieldBlock label="Chat Name">
             <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Example: Launch planning assistant" autoFocus />
           </FieldBlock>
           <FieldBlock label="Description">
@@ -6987,7 +7244,7 @@ function CreateChatDialog({
             </Button>
             <Button type="submit" disabled={pending || !title.trim()}>
               <Plus />
-              Create chat
+              Create Chat
             </Button>
           </DialogFooter>
         </form>
@@ -7028,7 +7285,7 @@ function BrandedConfirmDialog({
     <Dialog open={Boolean(state)} onOpenChange={(open) => !isPending && onOpenChange(open)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{state?.title ?? "Confirm action"}</DialogTitle>
+          <DialogTitle>{state?.title ?? "Confirm Action"}</DialogTitle>
           <DialogDescription>{state?.description ?? "Confirm this action before continuing."}</DialogDescription>
         </DialogHeader>
         {error ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
@@ -7149,7 +7406,7 @@ function ArtifactPreviewDialog({
               <div className="space-y-3">
                 <p className="text-sm leading-6 text-muted-foreground">{artifact.summary}</p>
                 <div className="rounded-md border bg-background px-3 py-2 text-sm">
-                  <span className="font-semibold text-foreground">Source chat</span>
+                  <span className="font-semibold text-foreground">Source Chat</span>
                   <p className="mt-1 text-muted-foreground">{artifact.sourceChatTitle ?? "Not captured for this artifact"}</p>
                 </div>
                 <ArtifactRenderer
@@ -7491,6 +7748,11 @@ function DataTable<TData extends object>({
 function StatusBadge({ status }: { status: IdeaStatus }) {
   const meta = statusMeta[status];
   return <Badge variant={meta.tone}>{meta.label}</Badge>;
+}
+
+function SeverityBadge({ severity }: { severity: Risk["severity"] }) {
+  const variant = severity === "critical" ? "destructive" : severity === "high" ? "warning" : severity === "medium" ? "info" : "success";
+  return <Badge variant={variant} className="capitalize">{severity}</Badge>;
 }
 
 function ScoreCell({ value }: { value: number }) {

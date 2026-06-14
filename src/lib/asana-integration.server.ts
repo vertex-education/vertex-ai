@@ -306,6 +306,7 @@ export type AsanaConnectionSummary = {
     asanaUserName: string;
     asanaUserEmail: string | null;
     scopes: string[];
+    autoSyncTasksEnabled: boolean;
     connectedAt: number;
     updatedAt: number;
   } | null;
@@ -315,6 +316,7 @@ export type AsanaConnectionSummary = {
   asanaProjects: AsanaProjectOption[];
   vertexProjects: VertexProjectOption[];
   mappings: AsanaProjectMappingView[];
+  webhookStatuses: AsanaProjectWebhookStatusView[];
   teams: VertexTeamOption[];
 };
 
@@ -361,6 +363,19 @@ export type AsanaProjectMappingView = {
   permissionLevel: string;
   permissionSource: string;
   updatedAt: number;
+};
+
+export type AsanaProjectWebhookStatusView = {
+  asanaProjectGid: string;
+  asanaProjectName: string;
+  asanaWorkspaceName: string;
+  vertexProjectName: string | null;
+  webhookGid: string | null;
+  targetUrl: string | null;
+  status: "active" | "creating" | "failed" | "deleted" | "missing";
+  lastError: string | null;
+  createdAt: number | null;
+  updatedAt: number | null;
 };
 
 export type AsanaMappingSelection = {
@@ -471,6 +486,23 @@ export async function disconnectAsanaConnectionForCurrentUser() {
   return { disconnected: true };
 }
 
+export async function updateAsanaTaskSyncSettingsForCurrentUser(data: { autoSyncTasksEnabled: boolean }) {
+  const user = await requireWorkspaceEditor();
+  const connection = await getConnectionForUser(user.id);
+  if (!connection) throw new Error("Connect Asana before updating task sync settings.");
+  await getDb()
+    .prepare("UPDATE asana_connections SET auto_sync_tasks_enabled = ?, updated_at = ? WHERE user_id = ?")
+    .bind(data.autoSyncTasksEnabled ? 1 : 0, Date.now(), user.id)
+    .run();
+  return { autoSyncTasksEnabled: data.autoSyncTasksEnabled };
+}
+
+export async function getAsanaTaskAutoSyncEnabledForCurrentUser() {
+  const user = await requireSignedInUser();
+  const connection = await getConnectionForUser(user.id);
+  return Boolean(connection?.autoSyncTasksEnabled);
+}
+
 export async function getAsanaConnectionSummaryForCurrentUser(): Promise<AsanaConnectionSummary> {
   const user = await requireSignedInUser();
   const configured = isAsanaConfigured();
@@ -486,9 +518,10 @@ export async function getAsanaConnectionSummaryForCurrentUser(): Promise<AsanaCo
   }
   const scopes = parseScopes(connection?.scopes ?? "");
   const missingScopes = defaultAsanaScopes.filter((scope) => !hasAsanaScope(scopes, scope));
-  const [vertexProjects, mappings, teams] = await Promise.all([
+  const [vertexProjects, mappings, webhookStatuses, teams] = await Promise.all([
     safeSummaryRead("asana_connection_summary_vertex_projects_failed", user.id, () => listVertexProjectsForUser(user.id), []),
     safeSummaryRead("asana_connection_summary_mappings_failed", user.id, () => listAsanaMappingsForUser(user.id), []),
+    safeSummaryRead("asana_connection_summary_webhooks_failed", user.id, () => listAsanaProjectWebhookStatusesForUser(user.id), []),
     safeSummaryRead("asana_connection_summary_teams_failed", user.id, () => listTeamsForUser(user.id), []),
   ]);
 
@@ -517,6 +550,7 @@ export async function getAsanaConnectionSummaryForCurrentUser(): Promise<AsanaCo
         asanaUserName: connection.asanaUserName,
         asanaUserEmail: connection.asanaUserEmail,
         scopes,
+        autoSyncTasksEnabled: Boolean(connection.autoSyncTasksEnabled),
         connectedAt: connection.connectedAt,
         updatedAt: connection.updatedAt,
       }
@@ -527,6 +561,7 @@ export async function getAsanaConnectionSummaryForCurrentUser(): Promise<AsanaCo
     asanaProjects,
     vertexProjects,
     mappings,
+    webhookStatuses,
     teams,
   };
 }
@@ -648,10 +683,32 @@ export async function repairAsanaProjectWebhooksForCurrentUser() {
 }
 
 export async function createAsanaTaskForMappedProjectForCurrentUser(data: { vertexProjectId: string; title: string; notes?: string }) {
-    const user = await requireWorkspaceEditor();
-    const title = data.title.trim();
-    if (!title) throw new Error("Task title is required.");
+  return createAsanaTaskForWorkflowTaskForCurrentUser({
+    notes: data.notes,
+    title: data.title,
+    vertexProjectId: data.vertexProjectId,
+  });
+}
 
+export async function createAsanaTaskForWorkflowTaskForCurrentUser(data: { title: string; notes?: string; vertexProjectId?: string | null }) {
+  const user = await requireWorkspaceEditor();
+  const title = data.title.trim();
+  if (!title) throw new Error("Task title is required.");
+
+  const tokenSet = await getValidAsanaTokens({ env: integrationEnv(), userId: user.id });
+  if (!tokenSet) throw new Error("Reconnect Asana before submitting tasks.");
+
+  const connection = await getConnectionForUser(user.id);
+  if (!connection) throw new Error("Connect Asana before submitting tasks.");
+  const scopes = parseScopes(connection.scopes);
+  if (!hasAsanaScope(scopes, "tasks:write")) throw new Error("Reconnect Asana with tasks:write before submitting tasks.");
+
+  const payload: Record<string, unknown> = {
+    name: title,
+    notes: data.notes?.trim() || undefined,
+  };
+
+  if (data.vertexProjectId) {
     const mapping = await getDb()
       .prepare(
         `SELECT asana_project_gid as asanaProjectGid,
@@ -665,21 +722,43 @@ export async function createAsanaTaskForMappedProjectForCurrentUser(data: { vert
       .first<{ asanaProjectGid: string; canWriteTasks: number | boolean }>();
     if (!mapping) throw new Error("This VertexAI project is not mapped to Asana.");
     if (!Boolean(mapping.canWriteTasks)) throw new Error("Your Asana permission for this project is read-only. Task submission is disabled.");
+    payload.projects = [mapping.asanaProjectGid];
+  } else {
+    const asanaUser = await fetchAsanaMe(tokenSet.accessToken);
+    payload.workspace = await resolveDefaultAsanaWorkspaceForUser(user.id, asanaUser);
+    payload.assignee = asanaUser.gid;
+  }
 
-    const tokenSet = await getValidAsanaTokens({ env: integrationEnv(), userId: user.id });
-    if (!tokenSet) throw new Error("Reconnect Asana before submitting tasks.");
+  const created = await asanaFetch<{ gid: string; name: string }>(tokenSet.accessToken, "/tasks", {
+    method: "POST",
+    body: JSON.stringify({ data: payload }),
+  });
+  return { gid: created.gid, name: created.name };
+}
 
-    const created = await asanaFetch<{ gid: string; name: string }>(tokenSet.accessToken, "/tasks", {
-      method: "POST",
-      body: JSON.stringify({
-        data: {
-          name: title,
-          notes: data.notes?.trim() || undefined,
-          projects: [mapping.asanaProjectGid],
-        },
-      }),
-    });
-    return { gid: created.gid, name: created.name };
+async function resolveDefaultAsanaWorkspaceForUser(userId: string, asanaUser: AsanaUser) {
+  const mappedWorkspaces = await getDb()
+    .prepare(
+      `SELECT DISTINCT asana_workspace_gid as gid
+       FROM asana_project_mappings
+       WHERE user_id = ?
+       ORDER BY asana_workspace_gid ASC`,
+    )
+    .bind(userId)
+    .all<{ gid: string }>();
+
+  const mappedWorkspaceGids = (mappedWorkspaces.results ?? []).map((row) => row.gid).filter(Boolean);
+  if (mappedWorkspaceGids.length === 1) return mappedWorkspaceGids[0];
+  if (mappedWorkspaceGids.length > 1) {
+    throw new Error("Non-project Asana tasks need one default workspace, but this account has mapped projects in multiple Asana workspaces.");
+  }
+
+  const accountWorkspaceGids = (asanaUser.workspaces ?? []).map((workspace) => workspace.gid).filter(Boolean);
+  if (accountWorkspaceGids.length === 1) return accountWorkspaceGids[0];
+  if (accountWorkspaceGids.length > 1) {
+    throw new Error("Non-project Asana tasks need one default workspace, but this Asana account belongs to multiple workspaces.");
+  }
+  throw new Error("No Asana workspace is available for non-project task creation.");
 }
 
 export async function listAsanaTaskStatusCustomFieldsForCurrentUser(data: { vertexProjectId: string }): Promise<AsanaTaskStatusCustomFieldOption[]> {
@@ -863,8 +942,8 @@ export async function handleAsanaOAuthCallback(request: Request) {
   await getDb()
     .prepare(
       `INSERT INTO asana_connections (
-        id, user_id, asana_user_gid, asana_user_name, asana_user_email, scopes, connected_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, user_id, asana_user_gid, asana_user_name, asana_user_email, scopes, auto_sync_tasks_enabled, connected_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         id = excluded.id,
         asana_user_gid = excluded.asana_user_gid,
@@ -873,7 +952,7 @@ export async function handleAsanaOAuthCallback(request: Request) {
         scopes = excluded.scopes,
         updated_at = excluded.updated_at`,
     )
-    .bind(connectionId, user.id, asanaUserGid, asanaUserName, asanaUserEmail, scope, now, now)
+    .bind(connectionId, user.id, asanaUserGid, asanaUserName, asanaUserEmail, scope, 0, now, now)
     .run();
 
   return Response.redirect(`${url.origin}${stateRecord.redirectTo ?? "/profile/asana"}?connected=1`, 302);
@@ -2368,6 +2447,7 @@ async function getConnectionForUser(userId: string) {
               asana_user_name as asanaUserName,
               asana_user_email as asanaUserEmail,
               scopes,
+              auto_sync_tasks_enabled as autoSyncTasksEnabled,
               connected_at as connectedAt,
               updated_at as updatedAt
        FROM asana_connections
@@ -2381,6 +2461,7 @@ async function getConnectionForUser(userId: string) {
       asanaUserName: string;
       asanaUserEmail: string | null;
       scopes: string;
+      autoSyncTasksEnabled: number | boolean;
       connectedAt: number;
       updatedAt: number;
     }>();
@@ -2478,6 +2559,34 @@ async function listAsanaMappingsForUser(userId: string) {
     ...row,
     canWriteTasks: Boolean(row.canWriteTasks),
   }));
+}
+
+async function listAsanaProjectWebhookStatusesForUser(userId: string) {
+  const rows = await getDb()
+    .prepare(
+      `SELECT m.asana_project_gid as asanaProjectGid,
+              m.asana_project_name as asanaProjectName,
+              m.asana_workspace_name as asanaWorkspaceName,
+              p.name as vertexProjectName,
+              w.webhook_gid as webhookGid,
+              w.target_url as targetUrl,
+              w.status as status,
+              w.last_error as lastError,
+              w.created_at as createdAt,
+              w.updated_at as updatedAt
+       FROM asana_project_mappings m
+       LEFT JOIN projects p ON p.id = m.vertex_project_id
+       LEFT JOIN asana_project_webhooks w ON w.asana_project_gid = m.asana_project_gid
+       WHERE m.user_id = ?
+       ORDER BY m.updated_at DESC`,
+    )
+    .bind(userId)
+    .all<Omit<AsanaProjectWebhookStatusView, "status"> & { status: AsanaProjectWebhookStatusView["status"] | null }>();
+
+  return (rows.results ?? []).map((row) => ({
+    ...row,
+    status: row.status ?? "missing",
+  } satisfies AsanaProjectWebhookStatusView));
 }
 
 async function scaffoldVertexProjectForAsana(

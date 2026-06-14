@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Check, UsersRound } from "lucide-react";
 import { AuthenticatedAppRail } from "@/components/AuthenticatedAppRail";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { acceptScopedInvite, listMyScopedInvites } from "@/lib/team-workflow";
@@ -48,13 +49,13 @@ function InvitesPage() {
           <div className="mx-auto grid max-w-4xl gap-4">
             <div className="flex items-center justify-between gap-3">
               <Button type="button" variant="outline" onClick={() => (window.location.href = "/profile")}>
-                Back to settings
+                Back to Settings
               </Button>
-              <img className="h-9 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
+              <VertexAIBrand />
             </div>
 
-            <InviteSection title="Team invites" description="Teams you have been invited to join." invites={teamInvites} pendingId={acceptMutation.variables} onAccept={(id) => acceptMutation.mutate(id)} />
-            <InviteSection title="Project invites" description="Projects assigned directly to you." invites={projectInvites} pendingId={acceptMutation.variables} onAccept={(id) => acceptMutation.mutate(id)} />
+            <InviteSection title="Team Invites" description="Teams you have been invited to join." invites={teamInvites} pendingId={acceptMutation.variables} onAccept={(id) => acceptMutation.mutate(id)} />
+            <InviteSection title="Project Invites" description="Projects assigned directly to you." invites={projectInvites} pendingId={acceptMutation.variables} onAccept={(id) => acceptMutation.mutate(id)} />
           </div>
         </section>
       </div>

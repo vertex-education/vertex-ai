@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { ArrowLeft, CheckCircle2, ExternalLink, Plug, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Plug, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 import { AuthenticatedAppRail } from "@/components/AuthenticatedAppRail";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,12 +13,13 @@ import { getSessionSnapshot } from "@/lib/auth-workflow";
 import {
   disconnectAsanaConnection,
   getAsanaConnectionSummary,
-  repairAsanaProjectWebhooks,
   saveAsanaProjectMappings,
   startAsanaConnection,
+  updateAsanaTaskSyncSettings,
   type AsanaConnectionSummary,
   type AsanaMappingSelection,
   type AsanaProjectOption,
+  type AsanaProjectWebhookStatusView,
   type VertexProjectOption,
 } from "@/lib/asana-integration";
 import type { WorkspaceMode } from "@/lib/pmo-data";
@@ -32,6 +34,8 @@ type ScaffoldDialogState = {
   projectName: string;
 } | null;
 
+const expandableListPageSize = 5;
+
 export const Route = createFileRoute("/profile/asana")({
   loader: async () => {
     const session = await getSessionSnapshot();
@@ -39,7 +43,7 @@ export const Route = createFileRoute("/profile/asana")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Asana integration | Vertex AI Command Center" }],
+    meta: [{ title: "Asana Integration | Vertex AI Command Center" }],
   }),
   component: AsanaIntegrationPage,
 });
@@ -103,8 +107,8 @@ function AsanaIntegrationPage() {
       setSavingProjectGid(null);
     },
   });
-  const repairWebhooksMutation = useMutation({
-    mutationFn: () => repairAsanaProjectWebhooks(),
+  const taskSyncSettingsMutation = useMutation({
+    mutationFn: (autoSyncTasksEnabled: boolean) => updateAsanaTaskSyncSettings({ data: { autoSyncTasksEnabled } }),
     onSuccess: () => {
       void summaryQuery.refetch();
     },
@@ -172,7 +176,7 @@ function AsanaIntegrationPage() {
                 <ArrowLeft className="size-4" />
                 Profile
               </Button>
-              <img className="h-9 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
+              <VertexAIBrand />
             </div>
 
             <Card>
@@ -181,7 +185,7 @@ function AsanaIntegrationPage() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Plug className="size-5" />
-                      Asana integration
+                      Asana Integration
                     </CardTitle>
                     <CardDescription>Connect Asana, choose project mappings, and capture task-write permissions before any task can be sent back.</CardDescription>
                   </div>
@@ -191,15 +195,9 @@ function AsanaIntegrationPage() {
                       Refresh
                     </Button>
                     {summary?.connected ? (
-                      <>
-                        <Button type="button" variant="outline" disabled={repairWebhooksMutation.isPending} onClick={() => repairWebhooksMutation.mutate()}>
-                          <RefreshCw className={`size-4 ${repairWebhooksMutation.isPending ? "animate-spin" : ""}`} />
-                          Repair webhooks
-                        </Button>
-                        <Button type="button" variant="outline" disabled={disconnectMutation.isPending} onClick={() => disconnectMutation.mutate()}>
-                          Disconnect
-                        </Button>
-                      </>
+                      <Button type="button" variant="outline" disabled={disconnectMutation.isPending} onClick={() => disconnectMutation.mutate()}>
+                        Disconnect
+                      </Button>
                     ) : (
                       <Button type="button" disabled={connectMutation.isPending || summary?.configured === false} onClick={() => connectMutation.mutate()}>
                         <ExternalLink className="size-4" />
@@ -213,20 +211,29 @@ function AsanaIntegrationPage() {
                 {summaryQuery.isLoading ? (
                   <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">Loading Asana connection...</div>
                 ) : summaryQuery.isError || !summary ? (
-                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">Could not load the Asana integration.</div>
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">Could not load the Asana Integration.</div>
                 ) : (
                   <>
                     <ConnectionState summary={summary} />
                     {summary.connected ? (
                       <>
                         <ScopeState requiredScopes={summary.requiredScopes} missingScopes={summary.missingScopes} />
+                        <TaskSyncSettings
+                          autoSyncTasksEnabled={summary.connection?.autoSyncTasksEnabled ?? false}
+                          disabled={taskSyncSettingsMutation.isPending}
+                          error={taskSyncSettingsMutation.error}
+                          onChange={(checked) => taskSyncSettingsMutation.mutate(checked)}
+                        />
                         {summary.projectDiscoveryIssue ? (
                           <div className="rounded-md border border-warning/30 bg-warning/10 p-4 text-sm text-warning-foreground">
-                            <p className="font-medium">Asana project permission check is blocked</p>
+                            <p className="font-medium">Asana Project Permission Check Is Blocked</p>
                             <p className="mt-1">{summary.projectDiscoveryIssue}</p>
                             <p className="mt-1 text-muted-foreground">If this is a rate limit, wait a few minutes and refresh. If this is a permission error, confirm Full permissions are enabled in the Asana developer app and reconnect Asana.</p>
                           </div>
                         ) : null}
+                        <WebhookStatusPanel
+                          webhookStatuses={summary.webhookStatuses}
+                        />
                         <ProjectMappingTable
                           asanaProjects={summary.asanaProjects}
                           draftSelections={draftSelections}
@@ -288,7 +295,7 @@ function ConnectionState({ summary }: { summary: AsanaConnectionSummary }) {
       <div className="flex items-start gap-3 rounded-md border bg-background p-4 text-sm text-muted-foreground">
         <Plug className="mt-0.5 size-4 shrink-0" />
         <div>
-          <p className="font-medium text-foreground">No Asana account connected</p>
+          <p className="font-medium text-foreground">No Asana Account Connected</p>
           <p>Start OAuth to read your Asana projects and capture permissions.</p>
         </div>
       </div>
@@ -308,6 +315,9 @@ function ConnectionState({ summary }: { summary: AsanaConnectionSummary }) {
         </Badge>
         <Badge variant="secondary">{summary.asanaProjects.length} member projects</Badge>
         <Badge variant="secondary">{summary.mappings.length} mapped</Badge>
+        <Badge variant={summary.webhookStatuses.some((webhook) => webhook.status === "failed" || webhook.status === "missing") ? "warning" : "secondary"}>
+          {summary.webhookStatuses.filter((webhook) => webhook.status === "active").length} active webhooks
+        </Badge>
       </div>
     </div>
   );
@@ -318,7 +328,7 @@ function ScopeState({ missingScopes, requiredScopes }: { requiredScopes: string[
     <div className="grid gap-3 rounded-md border bg-background p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="font-medium">Asana scopes</p>
+          <p className="font-medium">Asana Scopes</p>
           <p className="text-sm text-muted-foreground">Task submission requires both task-write scope and project-level write permission.</p>
         </div>
         <Badge variant={missingScopes.length ? "secondary" : "default"}>
@@ -331,6 +341,130 @@ function ScopeState({ missingScopes, requiredScopes }: { requiredScopes: string[
           return <Badge key={scope} variant={missing ? "secondary" : "default"}>{scope}</Badge>;
         })}
       </div>
+    </div>
+  );
+}
+
+function TaskSyncSettings({
+  autoSyncTasksEnabled,
+  disabled,
+  error,
+  onChange,
+}: {
+  autoSyncTasksEnabled: boolean;
+  disabled: boolean;
+  error: unknown;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="grid gap-3 rounded-md border bg-background p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-medium">Task Sync</p>
+          <p className="text-sm text-muted-foreground">By default, tasks stay local until you click Sync to Asana.</p>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-4"
+            checked={autoSyncTasksEnabled}
+            disabled={disabled}
+            onChange={(event) => onChange(event.currentTarget.checked)}
+          />
+          Auto-Sync New Tasks
+        </label>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        When enabled, new VertexAI tasks are pushed to Asana during creation and display as synced immediately.
+      </p>
+      {error ? <p className="text-sm text-destructive">{errorMessage(error)}</p> : null}
+    </div>
+  );
+}
+
+function WebhookStatusPanel({
+  webhookStatuses,
+}: {
+  webhookStatuses: AsanaProjectWebhookStatusView[];
+}) {
+  const activeCount = webhookStatuses.filter((webhook) => webhook.status === "active").length;
+  const needsAttentionCount = webhookStatuses.filter((webhook) => webhook.status === "failed" || webhook.status === "missing").length;
+  const [visibleCount, setVisibleCount] = useState(expandableListPageSize);
+  const visibleWebhookStatuses = webhookStatuses.slice(0, visibleCount);
+  const hasMoreWebhookStatuses = visibleCount < webhookStatuses.length;
+  const canShowFewerWebhookStatuses = visibleCount > expandableListPageSize;
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-background p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">Webhook Status</p>
+          <p className="text-sm text-muted-foreground">Mapped Asana projects should each have one active project webhook.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={activeCount ? "success" : "secondary"}>{activeCount} active</Badge>
+          <Badge variant={needsAttentionCount ? "warning" : "secondary"}>{needsAttentionCount} need attention</Badge>
+        </div>
+      </div>
+
+      {webhookStatuses.length ? (
+        <div className="overflow-hidden rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Project</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Webhook</TableHead>
+                <TableHead>Last Checked</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleWebhookStatuses.map((webhook) => (
+                <TableRow key={webhook.asanaProjectGid}>
+                  <TableCell>
+                    <div className="grid gap-1">
+                      <span className="font-medium">{webhook.asanaProjectName}</span>
+                      <span className="text-xs text-muted-foreground">{webhook.asanaWorkspaceName} / {webhook.vertexProjectName ?? "Mapped Project"}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={webhookStatusVariant(webhook.status)}>{webhookStatusLabel(webhook.status)}</Badge>
+                    {webhook.lastError ? <p className="mt-2 max-w-80 text-xs text-destructive">{webhook.lastError}</p> : null}
+                  </TableCell>
+                  <TableCell>
+                    {webhook.webhookGid ? <p className="font-mono text-xs">{webhook.webhookGid}</p> : <span className="text-sm text-muted-foreground">No webhook gid recorded</span>}
+                    {webhook.targetUrl ? <p className="mt-1 max-w-96 break-all font-mono text-xs text-muted-foreground">{webhook.targetUrl}</p> : null}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{formatWebhookTimestamp(webhook.updatedAt)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {webhookStatuses.length > expandableListPageSize ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+              <span>Showing {visibleWebhookStatuses.length} of {webhookStatuses.length}</span>
+              <div className="flex items-center gap-2">
+                {canShowFewerWebhookStatuses ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setVisibleCount(expandableListPageSize)}>
+                    <ChevronUp className="size-4" />
+                    Show Fewer
+                  </Button>
+                ) : null}
+                {hasMoreWebhookStatuses ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setVisibleCount((count) => Math.min(count + expandableListPageSize, webhookStatuses.length))}>
+                    <ChevronDown className="size-4" />
+                    Show {Math.min(expandableListPageSize, webhookStatuses.length - visibleWebhookStatuses.length)} more
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
+          No mapped projects yet. Webhooks are created after an Asana project is mapped or scaffolded.
+        </div>
+      )}
     </div>
   );
 }
@@ -365,7 +499,7 @@ function ScaffoldTargetDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => !isPending && onOpenChange(nextOpen)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Place scaffolded projects</DialogTitle>
+          <DialogTitle>Place Scaffolded Projects</DialogTitle>
           <DialogDescription>
             Choose where to create {projectName || "this Asana project"} in VertexAI.
           </DialogDescription>
@@ -393,7 +527,7 @@ function ScaffoldTargetDialog({
                 value={targetTeamId}
                 onChange={(event) => onTargetTeamIdChange(event.target.value)}
               >
-                <option value="">Select team</option>
+                <option value="">Select Team</option>
                 {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
               </select>
             </label>
@@ -405,12 +539,39 @@ function ScaffoldTargetDialog({
             Cancel
           </Button>
           <Button type="button" disabled={!canConfirm} onClick={onConfirm}>
-            {isPending ? "Saving..." : "Create projects"}
+            {isPending ? "Saving..." : "Create Projects"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function webhookStatusVariant(status: AsanaProjectWebhookStatusView["status"]) {
+  if (status === "active") return "success";
+  if (status === "failed") return "destructive";
+  if (status === "missing") return "warning";
+  return "secondary";
+}
+
+function webhookStatusLabel(status: AsanaProjectWebhookStatusView["status"]) {
+  if (status === "active") return "Active";
+  if (status === "creating") return "Creating";
+  if (status === "failed") return "Failed";
+  if (status === "deleted") return "Deleted";
+  return "Missing";
+}
+
+function formatWebhookTimestamp(value: number | null) {
+  if (!value) return "Never";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 function ProjectMappingTable({
@@ -430,6 +591,11 @@ function ProjectMappingTable({
   onActionChange: (project: AsanaProjectOption, action: DraftSelection["action"]) => void;
   onMapProject: (projectGid: string, vertexProjectId: string) => void;
 }) {
+  const [visibleCount, setVisibleCount] = useState(expandableListPageSize);
+  const visibleAsanaProjects = asanaProjects.slice(0, visibleCount);
+  const hasMoreAsanaProjects = visibleCount < asanaProjects.length;
+  const canShowFewerAsanaProjects = visibleCount > expandableListPageSize;
+
   if (!asanaProjects.length) {
     return (
       <div className="rounded-md border bg-background p-8 text-center text-sm text-muted-foreground">
@@ -443,20 +609,20 @@ function ProjectMappingTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Asana project</TableHead>
+            <TableHead>Asana Project</TableHead>
             <TableHead>Permission</TableHead>
             <TableHead>Action</TableHead>
-            <TableHead>VertexAI project</TableHead>
+            <TableHead>VertexAI Project</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {asanaProjects.map((project) => {
+          {visibleAsanaProjects.map((project) => {
             const selection = draftSelections[project.gid] ?? { action: "ignore", vertexProjectId: "" };
             const selectedVertexProject = vertexProjectById.get(selection.vertexProjectId);
             const sourceLabel = project.portfolioName
               ? `${project.workspaceName} / Portfolio: ${project.portfolioName}`
               : `${project.workspaceName}${project.teamName ? ` / ${project.teamName}` : ""}`;
-            const permissionLabel = project.canWriteTasks ? "Task write" : project.permissionLevel === "unknown" ? "Verify on save" : "Read only";
+            const permissionLabel = project.canWriteTasks ? "Task Write" : project.permissionLevel === "unknown" ? "Verify on Save" : "Read Only";
             const isSaving = savingProjectGid === project.gid;
             return (
               <TableRow key={project.gid}>
@@ -481,8 +647,8 @@ function ProjectMappingTable({
                     onChange={(event) => onActionChange(project, event.target.value as DraftSelection["action"])}
                   >
                     <option value="ignore">Ignore</option>
-                    <option value="map">Map existing</option>
-                    <option value="scaffold">Scaffold new</option>
+                    <option value="map">Map Existing</option>
+                    <option value="scaffold">Scaffold New</option>
                   </select>
                 </TableCell>
                 <TableCell>
@@ -493,7 +659,7 @@ function ProjectMappingTable({
                       value={selection.vertexProjectId}
                       onChange={(event) => onMapProject(project.gid, event.target.value)}
                     >
-                      <option value="">Select project</option>
+                      <option value="">Select Project</option>
                       {vertexProjects.map((vertexProject) => (
                         <option key={vertexProject.id} value={vertexProject.id}>
                           {vertexProject.name} / {vertexProject.mode}
@@ -502,12 +668,12 @@ function ProjectMappingTable({
                     </select>
                   ) : selection.action === "scaffold" ? (
                     <Button type="button" variant="outline" disabled={isSaving} onClick={() => onActionChange(project, "scaffold")}>
-                      {isSaving ? "Creating..." : "Choose destination"}
+                      {isSaving ? "Creating..." : "Choose Destination"}
                     </Button>
                   ) : selectedVertexProject ? (
                     <span className="text-sm text-muted-foreground">Currently mapped to {selectedVertexProject.name}</span>
                   ) : (
-                    <span className="text-sm text-muted-foreground">No action</span>
+                    <span className="text-sm text-muted-foreground">No Action</span>
                   )}
                 </TableCell>
               </TableRow>
@@ -515,6 +681,25 @@ function ProjectMappingTable({
           })}
         </TableBody>
       </Table>
+      {asanaProjects.length > expandableListPageSize ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          <span>Showing {visibleAsanaProjects.length} of {asanaProjects.length}</span>
+          <div className="flex items-center gap-2">
+            {canShowFewerAsanaProjects ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setVisibleCount(expandableListPageSize)}>
+                <ChevronUp className="size-4" />
+                Show Fewer
+              </Button>
+            ) : null}
+            {hasMoreAsanaProjects ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setVisibleCount((count) => Math.min(count + expandableListPageSize, asanaProjects.length))}>
+                <ChevronDown className="size-4" />
+                Show {Math.min(expandableListPageSize, asanaProjects.length - visibleAsanaProjects.length)} more
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

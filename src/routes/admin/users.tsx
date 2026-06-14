@@ -156,7 +156,7 @@ function AdminUsersPage() {
     setConfirmDialog({
       title: `Delete ${user.email}`,
       description: "This removes the user's sessions and sign-in account.",
-      actionLabel: "Delete user",
+      actionLabel: "Delete User",
       onConfirm: async () => {
         setMessage("");
         setInviteLink("");
@@ -208,7 +208,7 @@ function AdminUsersPage() {
         {activeTab === "users" ? (
           <Card>
               <CardHeader>
-                <CardTitle>User accounts</CardTitle>
+                <CardTitle>User Accounts</CardTitle>
                 <CardDescription>Edit names, change roles, and remove accounts that should no longer have access.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -278,7 +278,7 @@ function AdminUsersPage() {
                     <UserPlus className="size-5" />
                   </span>
                   <div>
-                    <CardTitle>Create invite</CardTitle>
+                    <CardTitle>Create Invite</CardTitle>
                     <CardDescription>Only vertexeducation.com addresses are allowed, plus rogerleecormier@gmail.com for this test.</CardDescription>
                   </div>
                 </div>
@@ -400,7 +400,7 @@ function AdminConfirmDialog({
     <Dialog open={Boolean(state)} onOpenChange={(open) => !isPending && onOpenChange(open)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{state?.title ?? "Confirm action"}</DialogTitle>
+          <DialogTitle>{state?.title ?? "Confirm Action"}</DialogTitle>
           <DialogDescription>{state?.description ?? "Confirm this action before continuing."}</DialogDescription>
         </DialogHeader>
         {error ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}

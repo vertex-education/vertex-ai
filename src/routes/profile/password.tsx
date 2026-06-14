@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Eye, EyeOff } from "lucide-react";
 import { AuthenticatedAppRail } from "@/components/AuthenticatedAppRail";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,7 +17,7 @@ export const Route = createFileRoute("/profile/password")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Reset password | Vertex AI Command Center" }],
+    meta: [{ title: "Reset Password | Vertex AI Command Center" }],
   }),
   component: ResetPasswordPage,
 });
@@ -74,15 +75,15 @@ function ResetPasswordPage() {
         <section className="grid min-h-0 place-items-center overflow-auto bg-muted/30 p-4">
           <Card className="w-full max-w-md">
             <CardHeader>
-              <img className="mb-3 h-10 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
-              <CardTitle>Reset password</CardTitle>
+              <VertexAIBrand className="mb-3" logoClassName="h-10 w-fit" aiClassName="text-[1.75rem]" />
+              <CardTitle>Reset Password</CardTitle>
               <CardDescription>Enter your current password and choose a new one.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <form className="space-y-4" onSubmit={handleResetPassword}>
                 <PasswordField
                   id="current-password"
-                  label="Current password"
+                  label="Current Password"
                   autoComplete="current-password"
                   showPassword={showPasswords}
                   value={currentPassword}
@@ -90,7 +91,7 @@ function ResetPasswordPage() {
                 />
                 <PasswordField
                   id="new-password"
-                  label="New password"
+                  label="New Password"
                   autoComplete="new-password"
                   showPassword={showPasswords}
                   value={newPassword}
@@ -98,7 +99,7 @@ function ResetPasswordPage() {
                 />
                 <PasswordField
                   id="confirm-password"
-                  label="Confirm new password"
+                  label="Confirm New Password"
                   autoComplete="new-password"
                   showPassword={showPasswords}
                   value={confirmPassword}
@@ -106,17 +107,17 @@ function ResetPasswordPage() {
                 />
                 <Button type="button" variant="outline" className="w-full" onClick={() => setShowPasswords((value) => !value)}>
                   {showPasswords ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  {showPasswords ? "Hide passwords" : "Show passwords"}
+                  {showPasswords ? "Hide Passwords" : "Show Passwords"}
                 </Button>
                 <Button className="w-full" type="submit" disabled={isPending}>
-                  {isPending ? "Resetting..." : "Reset password"}
+                  {isPending ? "Resetting..." : "Reset Password"}
                 </Button>
               </form>
 
               {message ? <p className="rounded-md border bg-background p-3 text-sm text-muted-foreground">{message}</p> : null}
 
               <Button className="w-full" type="button" variant="ghost" onClick={() => (window.location.href = "/profile")}>
-                Return to settings
+                Return to Settings
               </Button>
             </CardContent>
           </Card>

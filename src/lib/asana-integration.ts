@@ -10,6 +10,7 @@ export type AsanaConnectionSummary = {
     asanaUserName: string;
     asanaUserEmail: string | null;
     scopes: string[];
+    autoSyncTasksEnabled: boolean;
     connectedAt: number;
     updatedAt: number;
   } | null;
@@ -19,6 +20,7 @@ export type AsanaConnectionSummary = {
   asanaProjects: AsanaProjectOption[];
   vertexProjects: VertexProjectOption[];
   mappings: AsanaProjectMappingView[];
+  webhookStatuses: AsanaProjectWebhookStatusView[];
   teams: VertexTeamOption[];
 };
 
@@ -67,6 +69,19 @@ export type AsanaProjectMappingView = {
   updatedAt: number;
 };
 
+export type AsanaProjectWebhookStatusView = {
+  asanaProjectGid: string;
+  asanaProjectName: string;
+  asanaWorkspaceName: string;
+  vertexProjectName: string | null;
+  webhookGid: string | null;
+  targetUrl: string | null;
+  status: "active" | "creating" | "failed" | "deleted" | "missing";
+  lastError: string | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+};
+
 export type AsanaMappingSelection = {
   asanaProjectGid: string;
   action: "ignore" | "map" | "scaffold";
@@ -107,6 +122,13 @@ export const repairAsanaProjectWebhooks = createServerFn({ method: "POST" }).han
   const { repairAsanaProjectWebhooksForCurrentUser } = await import("@/lib/asana-integration.server");
   return repairAsanaProjectWebhooksForCurrentUser();
 });
+
+export const updateAsanaTaskSyncSettings = createServerFn({ method: "POST" })
+  .validator((data: { autoSyncTasksEnabled: boolean }) => data)
+  .handler(async ({ data }) => {
+    const { updateAsanaTaskSyncSettingsForCurrentUser } = await import("@/lib/asana-integration.server");
+    return updateAsanaTaskSyncSettingsForCurrentUser(data);
+  });
 
 export const createAsanaTaskForMappedProject = createServerFn({ method: "POST" })
   .validator((data: { vertexProjectId: string; title: string; notes?: string }) => data)

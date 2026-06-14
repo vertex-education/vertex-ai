@@ -17,7 +17,7 @@ import {
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({
-    meta: [{ title: "Admin Dashboard | Vertex AI Command Center" }],
+    meta: [{ title: "Admin Settings Dashboard | Vertex AI Command Center" }],
   }),
   component: AdminDashboardPage,
 });
@@ -150,7 +150,7 @@ function AdminDashboardPage() {
           <h2 className="text-2xl font-semibold">Dashboard</h2>
           <p className="text-sm text-muted-foreground">Live app health and 30-day provider usage. Sections refresh independently{generatedAt ? `; latest refresh ${new Date(generatedAt).toLocaleTimeString()}` : ""}.</p>
         </div>
-        <Badge variant="secondary">Primary admin tab</Badge>
+        <Badge variant="secondary">Primary Admin Tab</Badge>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -194,7 +194,7 @@ function AdminDashboardPage() {
             <CardDescription>Tracked usage events by service over the last 30 days.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh provider requests" onRefresh={() => void providerUsageQuery.refetch()} />
+            <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh Provider Requests" onRefresh={() => void providerUsageQuery.refetch()} />
             <ChartContainer config={providerChartConfig} className="h-72 w-full">
               <BarChart data={requestRows} margin={{ left: 4, right: 12, top: 8, bottom: 0 }}>
                 <CartesianGrid vertical={false} />
@@ -213,7 +213,7 @@ function AdminDashboardPage() {
             <CardDescription>Gemma token totals from AI Gateway usage events and Gateway logs.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh token usage" onRefresh={() => void providerUsageQuery.refetch()} />
+            <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh Token Usage" onRefresh={() => void providerUsageQuery.refetch()} />
             <ChartContainer config={tokenChartConfig} className="h-72 w-full">
               <BarChart data={tokenRows.length ? tokenRows : [{ provider: "No tracked tokens", totalTokens: 0 }]} margin={{ left: 4, right: 12, top: 8, bottom: 0 }}>
                 <CartesianGrid vertical={false} />
@@ -234,7 +234,7 @@ function AdminDashboardPage() {
             <CardDescription>Core app records that indicate operational volume and health.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SectionRefreshButton isFetching={appHealthQuery.isFetching} label="Refresh storage and activity" onRefresh={() => void appHealthQuery.refetch()} />
+            <SectionRefreshButton isFetching={appHealthQuery.isFetching} label="Refresh Storage and Activity" onRefresh={() => void appHealthQuery.refetch()} />
             <ChartContainer config={healthChartConfig} className="h-72 w-full">
               <BarChart data={healthRows} layout="vertical" margin={{ left: 12, right: 24, top: 8, bottom: 8 }}>
                 <CartesianGrid horizontal={false} />
@@ -253,7 +253,7 @@ function AdminDashboardPage() {
             <CardDescription>Runtime bindings and provider keys visible to the Worker.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <SectionRefreshButton isFetching={appHealthQuery.isFetching} label="Refresh service configuration" onRefresh={() => void appHealthQuery.refetch()} />
+            <SectionRefreshButton isFetching={appHealthQuery.isFetching} label="Refresh Service Configuration" onRefresh={() => void appHealthQuery.refetch()} />
             <ChartContainer config={{ value: { label: "Services", color: serviceColors[0] } }} className="mx-auto h-48 w-full max-w-72">
               <PieChart>
                 <ChartTooltip content={<ChartTooltipContent />} />
@@ -282,19 +282,19 @@ function AdminDashboardPage() {
           <CardDescription>Credits are recorded when provider APIs expose them; otherwise request counts and runtime token diagnostics are tracked.</CardDescription>
         </CardHeader>
         <CardContent>
-          <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh provider usage detail" onRefresh={() => void providerUsageQuery.refetch()} />
+          <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh Provider Usage Detail" onRefresh={() => void providerUsageQuery.refetch()} />
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Provider</TableHead>
                 <TableHead className="text-right">Requests</TableHead>
                 <TableHead className="text-right">Credits</TableHead>
-                <TableHead className="text-right">Input tokens</TableHead>
-                <TableHead className="text-right">Output tokens</TableHead>
-                <TableHead className="text-right">Total tokens</TableHead>
+                <TableHead className="text-right">Input Tokens</TableHead>
+                <TableHead className="text-right">Output Tokens</TableHead>
+                <TableHead className="text-right">Total Tokens</TableHead>
                 <TableHead className="text-right">Cache</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Avg duration</TableHead>
+                <TableHead className="text-right">Avg Duration</TableHead>
                 <TableHead>Latest</TableHead>
               </TableRow>
             </TableHeader>
@@ -324,7 +324,7 @@ function AdminDashboardPage() {
           <CardDescription>Consolidated by chat or workflow; expand a group to inspect each inference, naming call, retrieval step, and API tool request.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
-          <SectionRefreshButton isFetching={recentUsageQuery.isFetching} label="Refresh recent usage events" onRefresh={() => void recentUsageQuery.refetch()} />
+          <SectionRefreshButton isFetching={recentUsageQuery.isFetching} label="Refresh Recent Usage Events" onRefresh={() => void recentUsageQuery.refetch()} />
           {usageGroups.length ? (
             usageGroups.map((group) => (
               <details key={group.key} className="group rounded-md border bg-background">
@@ -351,7 +351,7 @@ function AdminDashboardPage() {
                         <TableHead>Provider</TableHead>
                         <TableHead>Inference / usage</TableHead>
                         <TableHead>Model</TableHead>
-                        <TableHead>Gateway log</TableHead>
+                        <TableHead>Gateway Log</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Tokens</TableHead>
                         <TableHead className="text-right">Cost</TableHead>

@@ -8,6 +8,7 @@ import { runTrackedAiGateway } from "@/lib/ai-gateway";
 import { recordAdminUsageEvent } from "@/lib/admin-metrics.server";
 import { fetchAsanaProjectContextForCurrentUser } from "@/lib/asana-integration.server";
 import { getAuth } from "@/lib/auth";
+import { parseChatOperationalEntityJson, type ChatOperationalEntity } from "@/lib/chat-entities";
 import type { DocumentIngestionJob } from "@/lib/document-ingestion-queue";
 import type { PromptIntent } from "@/lib/intent-routing";
 import {
@@ -21,6 +22,7 @@ import {
 
 const embeddingModelId = "@cf/baai/bge-large-en-v1.5";
 const generationModelId = "@cf/google/gemma-4-26b-a4b-it";
+const entityExtractionModelId = "@cf/google/gemma-4-26b-a4b-it";
 const embeddingBatchSize = 50;
 const webSearchTimeoutMs = 10_000;
 
@@ -579,7 +581,214 @@ function sseEncode(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-function createAiSseResponse(aiStream: ReadableStream<Uint8Array>, citations: ChatWithScopedRagCitation[], trace: StreamTracePayload) {
+function extractTextFromAiContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => extractTextFromAiContent(item)).filter(Boolean).join("");
+  }
+  if (!isRecord(value)) return "";
+
+  for (const key of ["text", "content", "response", "output_text", "value"]) {
+    const text = extractTextFromAiContent(value[key]);
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function extractAiTextResponse(result: unknown) {
+  if (typeof result === "string") return result;
+  if (!isRecord(result)) return "";
+  const nestedResult = isRecord(result.result) ? result.result : null;
+  const choices = Array.isArray(result.choices) ? result.choices : [];
+  const firstChoice = isRecord(choices[0]) ? choices[0] : null;
+  const firstMessage = firstChoice && isRecord(firstChoice.message) ? firstChoice.message : null;
+  const firstDelta = firstChoice && isRecord(firstChoice.delta) ? firstChoice.delta : null;
+  const candidates = [
+    result.response,
+    result.text,
+    result.output_text,
+    extractTextFromAiContent(result.content),
+    nestedResult?.response,
+    nestedResult?.text,
+    nestedResult?.output_text,
+    extractTextFromAiContent(nestedResult?.content),
+    extractTextFromAiContent(result.output),
+    extractTextFromAiContent(nestedResult?.output),
+    extractTextFromAiContent(firstMessage?.content),
+    extractTextFromAiContent(firstMessage?.text),
+    extractTextFromAiContent(firstDelta?.content),
+  ];
+  return candidates.find((candidate) => typeof candidate === "string" && candidate.trim())?.toString() ?? "";
+}
+
+async function repairOperationalEntityJson({
+  ai,
+  chatId,
+  projectId,
+  rawOutput,
+  schema,
+  teamId,
+  workspaceId,
+}: {
+  ai: Ai;
+  chatId: string | null;
+  projectId: string;
+  rawOutput: string;
+  schema: string;
+  teamId: string | null;
+  workspaceId: string;
+}) {
+  const result = await runTrackedAiGateway(ai, entityExtractionModelId, {
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You repair malformed entity extraction output into strict JSON.",
+          schema,
+          "Use only facts already present in the malformed output. Do not add new entities.",
+          "Return [] if no valid entity can be recovered.",
+        ].join("\n\n"),
+      },
+      {
+        role: "user",
+        content: [
+          "Malformed extraction output:",
+          truncateForRagPrompt(rawOutput, 6_000),
+          "",
+          "Return only the repaired strict JSON array.",
+        ].join("\n"),
+      },
+    ],
+    max_completion_tokens: 700,
+    temperature: 0,
+  }, {
+    feature: "scoped-rag-entity-json-repair",
+    teamId,
+    projectId,
+    chatId,
+    metadata: {
+      feature: "scoped-rag-entity-repair",
+      model: entityExtractionModelId,
+      teamId: teamId?.slice(0, 80) ?? null,
+      projectId: projectId.slice(0, 80),
+      chatId: chatId?.slice(0, 80) ?? null,
+      workspaceId,
+    },
+  });
+
+  return parseChatOperationalEntityJson(extractAiTextResponse(result));
+}
+
+async function extractOperationalEntities({
+  assistantResponse,
+  chatId,
+  projectId,
+  prompt,
+  teamId,
+  workspaceId,
+}: {
+  assistantResponse: string;
+  chatId: string | null;
+  projectId: string;
+  prompt: string;
+  teamId: string | null;
+  workspaceId: string;
+}): Promise<ChatOperationalEntity[]> {
+  const trimmedPrompt = truncateForRagPrompt(prompt, 3_000);
+  const trimmedResponse = truncateForRagPrompt(assistantResponse, 4_000);
+  if (!trimmedPrompt && !trimmedResponse) return [];
+
+  const schema = [
+    "Return only a strict JSON array. Do not include markdown, prose, comments, or code fences.",
+    "Each array item must match this exact object shape:",
+    "{",
+    '  "id": "stable short id string",',
+    '  "type": "Task" | "Approval" | "Idea" | "Risk",',
+    '  "title": "short actionable title",',
+    '  "description": "one sentence grounded in the chat",',
+    '  "owner": "person/team if explicit, otherwise null",',
+    '  "dueDate": "date/deadline if explicit, otherwise null",',
+    '  "priority": "Low" | "Medium" | "High" | null,',
+    '  "sourceQuote": "short quote from the prompt or response",',
+    '  "confidence": 0.0',
+    "}",
+    "Definitions:",
+    "Task = concrete follow-up work to do.",
+    "Approval = explicit decision or permission needed from a person/group.",
+    "Idea = suggestion, improvement, opportunity, or possible artifact to explore.",
+    "Risk = blocker, dependency, uncertainty, or negative outcome to monitor.",
+    "Extract only distinct operational entities that are actually present. If none are present, return [].",
+  ].join("\n");
+
+  try {
+    const ai = getAi();
+    const result = await runTrackedAiGateway(ai, entityExtractionModelId, {
+      messages: [
+        { role: "system", content: schema },
+        {
+          role: "user",
+          content: [
+            "Analyze this chat turn for operational entities.",
+            "",
+            "User prompt:",
+            trimmedPrompt,
+            "",
+            "Assistant response:",
+            trimmedResponse,
+          ].join("\n"),
+        },
+      ],
+      max_completion_tokens: 700,
+      temperature: 0,
+    }, {
+      feature: "scoped-rag-entity-extraction",
+      teamId,
+      projectId,
+      chatId,
+      metadata: {
+        feature: "scoped-rag-entities",
+        model: entityExtractionModelId,
+        teamId: teamId?.slice(0, 80) ?? null,
+        projectId: projectId.slice(0, 80),
+        chatId: chatId?.slice(0, 80) ?? null,
+        workspaceId,
+      },
+    });
+    const text = extractAiTextResponse(result);
+    try {
+      return parseChatOperationalEntityJson(text);
+    } catch {
+      return repairOperationalEntityJson({
+        ai,
+        chatId,
+        projectId,
+        rawOutput: text,
+        schema,
+        teamId,
+        workspaceId,
+      });
+    }
+  } catch (error) {
+    console.warn("[ScopedRag] Entity extraction failed.", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    return [];
+  }
+}
+
+function createAiSseResponse(
+  aiStream: ReadableStream<Uint8Array>,
+  citations: ChatWithScopedRagCitation[],
+  trace: StreamTracePayload,
+  entityContext: {
+    chatId: string | null;
+    projectId: string;
+    prompt: string;
+    teamId: string | null;
+    workspaceId: string;
+  },
+) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -642,7 +851,14 @@ function createAiSseResponse(aiStream: ReadableStream<Uint8Array>, citations: Ch
           buffer = "";
         }
         if (!fullResponse.trim()) enqueue("token", { token: "The model did not return a response." });
-        enqueue("done", { response: fullResponse.trim(), thinking: fullThinking.trim(), citations });
+        const finalResponse = fullResponse.trim();
+        const entityExtraction = extractOperationalEntities({
+          assistantResponse: finalResponse || "The model did not return a response.",
+          ...entityContext,
+        });
+        const entities = await entityExtraction;
+        enqueue("entities", { entities });
+        enqueue("done", { response: finalResponse, thinking: fullThinking.trim(), citations, entities });
       } catch (error) {
         enqueue("stream-error", { message: error instanceof Error ? error.message : "Scoped RAG stream failed." });
       } finally {
@@ -758,16 +974,21 @@ async function createDirectGenerationResponse({
     },
   })) as unknown as ReadableStream<Uint8Array>;
 
-  return createAiSseResponse(aiStream, historicalContext.citations, {
-    request: { messages },
-    context: {
-      asanaContextChars: asanaContext?.length ?? 0,
-      citations: historicalContext.citations.length,
-      contextNotice,
-      historicalContextChars: historicalContext.context.length,
-      webContextChars: 0,
+  return createAiSseResponse(
+    aiStream,
+    historicalContext.citations,
+    {
+      request: { messages },
+      context: {
+        asanaContextChars: asanaContext?.length ?? 0,
+        citations: historicalContext.citations.length,
+        contextNotice,
+        historicalContextChars: historicalContext.context.length,
+        webContextChars: 0,
+      },
     },
-  });
+    { chatId, projectId, prompt, teamId, workspaceId },
+  );
 }
 
 async function createWebSearchGenerationResponse({
@@ -875,16 +1096,21 @@ async function createWebSearchGenerationResponse({
     },
   })) as unknown as ReadableStream<Uint8Array>;
 
-  return createAiSseResponse(aiStream, historicalContext.citations, {
-    request: { messages },
-    context: {
-      asanaContextChars: asanaContext?.length ?? 0,
-      citations: historicalContext.citations.length,
-      contextNotice,
-      historicalContextChars: historicalContext.context.length,
-      webContextChars: webContext.length,
+  return createAiSseResponse(
+    aiStream,
+    historicalContext.citations,
+    {
+      request: { messages },
+      context: {
+        asanaContextChars: asanaContext?.length ?? 0,
+        citations: historicalContext.citations.length,
+        contextNotice,
+        historicalContextChars: historicalContext.context.length,
+        webContextChars: webContext.length,
+      },
     },
-  });
+    { chatId, projectId, prompt, teamId, workspaceId },
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

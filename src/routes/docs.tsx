@@ -41,7 +41,7 @@ export const Route = createFileRoute("/docs")({
   component: DocsPage,
 });
 
-type DocStatus = "Available" | "Admin" | "Partial" | "Coming soon";
+type DocStatus = "Available" | "Admin" | "Partial" | "Coming Soon";
 
 type DocSection = {
   id: string;
@@ -148,7 +148,7 @@ const docSections: DocSection[] = [
       "Use High reasoning for exhaustive planning, analysis, risk review, or multi-step work where completeness matters more than speed.",
       "Turn Web on only when the question needs current external information; leave it off for workspace-only or historical context.",
       "Branch a chat when a specific message should become the starting point for a separate thread without losing the original conversation.",
-      "Token usage can be shown or hidden from the account menu depending on whether the audience needs model diagnostics.",
+      "Token usage can be shown or hidden from User Settings depending on whether the audience needs model diagnostics.",
     ],
     technicalDetails: [
       "Chat send uses a TanStack Query v5 useMutation onMutate handler to cancel scoped chat queries, snapshot the previous cache, and append an optimistic user message with clientStatus sending.",
@@ -201,7 +201,7 @@ const docSections: DocSection[] = [
     status: "Available",
     summary: "OAuth connects a user's Asana account, maps member projects to VertexAI projects, and gates task writes by captured Asana permissions.",
     howTo: [
-      "Open User settings, then Asana integration.",
+      "Open User Settings, then Asana Integration.",
       "Connect Asana and approve the requested scopes.",
       "Map visible Asana projects to existing VertexAI projects, or scaffold new VertexAI projects from selected Asana projects, including projects discovered from Asana portfolio memberships.",
       "Review the permission badge before relying on task submission back to Asana.",
@@ -211,13 +211,14 @@ const docSections: DocSection[] = [
       "The mapping wizard discovers Asana projects through team project memberships and portfolio memberships. Asana requires Full permissions mode for membership and portfolio permission checks.",
       "Scaffolding creates a local VertexAI project and a project chat that can receive Asana updates.",
       "Task submission is disabled for mapped projects unless Asana confirms project write access at save time and the connection has tasks:write scope.",
+      "Tasks stay local until the user clicks Sync to Asana unless auto-sync is enabled in Profile > Asana.",
       "The webhook remains the live update layer after mappings exist.",
     ],
     technicalDetails: [
       "/profile/asana uses startAsanaConnection, getAsanaConnectionSummary, saveAsanaProjectMappings, and disconnectAsanaConnection server functions.",
       "/api/asana/oauth/callback exchanges the authorization code server-side with PKCE verifier and state validation.",
       "Asana tokens are encrypted in KV through src/lib/asana-token-vault.ts using TOKEN_VAULT_KEY; D1 stores only connected account metadata and scopes.",
-      "asana_oauth_states stores short-lived OAuth state, asana_connections stores the connected Asana identity, and asana_project_mappings stores routing plus can_write_tasks.",
+      "asana_oauth_states stores short-lived OAuth state, asana_connections stores the connected Asana identity plus auto-sync preference, and asana_project_mappings stores routing plus can_write_tasks.",
       "The project picker uses Asana team membership and portfolio membership discovery before surfacing projects in the wizard. Set ASANA_USE_FULL_PERMISSIONS=true and reconnect when the Asana app uses Full permissions.",
       "/api/webhooks/asana is routed through Hono in src/worker.ts and delegates to handleAsanaWebhookRequest in src/lib/asana-webhook.ts.",
       "Asana project webhook URLs must include workspaceId or asanaWorkspaceGid plus asanaProjectGid or webhookKey so the Worker can store and retrieve each webhook's X-Hook-Secret in ASANA_WEBHOOK_SECRETS.",
@@ -353,7 +354,7 @@ const docSections: DocSection[] = [
       "Decisions, approvals, and tasks are persisted in D1 workspace_actions rows and hydrated into typed ScopedWorkspaceState action arrays.",
       "Decision status is Not Completed or Completed; completed decisions render with green strikethrough styling.",
       "Approval status is Not Reviewed, Reviewing, Approved, or Not Approved; Approved renders green strikethrough and Not Approved renders red strikethrough.",
-      "Task status is Open or Completed; completed tasks can be toggled back to Open from the Tasks section.",
+      "Tasks do not expose completion controls in the app; each task can be manually synced to Asana once, or auto-synced on creation when the user's Asana setting is enabled.",
       "toggleWorkflowActionPin updates workspace_actions.pinned and refreshes merged workspace state.",
       "ArtifactRenderer recognizes approvals, decisions, ideas, suggestedIdeas, assignedTasks, and tasks JSON arrays when assistant output should become interactive action rows.",
       "Inline workflow actions rendered inside chat create persisted ideas, approvals, decisions, or tasks through the same server-side permission checks as the tabs.",
@@ -427,14 +428,14 @@ const docSections: DocSection[] = [
     howTo: [
       "Create a team from Team scope when you need a shared workspace.",
       "Invite a teammate to a team or project by email.",
-      "Invitees can review and accept scoped invites from User settings.",
+      "Invitees can review and accept scoped invites from User Settings.",
     ],
     details: [
       "Create a team when a set of people needs a shared workspace separate from personal or org-wide work.",
       "Create a team project when the work has a defined delivery scope, project chats, artifacts, and actions.",
       "Invite at the team level when someone needs broad team visibility.",
       "Invite at the project level when someone should only participate in one project.",
-      "Accepted invites grant access after the invited user signs in and accepts from the Invites area in User settings.",
+      "Accepted invites grant access after the invited user signs in and accepts from the Invites area in User Settings.",
     ],
     technicalDetails: [
       "Teams are stored in teams, team_members records assign owner or member roles, and listMyTeams returns only memberships for the current user.",
@@ -451,20 +452,20 @@ const docSections: DocSection[] = [
     category: "Account",
     icon: KeyRound,
     status: "Available",
-    summary: "Signed-in users can authenticate with Microsoft or invited credentials, manage User settings, reset passwords, review invites, relaunch onboarding, and sign out.",
+    summary: "Signed-in users can authenticate with Microsoft or invited credentials, manage User Settings, reset passwords, review invites, relaunch onboarding, and sign out.",
     howTo: [
       "Open the account menu from the bottom of the persistent blue rail or from the mobile top bar.",
-      "Choose User settings to review account details.",
-      "Choose Relaunch tutorial to replay the step-based onboarding flow.",
-      "Choose Reset password to update credentials.",
+      "Choose User Settings to review account details.",
+      "Open User Settings to replay the step-based onboarding flow.",
+      "Open User Settings to update credentials.",
       "Choose Sign out to end the session.",
     ],
     details: [
-      "Use the account menu for User settings, onboarding, password, admin, token usage, and sign-out actions.",
+      "Use the account menu for User Settings, Admin Settings, and sign-out actions.",
       "Viewer accounts can read permitted workspace content without changing records.",
       "User accounts can create and update workspace records where membership allows access.",
       "Admin accounts can manage users in addition to normal workspace editing.",
-      "Use the Invites area in User settings to review and accept scoped team or project invitations.",
+      "Use the Invites area in User Settings to review and accept scoped team or project invitations.",
     ],
     technicalDetails: [
       "Protected routes call getSessionSnapshot in their loaders and redirect unauthenticated users to /sign-in.",
@@ -484,7 +485,7 @@ const docSections: DocSection[] = [
     status: "Admin",
     summary: "Admins can manage user accounts, roles, account invitations, and invite revocation.",
     howTo: [
-      "Open Admin from the account menu when signed in as an admin.",
+      "Open Admin Settings from the account menu when signed in as an admin.",
       "Use the Users tab to edit names and roles or remove accounts.",
       "Use the Invites tab to create or revoke account invitations.",
     ],
@@ -582,7 +583,7 @@ const docSections: DocSection[] = [
     title: "Coming Soon Stubs",
     category: "Roadmap",
     icon: Zap,
-    status: "Coming soon",
+    status: "Coming Soon",
     summary: "Some visible controls and backend capabilities are placeholders or partially wired.",
     howTo: [
       "Attachment button: currently shows a queued toast; full upload-from-composer workflow is coming soon.",
@@ -864,7 +865,7 @@ const technicalArticles: DocArticle[] = [
     title: "Roadmap Stubs and Partial Wiring",
     category: "Technical Reference",
     icon: Sparkles,
-    status: "Coming soon",
+    status: "Coming Soon",
     summary: "Some visible UI controls are intentionally stubbed while their durable backend workflows are completed.",
     blocks: [
       {
@@ -894,10 +895,6 @@ function DocsPage() {
   const { session } = Route.useLoaderData();
   const [activeArticleId, setActiveArticleId] = useState(docArticles[0].id);
   const [searchTerm, setSearchTerm] = useState("");
-  const [showTokenUsage, setShowTokenUsage] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return window.localStorage.getItem("vertex-show-token-usage") !== "0";
-  });
   const activeArticle = docArticles.find((article) => article.id === activeArticleId) ?? docArticles[0];
 
   const filteredCategories = useMemo(() => {
@@ -916,18 +913,9 @@ function DocsPage() {
       .filter((category) => category.articles.length > 0);
   }, [searchTerm]);
 
-  useEffect(() => {
-    window.localStorage.setItem("vertex-show-token-usage", showTokenUsage ? "1" : "0");
-  }, [showTokenUsage]);
-
   async function handleSignOut() {
     await authClient.signOut();
     window.location.href = "/sign-in";
-  }
-
-  function handleStartTutorial() {
-    window.sessionStorage.setItem("vertex-onboarding-tutorial-relaunch", "1");
-    window.location.href = "/";
   }
 
   return (
@@ -936,12 +924,9 @@ function DocsPage() {
         <AppRail
           account={{
             canAdmin: session.user.role === "admin",
-            showTokenUsage,
             userEmail: session.user.email,
             userName: session.user.name,
-            onShowTokenUsageChange: setShowTokenUsage,
             onSignOut: handleSignOut,
-            onStartTutorial: handleStartTutorial,
           }}
           activeItem="Docs"
           persist
@@ -1209,5 +1194,5 @@ function StatusBadge({ status }: { status: DocStatus }) {
   if (status === "Available") return <Badge variant="success">Available</Badge>;
   if (status === "Admin") return <Badge variant="info">Admin</Badge>;
   if (status === "Partial") return <Badge variant="warning">Partial</Badge>;
-  return <Badge variant="secondary">Coming soon</Badge>;
+  return <Badge variant="secondary">Coming Soon</Badge>;
 }

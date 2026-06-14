@@ -589,6 +589,54 @@ const migrations = [
       "CREATE UNIQUE INDEX IF NOT EXISTS asana_project_webhooks_webhook_idx ON asana_project_webhooks (webhook_gid);",
     ],
   },
+  {
+    name: "0021_manual_asana_task_sync",
+    isComplete: () =>
+      columnExists("workspace_actions", "asana_task_gid") &&
+      columnExists("workspace_actions", "asana_synced_at") &&
+      columnExists("workspace_actions", "asana_sync_error") &&
+      columnExists("asana_connections", "auto_sync_tasks_enabled"),
+    steps: [
+      {
+        isComplete: () => columnExists("workspace_actions", "asana_task_gid"),
+        statement: "ALTER TABLE workspace_actions ADD COLUMN asana_task_gid TEXT;",
+      },
+      {
+        isComplete: () => columnExists("workspace_actions", "asana_synced_at"),
+        statement: "ALTER TABLE workspace_actions ADD COLUMN asana_synced_at INTEGER;",
+      },
+      {
+        isComplete: () => columnExists("workspace_actions", "asana_sync_error"),
+        statement: "ALTER TABLE workspace_actions ADD COLUMN asana_sync_error TEXT;",
+      },
+      {
+        isComplete: () => columnExists("asana_connections", "auto_sync_tasks_enabled"),
+        statement: "ALTER TABLE asana_connections ADD COLUMN auto_sync_tasks_enabled INTEGER DEFAULT 0 NOT NULL;",
+      },
+    ],
+  },
+  {
+    name: "0022_risks",
+    isComplete: () =>
+      tableExists("risks") &&
+      indexExists("risks_scope_idx") &&
+      indexExists("risks_severity_idx") &&
+      indexExists("risks_status_idx"),
+    statements: [
+      `CREATE TABLE IF NOT EXISTS risks (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  status TEXT NOT NULL DEFAULT 'open',
+  mitigation_strategy TEXT NOT NULL DEFAULT ''
+);`,
+      "CREATE INDEX IF NOT EXISTS risks_scope_idx ON risks (workspace_id, project_id);",
+      "CREATE INDEX IF NOT EXISTS risks_severity_idx ON risks (workspace_id, project_id, severity);",
+      "CREATE INDEX IF NOT EXISTS risks_status_idx ON risks (workspace_id, project_id, status);",
+    ],
+  },
 ];
 
 ensureMigrationTable();

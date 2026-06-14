@@ -29,6 +29,8 @@ The ensure step:
 
 Mapping saves are not rolled back if webhook setup fails. Instead, the failure is recorded in `asana_project_webhooks`, and the Repair webhooks action in Profile > Asana can rerun setup for all mapped projects.
 
+Profile > Asana also shows a Webhook status panel for mapped projects. Use it to confirm whether each mapped project has an active webhook, inspect the recorded Asana webhook gid and target URL, and read the most recent setup error if creation or repair failed.
+
 ## Handshake
 
 When Asana creates a webhook, it sends `X-Hook-Secret`. The Worker:
@@ -58,6 +60,8 @@ After signature verification succeeds, task events are parsed and upserted throu
 Webhook setup state is stored in `asana_project_webhooks`. Verified event payload state is stored in `asana_webhook_task_states`.
 
 The receiver then resolves project-chat delivery through `asana_project_mappings`, followed by the optional `ASANA_WEBHOOK_PROJECT_MAP` fallback. Matching updates are inserted as system chat messages, published through `CHAT_SYNC`, and recorded in the D1 `events` table for SSE invalidation.
+
+This is not a two-way task sync. VertexAI-created workflow tasks can be pushed to Asana manually, or automatically when the user's Profile > Asana setting is enabled. Asana webhook events do not create, update, complete, or delete VertexAI task records.
 
 ## Bindings
 

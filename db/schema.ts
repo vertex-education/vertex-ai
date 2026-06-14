@@ -247,6 +247,24 @@ export const projects = sqliteTable(
   }),
 );
 
+export const risks = sqliteTable(
+  "risks",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    severity: text("severity", { enum: ["low", "medium", "high", "critical"] }).notNull(),
+    status: text("status").notNull().default("open"),
+    mitigationStrategy: text("mitigation_strategy").notNull().default(""),
+  },
+  (table) => ({
+    scopeIdx: index("risks_scope_idx").on(table.workspaceId, table.projectId),
+    severityIdx: index("risks_severity_idx").on(table.workspaceId, table.projectId, table.severity),
+    statusIdx: index("risks_status_idx").on(table.workspaceId, table.projectId, table.status),
+  }),
+);
+
 export const chats = sqliteTable(
   "chats",
   {
@@ -380,6 +398,9 @@ export const workspaceActions = sqliteTable(
     source: text("source"),
     status: text("status").notNull(),
     pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    asanaTaskGid: text("asana_task_gid"),
+    asanaSyncedAt: integer("asana_synced_at", { mode: "timestamp_ms" }),
+    asanaSyncError: text("asana_sync_error"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
   },
   (table) => ({
@@ -526,6 +547,7 @@ export const asanaConnections = sqliteTable(
     asanaUserName: text("asana_user_name").notNull(),
     asanaUserEmail: text("asana_user_email"),
     scopes: text("scopes").notNull(),
+    autoSyncTasksEnabled: integer("auto_sync_tasks_enabled", { mode: "boolean" }).notNull().default(false),
     connectedAt: integer("connected_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },

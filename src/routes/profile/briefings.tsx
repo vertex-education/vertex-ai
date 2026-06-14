@@ -4,6 +4,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { ArrowLeft, CalendarClock, Eye, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { AuthenticatedAppRail } from "@/components/AuthenticatedAppRail";
 import { ArtifactRenderer } from "@/components/ArtifactRenderer";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,7 +52,7 @@ const customInstructionPlaceholders = [
 
 const customInstructionFormatHelpers = [
   {
-    label: "Report title",
+    label: "Report Title",
     text: "Title: {Project Name} - Weekly Status Update - {MM/DD/YY}\n\n",
     description: "Adds the briefing title line",
   },
@@ -61,22 +62,22 @@ const customInstructionFormatHelpers = [
     description: "Adds a section with guidance",
   },
   {
-    label: "Bullet list",
+    label: "Bullet List",
     text: "\nSection Name\n- First item\n- Second item\n",
     description: "Adds a section with bullets",
   },
   {
-    label: "Status block",
+    label: "Status Block",
     text: "\nStatus (On Track, Off Track - choose based on analysis of the project)\n\nStatus Summary\nGive a summary of the week in 100 words or less.\n",
     description: "Adds status and summary sections",
   },
   {
-    label: "Risks section",
+    label: "Risks Section",
     text: "\nRisks\n- List elevated risks supported by source data.\n- Leave blank if no risks are supported.\n",
     description: "Adds a risk bullet section",
   },
   {
-    label: "Decision section",
+    label: "Decision Section",
     text: "\nDecisions Requiring Executive Input\n- List decisions that need executive input.\n\nDecisions Made Within Workstream Scope\n- List decisions made by the workstream.\n",
     description: "Adds executive and workstream decisions",
   },
@@ -89,7 +90,7 @@ export const Route = createFileRoute("/profile/briefings")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Automated briefings | Vertex AI Command Center" }],
+    meta: [{ title: "Automated Briefings | Vertex AI Command Center" }],
   }),
   component: BriefingSettingsPage,
 });
@@ -100,7 +101,7 @@ function createDefaultDraft(projectId = ""): DraftSchedule {
   tomorrow.setHours(8, 0, 0, 0);
   return {
     id: null,
-    title: "Morning project briefing",
+    title: "Morning Project Briefing",
     enabled: true,
     recurrence: "weekdays",
     timeZone: timeZone || "America/New_York",
@@ -206,7 +207,7 @@ function BriefingSettingsPage() {
                 <ArrowLeft className="size-4" />
                 Profile
               </Button>
-              <img className="h-9 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
+              <VertexAIBrand />
             </div>
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
@@ -214,7 +215,7 @@ function BriefingSettingsPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <CalendarClock className="size-5" />
-                    Automated briefings
+                    Automated Briefings
                   </CardTitle>
                   <CardDescription>Schedules run from the Cloudflare cron tick and save Markdown briefings into project threads.</CardDescription>
                 </CardHeader>
@@ -224,7 +225,7 @@ function BriefingSettingsPage() {
                     Refresh
                   </Button>
                   <Button type="button" onClick={() => { setDraft(createDefaultDraft(firstProjectId)); setPreview(null); setMessage(""); }}>
-                    New schedule
+                    New Schedule
                   </Button>
                   <div className="grid gap-2">
                     {summaryQuery.isLoading ? <p className="text-sm text-muted-foreground">Loading schedules...</p> : null}
@@ -255,7 +256,7 @@ function BriefingSettingsPage() {
               <form className="grid gap-4" onSubmit={handleSubmit}>
                 <Card>
                   <CardHeader>
-                    <CardTitle>Schedule setup</CardTitle>
+                    <CardTitle>Schedule Setup</CardTitle>
                     <CardDescription>{draft.id ? "Edit this briefing schedule." : "Create a briefing schedule or one-off run."}</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-4">
@@ -265,7 +266,7 @@ function BriefingSettingsPage() {
                       </Field>
                       <Field label="Project">
                         <select className="h-9 rounded-md border bg-background px-3 text-sm" value={draft.projectId} onChange={(event) => updateDraft({ projectId: event.target.value, chatId: null, newChatTitle: null })}>
-                          <option value="">{summaryQuery.isFetching ? "Loading projects..." : "Select project"}</option>
+                          <option value="">{summaryQuery.isFetching ? "Loading projects..." : "Select Project"}</option>
                           {(summaryQuery.data?.projects ?? []).map((project) => (
                             <option key={project.id} value={project.id}>{projectLabel(project)}</option>
                           ))}
@@ -282,15 +283,15 @@ function BriefingSettingsPage() {
                         >
                           <option value="">Select existing thread</option>
                           {(selectedProject?.chatOptions ?? []).map((chat) => <option key={chat.id} value={chat.id}>{chat.title}</option>)}
-                          <option value="__new__">Create new thread</option>
+                          <option value="__new__">Create New Thread</option>
                         </select>
                       </Field>
                       {threadSelectValue === "__new__" ? (
-                        <Field label="New thread name">
+                        <Field label="New Thread Name">
                           <Input value={draft.newChatTitle ?? ""} onChange={(event) => updateDraft({ newChatTitle: event.target.value })} />
                         </Field>
                       ) : null}
-                      <Field label="Reporting window">
+                      <Field label="Reporting Window">
                         <select className="h-9 rounded-md border bg-background px-3 text-sm" value={draft.reportingWindowHours} onChange={(event) => updateDraft({ reportingWindowHours: Number(event.target.value) })}>
                           <option value={24}>Last 24 hours</option>
                           <option value={48}>Last 48 hours</option>
@@ -313,10 +314,10 @@ function BriefingSettingsPage() {
                           <option value="weekdays">Weekdays</option>
                           <option value="weekly">Weekly</option>
                           <option value="monthly">Monthly</option>
-                          <option value="once">One-off</option>
+                          <option value="once">One-Off</option>
                         </select>
                       </Field>
-                      <Field label="Time zone">
+                      <Field label="Time Zone">
                         <Input value={draft.timeZone} onChange={(event) => updateDraft({ timeZone: event.target.value })} />
                       </Field>
                       <Field label="Time">
@@ -340,13 +341,13 @@ function BriefingSettingsPage() {
                     ) : null}
 
                     {draft.recurrence === "monthly" ? (
-                      <Field label="Day of month">
+                      <Field label="Day of Month">
                         <Input type="number" min={1} max={31} value={draft.monthDay ?? 1} onChange={(event) => updateDraft({ monthDay: Number(event.target.value) })} />
                       </Field>
                     ) : null}
 
                     {draft.recurrence === "once" ? (
-                      <Field label="One-off date and time">
+                      <Field label="One-Off Date and Time">
                         <Input type="datetime-local" value={draft.runOnceAt ?? ""} onChange={(event) => updateDraft({ runOnceAt: event.target.value })} />
                       </Field>
                     ) : null}
@@ -362,7 +363,7 @@ function BriefingSettingsPage() {
                         <Accordion type="single" collapsible className="rounded-md border bg-background">
                           <AccordionItem value="formatting">
                             <AccordionTrigger className="px-3 py-2 text-xs text-muted-foreground hover:no-underline">
-                              Add format
+                              Add Format
                             </AccordionTrigger>
                             <AccordionContent className="border-t p-3">
                               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -385,7 +386,7 @@ function BriefingSettingsPage() {
                           </AccordionItem>
                           <AccordionItem value="placeholders" className="border-b-0">
                             <AccordionTrigger className="px-3 py-2 text-xs text-muted-foreground hover:no-underline">
-                              Placeholder library
+                              Placeholder Library
                             </AccordionTrigger>
                             <AccordionContent className="border-t p-3">
                               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -413,11 +414,11 @@ function BriefingSettingsPage() {
                     <div className="flex flex-wrap gap-2">
                       <Button type="submit" disabled={saveMutation.isPending || !canSave}>
                         <Save className="size-4" />
-                        {saveMutation.isPending ? "Saving..." : "Save schedule"}
+                        {saveMutation.isPending ? "Saving..." : "Save Schedule"}
                       </Button>
                       <Button type="button" variant="outline" disabled={testMutation.isPending || !draft.projectId} onClick={() => testMutation.mutate(prepareDraftForServer(draft))}>
                         <Eye className="size-4" />
-                        {testMutation.isPending ? "Generating..." : "Test output"}
+                        {testMutation.isPending ? "Generating..." : "Test Output"}
                       </Button>
                       {draft.id ? (
                         <Button type="button" variant="outline" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(draft.id!)}>
@@ -454,7 +455,7 @@ function PreviewPanel({ preview }: { preview: BriefingPreviewResult | null }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Current-state test output</CardTitle>
+        <CardTitle>Current-State Test Output</CardTitle>
         <CardDescription>{preview ? `${preview.project.workspaceName} / ${preview.project.name}` : "Generate a test to preview the Markdown before the schedule runs."}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -522,6 +523,6 @@ function prepareDraftForServer(draft: DraftSchedule): DraftSchedule {
 }
 
 function formatDateTime(value: string | null) {
-  if (!value) return "not scheduled";
+  if (!value) return "Not Scheduled";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }

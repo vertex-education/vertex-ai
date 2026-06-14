@@ -2,6 +2,7 @@ import { and, asc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import * as schema from "../../db/schema";
 import { runAiGateway } from "@/lib/ai-gateway";
+import { formatCustomInstructionTemplate, normalizeBriefingMarkdown, resolveInstructionPlaceholders, utcTimeLabel } from "@/lib/briefing-formatting";
 import { vertexAiModelId } from "@/lib/prompts";
 
 type AppDb = DrizzleD1Database<typeof schema>;
@@ -92,17 +93,6 @@ function isoDateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function shortDateKey(date: Date) {
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const year = String(date.getUTCFullYear()).slice(-2);
-  return `${month}/${day}/${year}`;
-}
-
-function utcTimeLabel(date: Date) {
-  return date.toISOString().slice(11, 16) + " UTC";
-}
-
 function truncate(value: string | null | undefined, maxLength: number) {
   const normalized = (value ?? "").replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
@@ -171,72 +161,6 @@ function parseReportingWindowHours(env: Env) {
   return clampReportingWindowHours(Number.parseInt(raw ?? "", 10));
 }
 
-function resolveInstructionPlaceholders(promptInstructions: string | null | undefined, project: BriefingProjectRow, windowEnd: Date) {
-  const instructions = promptInstructions?.trim();
-  if (!instructions) return "";
-
-  const projectName = project.name?.trim();
-  const workspaceName = project.workspaceName?.trim();
-  const values: Record<string, string | undefined> = {
-    "project name": projectName,
-    project: projectName,
-    "workspace name": workspaceName,
-    workspace: workspaceName,
-    "project status": project.status?.trim(),
-    status: project.status?.trim(),
-    date: isoDateKey(windowEnd),
-    "yyyy-mm-dd": isoDateKey(windowEnd),
-    "mm/dd/yy": shortDateKey(windowEnd),
-    "mm/dd/yyyy": `${String(windowEnd.getUTCMonth() + 1).padStart(2, "0")}/${String(windowEnd.getUTCDate()).padStart(2, "0")}/${windowEnd.getUTCFullYear()}`,
-    time: utcTimeLabel(windowEnd),
-  };
-
-  return instructions.replace(/\{([^{}]+)\}/g, (match, rawKey: string) => {
-    const key = rawKey.trim().toLowerCase();
-    return values[key] || match;
-  });
-}
-
-function formatCustomInstructionTemplate(instructions: string) {
-  const lines = instructions.replace(/\r/g, "\n").split("\n");
-  const formatted: string[] = [];
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      formatted.push("");
-      continue;
-    }
-
-    const titleMatch = line.match(/^title\s*:\s*(.+)$/i);
-    if (titleMatch?.[1]) {
-      formatted.push(`# ${titleMatch[1].trim()}`);
-      continue;
-    }
-
-    const parentheticalMatch = line.match(/^([A-Z][A-Za-z0-9 /&-]{1,70})\s*\((.+)\)$/);
-    if (parentheticalMatch?.[1] && parentheticalMatch[2]) {
-      formatted.push(`## ${parentheticalMatch[1].trim()}`);
-      formatted.push(parentheticalMatch[2].trim());
-      continue;
-    }
-
-    const sentenceLike = /[.!?]$/.test(line) || /\b(the|a|an|and|or|but|because|based|choose|give|summarize|list|include)\b/i.test(line);
-    const alreadyFormatted = /^(#{1,6}\s+|- |\* |\d+\. )/.test(line);
-    if (!alreadyFormatted && !sentenceLike && line.length <= 80) {
-      formatted.push(`## ${line.replace(/:$/, "")}`);
-      continue;
-    }
-
-    formatted.push(line);
-  }
-
-  return formatted
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 function extractAiResponse(result: unknown) {
   if (typeof result === "string") return result.trim();
   if (isRecord(result)) {
@@ -262,43 +186,6 @@ function extractAiResponse(result: unknown) {
     }
   }
   return "";
-}
-
-function normalizeBriefingMarkdown(markdown: string) {
-  const sectionLabels = new Set([
-    "status",
-    "status summary",
-    "risks",
-    "decisions requiring executive input",
-    "decisions made within workstream scope",
-    "completed asana tasks",
-    "key strategic decisions",
-    "elevated project risks",
-    "recommended next moves",
-  ]);
-
-  return markdown
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/([^\n])\s+(#{1,6}\s+)/g, "$1\n\n$2")
-    .replace(/([^\n])\s+(\*\*[^*\n]+:\*\*)/g, "$1\n\n$2")
-    .replace(/(\S)\s+(Status:\s*)/g, "$1\n\n$2")
-    .replace(/([^\n])\s+([-*]\s+\*\*)/g, "$1\n$2")
-    .replace(/([^\n])\s+([-*]\s+[A-Z][^:\n]{2,80}:)/g, "$1\n$2")
-    .replace(/(\S)\s+(Status Summary:)/g, "$1\n\n$2")
-    .replace(/(\S)\s+(Decisions Requiring Executive Input)/g, "$1\n\n$2")
-    .replace(/(\S)\s+(Decisions Made Within Workstream Scope)/g, "$1\n\n$2")
-    .split("\n")
-    .map((line, index) => {
-      const trimmed = line.trim();
-      if (!trimmed || /^#{1,6}\s+/.test(trimmed) || /^[-*]\s+/.test(trimmed)) return line;
-      const normalized = trimmed.replace(/:$/, "").toLowerCase();
-      if (index > 0 && sectionLabels.has(normalized)) return `## ${trimmed.replace(/:$/, "")}`;
-      return line;
-    })
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 function fallbackBriefing(project: BriefingProjectRow, windowEnd: Date, hasActivity: boolean, promptInstructions?: string | null, failureReason = "Workers AI did not return usable text.") {

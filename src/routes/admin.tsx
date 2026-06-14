@@ -1,6 +1,7 @@
 import { Outlet, createFileRoute, redirect, useRouterState } from "@tanstack/react-router";
 import { Activity, ArrowLeft, BarChart3, UsersRound } from "lucide-react";
 import { AuthenticatedAppRail } from "@/components/AuthenticatedAppRail";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Button } from "@/components/ui/button";
 import { getSessionSnapshot } from "@/lib/auth-workflow";
 import { cn } from "@/lib/utils";
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/admin")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Admin | Vertex AI Command Center" }],
+    meta: [{ title: "Admin Settings | Vertex AI Command Center" }],
   }),
   component: AdminLayout,
 });
@@ -39,16 +40,19 @@ function AdminLayout() {
                   <Activity className="size-5" />
                 </span>
                 <div className="min-w-0">
-                  <h1 className="text-xl font-semibold">Admin</h1>
+                  <h1 className="text-xl font-semibold">Admin Settings</h1>
                   <p className="text-sm text-muted-foreground">Operational metrics, usage tracking, users, and access controls.</p>
                 </div>
               </div>
-              <Button type="button" variant="outline" onClick={() => (window.location.href = "/")}>
-                <ArrowLeft className="size-4" />
-                Workspace
-              </Button>
+              <div className="flex items-center gap-3">
+                <Button type="button" variant="outline" onClick={() => (window.location.href = "/")}>
+                  <ArrowLeft className="size-4" />
+                  Workspace
+                </Button>
+                <VertexAIBrand />
+              </div>
             </div>
-            <nav className="mx-auto mt-3 flex max-w-7xl gap-2" aria-label="Admin tabs">
+            <nav className="mx-auto mt-3 flex max-w-7xl gap-2" aria-label="Admin Settings tabs">
               {adminTabs.map(({ href, label, icon: Icon }) => {
                 const active = href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
                 return (

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { VertexAIBrand } from "@/components/VertexAIBrand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -80,7 +81,7 @@ function AcceptInvitePage() {
     <main className="grid min-h-screen place-items-center bg-muted/30 p-4">
       <Card className="w-full max-w-lg">
         <CardHeader>
-          <img className="mb-3 h-10 w-fit" src="/vertex-horizontal.svg" alt="Vertex Education" />
+          <VertexAIBrand className="mb-3" logoClassName="h-10 w-fit" aiClassName="text-[1.75rem]" />
           <CardTitle>{isComplete ? "Check your email" : "Create your account"}</CardTitle>
           <CardDescription>
             {isComplete ? "Your account was created. Verify your email address before signing in." : "Set your password, then verify your email before signing in."}
