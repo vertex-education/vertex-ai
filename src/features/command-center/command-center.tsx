@@ -290,6 +290,7 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const canEdit = roleCanModifyState(session.user.role);
+  const canUseLlmDevtools = isAdminRole(session.user.role);
   useWorkspaceEventSource({
     enabled: activeMode !== "Team" || Boolean(selectedTeam),
     mode: activeMode,
@@ -2568,7 +2569,7 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
       />
       <ArtifactPreviewDialog artifact={previewArtifact} onOpenChange={(open) => !open && setPreviewArtifact(null)} />
       <WorkflowPreviewDialog preview={workflowPreview} onOpenChange={(open) => !open && setWorkflowPreview(null)} />
-      {import.meta.env.DEV ? <LlmDevtools traces={llmTraces} /> : null}
+      {canUseLlmDevtools ? <LlmDevtools traces={llmTraces} /> : null}
     </main>
   );
 }

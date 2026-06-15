@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import {
   Archive,
-  BookOpen,
   CalendarClock,
   CheckCircle2,
   ClipboardList,
@@ -12,7 +11,6 @@ import {
   GitBranch,
   KeyRound,
   Lightbulb,
-  Lock,
   MessageCircle,
   Search,
   ShieldAlert,
@@ -1038,7 +1036,7 @@ function DocsPage() {
                 </div>
 
                 <DocHero article={activeArticle} />
-                <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
+                <div className="mt-6 grid gap-5">
                   <div className="grid gap-5">
                     {activeArticle.blocks.map((block) => (
                       <DocBlock
@@ -1050,36 +1048,6 @@ function DocsPage() {
                       </DocBlock>
                     ))}
                   </div>
-                  <aside className="grid content-start gap-4">
-                    <Card>
-                      <CardContent className="space-y-3 p-4">
-                        <div className="flex items-center gap-2">
-                          <Lock className="size-4 text-primary" />
-                          <strong className="text-sm">Access Notes</strong>
-                        </div>
-                        <p className="text-sm leading-6 text-muted-foreground">
-                          Docs follow the signed-in app shell. Viewer accounts can read docs and workspace data, while Contributor, Manager,
-                          and Admin roles unlock write actions.
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="space-y-3 p-4">
-                        <div className="flex items-center gap-2">
-                          <BookOpen className="size-4 text-primary" />
-                          <strong className="text-sm">Documentation Sections</strong>
-                        </div>
-                        <div className="grid gap-2">
-                          {docCategories.map((category) => (
-                            <div key={category.title} className="rounded-md border bg-muted/25 p-3">
-                              <strong className="block text-sm">{category.title}</strong>
-                              <p className="mt-1 text-xs leading-5 text-muted-foreground">{category.description}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </aside>
                 </div>
               </div>
             </article>

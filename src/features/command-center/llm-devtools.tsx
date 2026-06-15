@@ -6,13 +6,69 @@ import { type LlmDevTrace } from "@/lib/pmo-data";
 
 export type LlmDevtoolsPane = "request" | "response" | "thinking" | "raw";
 
+const llmDevtoolsStorageKey = "vertex-llm-devtools";
+const defaultPanelSize = { width: 760, height: 520 };
+
+type LlmDevtoolsPreferences = {
+  activePane: LlmDevtoolsPane;
+  isMinimized: boolean;
+  isOpen: boolean;
+  panelSize: typeof defaultPanelSize;
+};
+
+const llmDevtoolsPanes = ["request", "response", "thinking", "raw"] as const satisfies readonly LlmDevtoolsPane[];
+
+function isLlmDevtoolsPane(value: unknown): value is LlmDevtoolsPane {
+  return typeof value === "string" && llmDevtoolsPanes.includes(value as LlmDevtoolsPane);
+}
+
+function clampPanelSize(width: number, height: number) {
+  if (typeof window === "undefined") return { width, height };
+  return {
+    width: Math.min(Math.max(width, 340), Math.max(340, window.innerWidth - 32)),
+    height: Math.min(Math.max(height, 320), Math.max(320, window.innerHeight - 32)),
+  };
+}
+
+function readLlmDevtoolsPreferences(): LlmDevtoolsPreferences {
+  const defaults: LlmDevtoolsPreferences = {
+    activePane: "request",
+    isMinimized: false,
+    isOpen: false,
+    panelSize: defaultPanelSize,
+  };
+  if (typeof window === "undefined") return defaults;
+
+  try {
+    const raw = window.localStorage.getItem(llmDevtoolsStorageKey);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as Partial<LlmDevtoolsPreferences>;
+    const rawPanelSize = parsed.panelSize;
+    const panelSize =
+      rawPanelSize &&
+      typeof rawPanelSize.width === "number" &&
+      Number.isFinite(rawPanelSize.width) &&
+      typeof rawPanelSize.height === "number" &&
+      Number.isFinite(rawPanelSize.height)
+        ? clampPanelSize(rawPanelSize.width, rawPanelSize.height)
+        : defaults.panelSize;
+    return {
+      activePane: isLlmDevtoolsPane(parsed.activePane) ? parsed.activePane : defaults.activePane,
+      isMinimized: typeof parsed.isMinimized === "boolean" ? parsed.isMinimized : defaults.isMinimized,
+      isOpen: typeof parsed.isOpen === "boolean" ? parsed.isOpen : defaults.isOpen,
+      panelSize,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
 export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [preferences, setPreferences] = useState(readLlmDevtoolsPreferences);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
-  const [activePane, setActivePane] = useState<LlmDevtoolsPane>("request");
   const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const devtoolsPanelRef = useRef<HTMLElement>(null);
+  const { activePane, isMinimized, isOpen, panelSize } = preferences;
 
   useEffect(() => {
     if (!selectedTraceId && traces[0]) setSelectedTraceId(traces[0].id);
@@ -20,6 +76,11 @@ export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
       setSelectedTraceId(traces[0].id);
     }
   }, [selectedTraceId, traces]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(llmDevtoolsStorageKey, JSON.stringify(preferences));
+  }, [preferences]);
 
   const selectedTrace = traces.find((trace) => trace.id === selectedTraceId) ?? traces[0] ?? null;
   const panes: Array<{ id: LlmDevtoolsPane; label: string }> = [
@@ -45,10 +106,10 @@ export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
     if (!start) return;
     const panel = devtoolsPanelRef.current;
     if (!panel) return;
-    const width = Math.min(Math.max(start.width + start.x - event.clientX, 340), Math.max(340, window.innerWidth - 32));
-    const height = Math.min(Math.max(start.height + start.y - event.clientY, 320), Math.max(320, window.innerHeight - 32));
+    const { width, height } = clampPanelSize(start.width + start.x - event.clientX, start.height + start.y - event.clientY);
     panel.style.width = `${width}px`;
     panel.style.height = `${height}px`;
+    setPreferences((current) => ({ ...current, panelSize: { width, height } }));
   }
 
   function handleResizeEnd(event: PointerEvent<HTMLButtonElement>) {
@@ -65,8 +126,7 @@ export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
         className="fixed right-4 bottom-4 z-50 grid size-11 place-items-center rounded-md border bg-card text-foreground shadow-lg transition-colors hover:bg-accent"
         type="button"
         onClick={() => {
-          setIsOpen(true);
-          setIsMinimized(false);
+          setPreferences((current) => ({ ...current, isMinimized: false, isOpen: true }));
         }}
       >
         <Bug className="size-5" />
@@ -80,10 +140,22 @@ export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
         <Bug className="size-4" />
         <span>LLM Devtools</span>
         {traces.length ? <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{traces.length}</span> : null}
-        <Button type="button" variant="ghost" size="icon" aria-label="Restore LLM devtools" onClick={() => setIsMinimized(false)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Restore LLM devtools"
+          onClick={() => setPreferences((current) => ({ ...current, isMinimized: false }))}
+        >
           <Maximize2 className="size-4" />
         </Button>
-        <Button type="button" variant="ghost" size="icon" aria-label="Close LLM devtools" onClick={() => setIsOpen(false)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Close LLM devtools"
+          onClick={() => setPreferences((current) => ({ ...current, isOpen: false }))}
+        >
           <X className="size-4" />
         </Button>
       </div>
@@ -95,6 +167,7 @@ export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
       ref={devtoolsPanelRef}
       aria-label="LLM devtools"
       className="fixed right-4 bottom-4 z-50 flex h-[520px] max-h-[calc(100vh-2rem)] min-h-80 w-[760px] max-w-[calc(100vw-2rem)] min-w-85 flex-col overflow-hidden rounded-md border bg-card text-card-foreground shadow-2xl"
+      style={{ height: panelSize.height, width: panelSize.width }}
     >
       <button
         aria-label="Resize LLM devtools"
@@ -117,10 +190,22 @@ export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
               : "No LLM calls captured yet"}
           </p>
         </div>
-        <Button type="button" variant="ghost" size="icon" aria-label="Minimize LLM devtools" onClick={() => setIsMinimized(true)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Minimize LLM devtools"
+          onClick={() => setPreferences((current) => ({ ...current, isMinimized: true }))}
+        >
           <Minimize2 className="size-4" />
         </Button>
-        <Button type="button" variant="ghost" size="icon" aria-label="Close LLM devtools" onClick={() => setIsOpen(false)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Close LLM devtools"
+          onClick={() => setPreferences((current) => ({ ...current, isOpen: false }))}
+        >
           <X className="size-4" />
         </Button>
       </header>
@@ -162,7 +247,7 @@ export function LlmDevtools({ traces }: { traces: LlmDevTrace[] }) {
                 )}
                 key={pane.id}
                 type="button"
-                onClick={() => setActivePane(pane.id)}
+                onClick={() => setPreferences((current) => ({ ...current, activePane: pane.id }))}
               >
                 {pane.label}
               </button>
