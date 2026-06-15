@@ -1,10 +1,12 @@
 import { env } from "cloudflare:workers";
+import type { SecondaryStorage } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { betterAuth } from "better-auth";
 import { admin, organization } from "better-auth/plugins";
 import { genericOAuth, type GenericOAuthConfig } from "better-auth/plugins/generic-oauth";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { vertexAccessControl, vertexAuthRoles } from "@/lib/auth-access-control";
+import { getCloudflareExecutionContext } from "@/lib/cloudflare-execution-context";
 import { storeMicrosoftGraphTokens, type MicrosoftTokenVaultEnv } from "@/lib/microsoft-token-vault";
 
 type EmailAddress = {
@@ -25,6 +27,7 @@ type SendEmailBinding = {
 };
 
 type AuthEnv = Env & {
+  AUTH_SECONDARY_STORAGE: KVNamespace;
   BETTER_AUTH_SECRET?: string;
   EMAIL?: SendEmailBinding;
   MICROSOFT_ENTRA_CLIENT_ID?: string;
@@ -38,6 +41,7 @@ const localDevSecret = "vertex-ai-local-dev-secret-change-before-production";
 const sender = { email: "noreply@rcormier.dev", name: "VertexAI" };
 const sessionExpiresInSeconds = 60 * 60 * 24 * 30;
 const sessionUpdateAgeSeconds = 60 * 60 * 24;
+const cloudflareKvMinimumTtlSeconds = 60;
 const localDevTrustedOrigins = Array.from({ length: 11 }, (_value, index) => {
   const port = 3000 + index;
   return [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
@@ -74,12 +78,30 @@ export function getAuth(request?: Request) {
 
   return betterAuth({
     database: runtimeEnv.DB,
+    secondaryStorage: createKvSecondaryStorage(runtimeEnv.AUTH_SECONDARY_STORAGE),
     secret: getAuthSecret(),
     baseURL: origin,
     trustedOrigins: origin ? Array.from(new Set([origin, ...localDevTrustedOrigins])) : localDevTrustedOrigins,
+    advanced: {
+      backgroundTasks: {
+        handler: (promise) => {
+          const executionContext = getCloudflareExecutionContext();
+          if (executionContext) {
+            executionContext.waitUntil(promise);
+            return;
+          }
+
+          void promise.catch((error) => {
+            console.error("Better Auth background task failed without a Cloudflare execution context.", error);
+          });
+        },
+      },
+    },
     session: {
       expiresIn: sessionExpiresInSeconds,
       updateAge: sessionUpdateAgeSeconds,
+      // Disabled for better-auth#4203: expired cookie caches can skip secondary storage refreshes and force valid users out.
+      cookieCache: { enabled: false },
     },
     emailAndPassword: {
       enabled: true,
@@ -169,6 +191,23 @@ export function getAuth(request?: Request) {
 }
 
 export type Auth = ReturnType<typeof getAuth>;
+
+function createKvSecondaryStorage(kv: KVNamespace): SecondaryStorage {
+  return {
+    get: (key) => kv.get(key),
+    set: async (key, value, ttl) => {
+      if (ttl === undefined) {
+        await kv.put(key, value);
+        return;
+      }
+
+      await kv.put(key, value, {
+        expirationTtl: Math.max(ttl, cloudflareKvMinimumTtlSeconds),
+      });
+    },
+    delete: (key) => kv.delete(key),
+  };
+}
 
 function getMicrosoftEntraPlugins() {
   const runtimeEnv = getRuntimeEnv();

@@ -10,6 +10,7 @@ import {
   type MicrosoftGraphWebhookJob,
 } from "./lib/microsoft-graph-webhooks";
 import { runScheduledTaskEngine } from "./lib/scheduled-tasks";
+import { runWithCloudflareExecutionContext } from "./lib/cloudflare-execution-context";
 
 export { ChatSyncRealtimeDurableObject } from "./lib/chat-sync";
 
@@ -18,18 +19,20 @@ webhookApp.post("/api/webhooks/asana", (c) => handleAsanaWebhookRequest(c.req.ra
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const url = new URL(request.url);
-    if (url.pathname === "/api/webhooks/asana") {
-      return webhookApp.fetch(request, env, ctx);
-    }
+    return runWithCloudflareExecutionContext(ctx, () => {
+      const url = new URL(request.url);
+      if (url.pathname === "/api/webhooks/asana") {
+        return webhookApp.fetch(request, env, ctx);
+      }
 
-    const requestOptions = {
-      context: {
-        cloudflare: { env, ctx },
-      },
-    } as unknown as Parameters<typeof serverEntry.fetch>[1];
+      const requestOptions = {
+        context: {
+          cloudflare: { env, ctx },
+        },
+      } as unknown as Parameters<typeof serverEntry.fetch>[1];
 
-    return serverEntry.fetch(request, requestOptions);
+      return serverEntry.fetch(request, requestOptions);
+    });
   },
 
   async queue(batch: MessageBatch<MicrosoftGraphWebhookJob | AsanaTaskSyncJob>, env: MicrosoftGraphWebhookEnv & AsanaTaskSyncEnv) {

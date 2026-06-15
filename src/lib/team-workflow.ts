@@ -7,6 +7,7 @@ import { getAuth } from "@/lib/auth";
 import { assertMutableChatThread, isReservedBriefingsTitle } from "@/lib/briefing-thread";
 import type { ChatOperationalEntity } from "@/lib/chat-entities";
 import { publishChatMessageInserts, type ChatMessageInsertEvent } from "@/lib/chat-sync";
+import { cachedD1Statement, runD1Batch } from "@/lib/d1-prepared";
 import { lightweightChatTitleModelId } from "@/lib/prompts";
 import { normalizeRiskEntities } from "@/lib/risk-contract";
 import {
@@ -124,6 +125,10 @@ function getDb() {
   const db = (env as Env).DB;
   if (!db) throw new Error("D1 binding DB is required.");
   return db;
+}
+
+function getPrepared(query: string) {
+  return cachedD1Statement(getDb(), query);
 }
 
 function currentClientId() {
@@ -636,14 +641,16 @@ export const createTeam = createServerFn({ method: "POST" })
     if (!name) throw new Error("Team name is required.");
     const id = `team-${crypto.randomUUID()}`;
     const now = Date.now();
-    await getDb()
-      .prepare("INSERT INTO teams (id, name, description, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(id, name, data.description?.trim() ?? "", user.id, now)
-      .run();
-    await getDb()
-      .prepare("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, ?, ?)")
-      .bind(id, user.id, "owner", now)
-      .run();
+    await runD1Batch(getDb(), [
+      getPrepared("INSERT INTO teams (id, name, description, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+        id,
+        name,
+        data.description?.trim() ?? "",
+        user.id,
+        now,
+      ),
+      getPrepared("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, ?, ?)").bind(id, user.id, "owner", now),
+    ]);
     await recordScopedMutation({
       entity: "team",
       entityId: id,
@@ -713,20 +720,21 @@ export const createScopedProject = createServerFn({ method: "POST" })
       .first<{ sortOrder: number }>();
 
     const id = projectId(name);
-    await getDb()
-      .prepare(
+    await runD1Batch(getDb(), [
+      getPrepared(
         `INSERT INTO projects (
           id, workspace_id, name, description, status, project_instructions,
           asana_task_status_source, asana_task_status_custom_field_gid,
           asana_task_status_custom_field_name, sort_order
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(id, workspace.id, name, description, data.status, "", "native", null, null, sort?.sortOrder ?? 1)
-      .run();
-    await getDb()
-      .prepare("INSERT OR IGNORE INTO project_members (project_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
-      .bind(id, user.id, data.mode === "Team" ? data.teamId : null, Date.now())
-      .run();
+      ).bind(id, workspace.id, name, description, data.status, "", "native", null, null, sort?.sortOrder ?? 1),
+      getPrepared("INSERT OR IGNORE INTO project_members (project_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)").bind(
+        id,
+        user.id,
+        data.mode === "Team" ? data.teamId : null,
+        Date.now(),
+      ),
+    ]);
     await recordScopedMutation({
       entity: "project",
       entityId: id,
@@ -863,10 +871,12 @@ export const deleteScopedProject = createServerFn({ method: "POST" })
       .first<{ id: string; workspaceId: string }>();
     if (!project) throw new Error("Project was not found.");
 
-    await getDb().prepare("DELETE FROM chats WHERE project_id = ?").bind(data.projectId).run();
-    await getDb().prepare("DELETE FROM scoped_invites WHERE scope = 'project' AND target_id = ?").bind(data.projectId).run();
-    await getDb().prepare("DELETE FROM project_members WHERE project_id = ?").bind(data.projectId).run();
-    await getDb().prepare("DELETE FROM projects WHERE id = ?").bind(data.projectId).run();
+    await runD1Batch(getDb(), [
+      getPrepared("DELETE FROM chats WHERE project_id = ?").bind(data.projectId),
+      getPrepared("DELETE FROM scoped_invites WHERE scope = 'project' AND target_id = ?").bind(data.projectId),
+      getPrepared("DELETE FROM project_members WHERE project_id = ?").bind(data.projectId),
+      getPrepared("DELETE FROM projects WHERE id = ?").bind(data.projectId),
+    ]);
     await recordScopedMutation({
       entity: "project",
       entityId: data.projectId,
@@ -1274,17 +1284,28 @@ export const createScopedChat = createServerFn({ method: "POST" })
       .first<{ sortOrder: number }>();
 
     const id = chatId(title);
-    await getDb()
-      .prepare("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, workspaceId, data.section === "project" ? data.projectId : null, data.section, title, description, sort?.sortOrder ?? 1)
-      .run();
-
+    const statements = [
+      getPrepared("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
+        id,
+        workspaceId,
+        data.section === "project" ? data.projectId : null,
+        data.section,
+        title,
+        description,
+        sort?.sortOrder ?? 1,
+      ),
+    ];
     if (data.section === "workspace") {
-      await getDb()
-        .prepare("INSERT INTO chat_members (chat_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
-        .bind(id, data.mode === "Team" ? null : user.id, data.mode === "Team" ? (data.teamId ?? null) : null, Date.now())
-        .run();
+      statements.push(
+        getPrepared("INSERT INTO chat_members (chat_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)").bind(
+          id,
+          data.mode === "Team" ? null : user.id,
+          data.mode === "Team" ? (data.teamId ?? null) : null,
+          Date.now(),
+        ),
+      );
     }
+    await runD1Batch(getDb(), statements);
     await recordScopedMutation({
       chatId: id,
       entity: "chat",
@@ -1402,9 +1423,8 @@ export const branchScopedChat = createServerFn({ method: "POST" })
     });
     const description = branchChatDescription(sourceMessage.text);
     const nextChatId = chatId(title);
-    await getDb()
-      .prepare("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(
+    const statements = [
+      getPrepared("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
         nextChatId,
         workspaceId,
         data.section === "project" ? data.projectId : null,
@@ -1412,14 +1432,18 @@ export const branchScopedChat = createServerFn({ method: "POST" })
         title,
         description,
         sort?.sortOrder ?? 1,
-      )
-      .run();
+      ),
+    ];
 
     if (data.section === "workspace") {
-      await getDb()
-        .prepare("INSERT INTO chat_members (chat_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
-        .bind(nextChatId, data.mode === "Team" ? null : user.id, data.mode === "Team" ? (data.teamId ?? null) : null, Date.now())
-        .run();
+      statements.push(
+        getPrepared("INSERT INTO chat_members (chat_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)").bind(
+          nextChatId,
+          data.mode === "Team" ? null : user.id,
+          data.mode === "Team" ? (data.teamId ?? null) : null,
+          Date.now(),
+        ),
+      );
     }
 
     const rootMessage: ChatMessage = {
@@ -1436,8 +1460,8 @@ export const branchScopedChat = createServerFn({ method: "POST" })
           : undefined,
       attachments: parseChatAttachments(sourceMessage.attachmentsJson),
     };
-    await getDb()
-      .prepare(
+    statements.push(
+      getPrepared(
         `INSERT INTO chat_messages (
           id,
           chat_id,
@@ -1455,7 +1479,7 @@ export const branchScopedChat = createServerFn({ method: "POST" })
           created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(
+        .bind(
         rootMessage.id,
         nextChatId,
         sourceMessage.id,
@@ -1470,8 +1494,9 @@ export const branchScopedChat = createServerFn({ method: "POST" })
         rootMessage.artifact?.meta ?? null,
         rootMessage.attachments?.length ? JSON.stringify(rootMessage.attachments) : null,
         new Date().toISOString(),
-      )
-      .run();
+        ),
+    );
+    await runD1Batch(getDb(), statements);
     await recordScopedMutation({
       chatId: nextChatId,
       entity: "chat",
@@ -1545,9 +1570,11 @@ export const deleteScopedChat = createServerFn({ method: "POST" })
 
     await assertChatIsMutable(data.chatId);
 
-    await getDb().prepare("DELETE FROM chat_members WHERE chat_id = ?").bind(data.chatId).run();
-    await getDb().prepare("DELETE FROM chat_messages WHERE chat_id = ?").bind(data.chatId).run();
-    await getDb().prepare("DELETE FROM chats WHERE id = ?").bind(data.chatId).run();
+    await runD1Batch(getDb(), [
+      getPrepared("DELETE FROM chat_members WHERE chat_id = ?").bind(data.chatId),
+      getPrepared("DELETE FROM chat_messages WHERE chat_id = ?").bind(data.chatId),
+      getPrepared("DELETE FROM chats WHERE id = ?").bind(data.chatId),
+    ]);
     await recordScopedMutation({
       chatId: data.chatId,
       entity: "chat",

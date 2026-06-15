@@ -3,6 +3,7 @@ import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import * as schema from "../../db/schema";
 import { runAiGateway } from "@/lib/ai-gateway";
 import { briefingsChatIdForProject, weeklyBriefingsChatDescription, weeklyBriefingsChatTitle } from "@/lib/briefing-thread";
+import { cachedPreparedQuery } from "@/lib/d1-prepared";
 import { recordRealtimeMutationEvent } from "@/lib/realtime-events";
 import {
   formatCustomInstructionTemplate,
@@ -359,7 +360,7 @@ function fallbackBriefing(
 }
 
 async function getProjectById(db: AppDb, projectId: string) {
-  const [projects] = await db.batch([
+  const query = cachedPreparedQuery(db, "dailyBriefings.projectById", () =>
     db
       .select({
         id: schema.projects.id,
@@ -372,14 +373,16 @@ async function getProjectById(db: AppDb, projectId: string) {
       })
       .from(schema.projects)
       .innerJoin(schema.workspaces, eq(schema.workspaces.id, schema.projects.workspaceId))
-      .where(eq(schema.projects.id, projectId))
-      .limit(1),
-  ]);
+      .where(eq(schema.projects.id, sql.placeholder("projectId")))
+      .limit(1)
+      .prepare(),
+  );
+  const projects = await query.execute({ projectId });
   return projects[0] as BriefingProjectRow | undefined;
 }
 
 async function listActiveOrgProjects(db: AppDb) {
-  const [projects] = await db.batch([
+  const query = cachedPreparedQuery(db, "dailyBriefings.activeOrgProjects", () =>
     db
       .select({
         id: schema.projects.id,
@@ -393,8 +396,10 @@ async function listActiveOrgProjects(db: AppDb) {
       .from(schema.projects)
       .innerJoin(schema.workspaces, eq(schema.workspaces.id, schema.projects.workspaceId))
       .where(and(eq(schema.workspaces.scope, "org"), inArray(schema.projects.status, ["Active", "In Progress", "Watch", "Blocked"])))
-      .orderBy(asc(schema.projects.sortOrder), asc(schema.projects.name)),
-  ]);
+      .orderBy(asc(schema.projects.sortOrder), asc(schema.projects.name))
+      .prepare(),
+  );
+  const projects = await query.execute();
   return projects as BriefingProjectRow[];
 }
 
@@ -447,13 +452,20 @@ async function getOrCreateBriefingsChat(db: AppDb, project: BriefingProjectRow) 
 }
 
 async function briefingExists(db: AppDb, chatId: string, marker: string) {
-  const [rows] = await db.batch([
+  const query = cachedPreparedQuery(db, "dailyBriefings.messageByMarker", () =>
     db
       .select({ id: schema.chatMessages.id })
       .from(schema.chatMessages)
-      .where(and(eq(schema.chatMessages.chatId, chatId), sql`${schema.chatMessages.body} LIKE ${`%${marker}%`}`))
-      .limit(1),
-  ]);
+      .where(
+        and(
+          eq(schema.chatMessages.chatId, sql.placeholder("chatId")),
+          sql`${schema.chatMessages.body} LIKE ${sql.placeholder("marker")}`,
+        ),
+      )
+      .limit(1)
+      .prepare(),
+  );
+  const rows = await query.execute({ chatId, marker: `%${marker}%` });
   return Boolean(rows[0]?.id);
 }
 

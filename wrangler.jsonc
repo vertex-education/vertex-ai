@@ -30,6 +30,10 @@
       "binding": "ASANA_WEBHOOK_SECRETS",
       "id": "3940400518f74a07acbe0beef0d46b8f",
     },
+    {
+      "binding": "AUTH_SECONDARY_STORAGE",
+      "id": "b4e5827c42164425b89f677a07c6cb1a",
+    },
   ],
   "r2_buckets": [
     {

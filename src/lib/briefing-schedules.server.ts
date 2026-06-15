@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../../db/schema";
 import { getAuth } from "@/lib/auth";
 import { briefingsChatIdForProject, weeklyBriefingsChatDescription, weeklyBriefingsChatTitle } from "@/lib/briefing-thread";
+import { cachedPreparedQuery } from "@/lib/d1-prepared";
 import { generateBriefingPreview } from "@/lib/daily-briefings";
 import type {
   BriefingPreviewResult,
@@ -263,7 +264,7 @@ export async function getBriefingSettingsSummaryForCurrentUser(): Promise<Briefi
 
   let scheduleRows: ScheduleRow[] = [];
   try {
-    const [rows] = await db.batch([
+    const query = cachedPreparedQuery(db, "briefingSchedules.byUser", () =>
       db
         .select({
           id: schema.briefingSchedules.id,
@@ -293,9 +294,11 @@ export async function getBriefingSettingsSummaryForCurrentUser(): Promise<Briefi
         .from(schema.briefingSchedules)
         .leftJoin(schema.projects, eq(schema.projects.id, schema.briefingSchedules.projectId))
         .leftJoin(schema.chats, eq(schema.chats.id, schema.briefingSchedules.chatId))
-        .where(eq(schema.briefingSchedules.userId, user.id))
-        .orderBy(asc(schema.briefingSchedules.title)),
-    ]);
+        .where(eq(schema.briefingSchedules.userId, sql.placeholder("userId")))
+        .orderBy(asc(schema.briefingSchedules.title))
+        .prepare(),
+    );
+    const rows = await query.execute({ userId: user.id });
     scheduleRows = rows as ScheduleRow[];
   } catch (error) {
     console.warn("[BriefingSchedules] Schedule table is not available yet; returning project options only.", {
@@ -330,16 +333,18 @@ export async function getBriefingSettingsSummaryForCurrentUser(): Promise<Briefi
 
 async function getProjectScope(projectId: string) {
   const db = getDb();
-  const [rows] = await db.batch([
+  const query = cachedPreparedQuery(db, "briefingProjects.byId", () =>
     db
       .select({
         id: schema.projects.id,
         workspaceId: schema.projects.workspaceId,
       })
       .from(schema.projects)
-      .where(eq(schema.projects.id, projectId))
-      .limit(1),
-  ]);
+      .where(eq(schema.projects.id, sql.placeholder("projectId")))
+      .limit(1)
+      .prepare(),
+  );
+  const rows = await query.execute({ projectId });
   const project = rows[0];
   if (!project) throw new Error("Choose a valid project for the briefing.");
   return project;

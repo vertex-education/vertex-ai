@@ -22,6 +22,7 @@ import { roleCanModifyState } from "@/lib/auth-access-control";
 import { getAuth } from "@/lib/auth";
 import { assertMutableChatThread } from "@/lib/briefing-thread";
 import { publishChatMessageInserts, type ChatMessageInsertEvent } from "@/lib/chat-sync";
+import { cachedD1Statement } from "@/lib/d1-prepared";
 import { recordRealtimeMutationEvent, type RealtimeInvalidationTarget } from "@/lib/realtime-events";
 import { xlsxBlobFromRows, type ExportTable } from "@/lib/chat-export";
 import type { ChatOperationalEntity } from "@/lib/chat-entities";
@@ -751,6 +752,10 @@ function getDb() {
   return db;
 }
 
+function getPrepared(query: string) {
+  return cachedD1Statement(getDb(), query);
+}
+
 function workspaceIdForMode(mode: WorkspaceMode) {
   return `ws-${scopeByMode[mode]}`;
 }
@@ -1087,8 +1092,7 @@ async function generateWorkflowSuggestionTitle(kind: "approval" | "decision" | "
 }
 
 async function getChatWorkspaceId(chatId: string) {
-  const chat = await getDb()
-    .prepare("SELECT workspace_id as workspaceId FROM chats WHERE id = ? LIMIT 1")
+  const chat = await getPrepared("SELECT workspace_id as workspaceId FROM chats WHERE id = ? LIMIT 1")
     .bind(chatId)
     .first<{ workspaceId: string }>();
   if (!chat) throw new Error("Chat was not found.");
@@ -1110,10 +1114,9 @@ async function persistChatMessage({
   message: ChatMessage;
   parentId?: string | null;
 }): Promise<ChatMessageInsertEvent> {
-  await getDb()
-    .prepare(
-      "INSERT INTO chat_messages (id, chat_id, parent_id, workspace_id, author, role, avatar, message_time, body, artifact_title, artifact_type, artifact_meta, attachments_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
+  await getPrepared(
+    "INSERT INTO chat_messages (id, chat_id, parent_id, workspace_id, author, role, avatar, message_time, body, artifact_title, artifact_type, artifact_meta, attachments_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
     .bind(
       message.id,
       chatId,
@@ -1143,10 +1146,9 @@ async function persistChatMessage({
 }
 
 async function listPersistedChatMessages(chatId: string) {
-  const result = await getDb()
-    .prepare(
-      "SELECT id, parent_id as parentId, author, role, avatar, message_time as time, body as text, attachments_json as attachmentsJson FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC",
-    )
+  const result = await getPrepared(
+    "SELECT id, parent_id as parentId, author, role, avatar, message_time as time, body as text, attachments_json as attachmentsJson FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC",
+  )
     .bind(chatId)
     .all<{
       id: string;
@@ -1905,8 +1907,7 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
     projectId: string | null;
   }>;
   try {
-    const result = await getDb()
-      .prepare(
+    const result = await getPrepared(
         `SELECT id,
                 workspace_id as workspaceId,
                 parent_artifact_id as parentArtifactId,
@@ -1924,8 +1925,7 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
                 version,
                 commit_message as commitMessage
          FROM artifacts`,
-      )
-      .all<(typeof rows)[number]>();
+    ).all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch {
     return root;
@@ -2006,8 +2006,7 @@ async function mergePersistedIdeas(root: PmoWorkspaceState) {
     pinned: boolean | number;
   }>;
   try {
-    const result = await getDb()
-      .prepare(
+    const result = await getPrepared(
         `SELECT id,
                 workspace_id as workspaceId,
                 project_id as projectId,
@@ -2029,8 +2028,7 @@ async function mergePersistedIdeas(root: PmoWorkspaceState) {
                 thread_json as threadJson,
                 pinned
          FROM ideas`,
-      )
-      .all<(typeof rows)[number]>();
+    ).all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch {
     return root;
@@ -2088,8 +2086,7 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
     asanaSyncError: string | null;
   }>;
   try {
-    const result = await getDb()
-      .prepare(
+    const result = await getPrepared(
         `SELECT id,
                 workspace_id as workspaceId,
                 kind,
@@ -2106,13 +2103,11 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
                 asana_sync_queued_at as asanaSyncQueuedAt,
                 asana_sync_error as asanaSyncError
          FROM workspace_actions`,
-      )
-      .all<(typeof rows)[number]>();
+    ).all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch (error) {
     if (!isMissingAsanaSyncColumnError(error)) return root;
-    const fallback = await getDb()
-      .prepare(
+    const fallback = await getPrepared(
         `SELECT id,
                 workspace_id as workspaceId,
                 kind,
@@ -2125,8 +2120,7 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
                 status,
                 pinned
          FROM workspace_actions`,
-      )
-      .all<Omit<(typeof rows)[number], "asanaTaskGid" | "asanaSyncedAt" | "asanaSyncQueuedAt" | "asanaSyncError">>();
+    ).all<Omit<(typeof rows)[number], "asanaTaskGid" | "asanaSyncedAt" | "asanaSyncQueuedAt" | "asanaSyncError">>();
     rows = (fallback.results ?? []).map(withDefaultAsanaSyncState);
   }
 
@@ -2195,8 +2189,7 @@ async function mergePersistedRisks(root: PmoWorkspaceState) {
     mitigationStrategy: string;
   }>;
   try {
-    const result = await getDb()
-      .prepare(
+    const result = await getPrepared(
         `SELECT id,
                 workspace_id as workspaceId,
                 project_id as projectId,
@@ -2206,8 +2199,7 @@ async function mergePersistedRisks(root: PmoWorkspaceState) {
                 status,
                 mitigation_strategy as mitigationStrategy
          FROM risks`,
-      )
-      .all<(typeof rows)[number]>();
+    ).all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch {
     return root;
@@ -2323,14 +2315,13 @@ export const fetchPmoWorkspace = createServerFn({ method: "GET" }).handler(async
 });
 
 async function persistIdea(mode: WorkspaceMode, idea: Idea, pinned: boolean) {
-  await getDb()
-    .prepare(
-      `INSERT OR REPLACE INTO ideas (
+  await getPrepared(
+    `INSERT OR REPLACE INTO ideas (
          id, workspace_id, project_id, title, original_text, status, category, owner, avatar,
          created_label, votes, impact, effort, confidence, summary, next_step,
          tags_json, metrics_json, thread_json, pinned
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
+  )
     .bind(
       idea.id,
       workspaceIdForMode(mode),
@@ -2357,12 +2348,11 @@ async function persistIdea(mode: WorkspaceMode, idea: Idea, pinned: boolean) {
 }
 
 async function persistWorkflowAction(mode: WorkspaceMode, kind: "approval" | "decision" | "task", item: Approval | Decision | Task) {
-  await getDb()
-    .prepare(
-      `INSERT OR REPLACE INTO workspace_actions (
+  await getPrepared(
+    `INSERT OR REPLACE INTO workspace_actions (
          id, workspace_id, kind, project_id, title, original_text, owner, due, source, status, pinned, asana_task_gid, asana_synced_at, asana_sync_queued_at, asana_sync_error, created_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
+  )
     .bind(
       item.id,
       workspaceIdForMode(mode),
@@ -2390,8 +2380,7 @@ async function updatePersistedWorkflowActionStatus(
   id: string,
   status: string,
 ) {
-  await getDb()
-    .prepare("UPDATE workspace_actions SET status = ? WHERE id = ? AND workspace_id = ? AND kind = ?")
+  await getPrepared("UPDATE workspace_actions SET status = ? WHERE id = ? AND workspace_id = ? AND kind = ?")
     .bind(status, id, workspaceIdForMode(mode), kind)
     .run();
 }
@@ -2401,9 +2390,8 @@ async function updatePersistedTaskAsanaSync(
   id: string,
   sync: { asanaTaskGid: string | null; asanaSyncedAt: number | null; asanaSyncQueuedAt: number | null; asanaSyncError: string | null },
 ) {
-  await getDb()
-    .prepare(
-      `UPDATE workspace_actions
+  await getPrepared(
+    `UPDATE workspace_actions
        SET asana_task_gid = ?,
            asana_synced_at = ?,
            asana_sync_queued_at = ?,
@@ -2411,15 +2399,14 @@ async function updatePersistedTaskAsanaSync(
        WHERE id = ?
          AND workspace_id = ?
          AND kind = 'task'`,
-    )
+  )
     .bind(sync.asanaTaskGid, sync.asanaSyncedAt, sync.asanaSyncQueuedAt, sync.asanaSyncError, id, workspaceIdForMode(mode))
     .run();
 }
 
 async function getPersistedTask(mode: WorkspaceMode, id: string): Promise<Task | null> {
-  const row = await getDb()
-    .prepare(
-      `SELECT id,
+  const row = await getPrepared(
+    `SELECT id,
               project_id as projectId,
               title,
               original_text as originalText,
@@ -2435,7 +2422,7 @@ async function getPersistedTask(mode: WorkspaceMode, id: string): Promise<Task |
          AND workspace_id = ?
          AND kind = 'task'
        LIMIT 1`,
-    )
+  )
     .bind(id, workspaceIdForMode(mode))
     .first<{
       id: string;
@@ -2468,8 +2455,7 @@ async function getPersistedTask(mode: WorkspaceMode, id: string): Promise<Task |
 }
 
 async function deletePersistedWorkflowAction(mode: WorkspaceMode, kind: "approval" | "decision" | "task", id: string) {
-  await getDb()
-    .prepare("DELETE FROM workspace_actions WHERE id = ? AND workspace_id = ? AND kind = ?")
+  await getPrepared("DELETE FROM workspace_actions WHERE id = ? AND workspace_id = ? AND kind = ?")
     .bind(id, workspaceIdForMode(mode), kind)
     .run();
 }
@@ -2480,8 +2466,7 @@ async function updatePersistedWorkflowActionPinned(
   id: string,
   pinned: boolean,
 ) {
-  await getDb()
-    .prepare("UPDATE workspace_actions SET pinned = ? WHERE id = ? AND workspace_id = ? AND kind = ?")
+  await getPrepared("UPDATE workspace_actions SET pinned = ? WHERE id = ? AND workspace_id = ? AND kind = ?")
     .bind(pinned ? 1 : 0, id, workspaceIdForMode(mode), kind)
     .run();
 }
