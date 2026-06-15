@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeMode, parseLastEventId, sseEncode } from "@/routes/api/events";
+import { createWorkspaceEventStreamErrorResponse } from "@/routes/sse/workspace-events";
 
 describe("mutation event stream helpers", () => {
   it("accepts only known workspace modes", () => {
@@ -21,5 +22,13 @@ describe("mutation event stream helpers", () => {
   it("encodes named SSE events with optional ids", () => {
     expect(sseEncode("mutation", 7, { ok: true })).toBe('id: 7\nevent: mutation\ndata: {"ok":true}\n\n');
     expect(sseEncode("stream-error", undefined, { message: "failed" })).toBe('event: stream-error\ndata: {"message":"failed"}\n\n');
+  });
+
+  it("returns stream errors as SSE responses", async () => {
+    const response = createWorkspaceEventStreamErrorResponse("failed");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/event-stream; charset=utf-8");
+    await expect(response.text()).resolves.toBe('event: stream-error\ndata: {"message":"failed"}\n\n');
   });
 });

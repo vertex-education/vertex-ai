@@ -17,6 +17,7 @@ import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProfileIndexRouteImport } from './routes/profile/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as SseWorkspaceEventsRouteImport } from './routes/sse/workspace-events'
 import { Route as ProfilePasswordRouteImport } from './routes/profile/password'
 import { Route as ProfileInvitesRouteImport } from './routes/profile/invites'
 import { Route as ProfileBriefingsRouteImport } from './routes/profile/briefings'
@@ -71,6 +72,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AdminRoute,
+} as any)
+const SseWorkspaceEventsRoute = SseWorkspaceEventsRouteImport.update({
+  id: '/sse/workspace-events',
+  path: '/sse/workspace-events',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ProfilePasswordRoute = ProfilePasswordRouteImport.update({
   id: '/password',
@@ -161,6 +167,7 @@ export interface FileRoutesByFullPath {
   '/profile/briefings': typeof ProfileBriefingsRoute
   '/profile/invites': typeof ProfileInvitesRoute
   '/profile/password': typeof ProfilePasswordRoute
+  '/sse/workspace-events': typeof SseWorkspaceEventsRoute
   '/admin/': typeof AdminIndexRoute
   '/profile/': typeof ProfileIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -183,6 +190,7 @@ export interface FileRoutesByTo {
   '/profile/briefings': typeof ProfileBriefingsRoute
   '/profile/invites': typeof ProfileInvitesRoute
   '/profile/password': typeof ProfilePasswordRoute
+  '/sse/workspace-events': typeof SseWorkspaceEventsRoute
   '/admin': typeof AdminIndexRoute
   '/profile': typeof ProfileIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -208,6 +216,7 @@ export interface FileRoutesById {
   '/profile/briefings': typeof ProfileBriefingsRoute
   '/profile/invites': typeof ProfileInvitesRoute
   '/profile/password': typeof ProfilePasswordRoute
+  '/sse/workspace-events': typeof SseWorkspaceEventsRoute
   '/admin/': typeof AdminIndexRoute
   '/profile/': typeof ProfileIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -234,6 +243,7 @@ export interface FileRouteTypes {
     | '/profile/briefings'
     | '/profile/invites'
     | '/profile/password'
+    | '/sse/workspace-events'
     | '/admin/'
     | '/profile/'
     | '/api/auth/$'
@@ -256,6 +266,7 @@ export interface FileRouteTypes {
     | '/profile/briefings'
     | '/profile/invites'
     | '/profile/password'
+    | '/sse/workspace-events'
     | '/admin'
     | '/profile'
     | '/api/auth/$'
@@ -280,6 +291,7 @@ export interface FileRouteTypes {
     | '/profile/briefings'
     | '/profile/invites'
     | '/profile/password'
+    | '/sse/workspace-events'
     | '/admin/'
     | '/profile/'
     | '/api/auth/$'
@@ -300,6 +312,7 @@ export interface RootRouteChildren {
   ApiChatEventsRoute: typeof ApiChatEventsRoute
   ApiEventsRoute: typeof ApiEventsRoute
   ApiScopedRagStreamRoute: typeof ApiScopedRagStreamRoute
+  SseWorkspaceEventsRoute: typeof SseWorkspaceEventsRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiGraphWebhooksRoute: typeof ApiGraphWebhooksRoute
   ApiAsanaOauthCallbackRoute: typeof ApiAsanaOauthCallbackRoute
@@ -363,6 +376,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/sse/workspace-events': {
+      id: '/sse/workspace-events'
+      path: '/sse/workspace-events'
+      fullPath: '/sse/workspace-events'
+      preLoaderRoute: typeof SseWorkspaceEventsRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/profile/password': {
       id: '/profile/password'
@@ -508,6 +528,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiChatEventsRoute: ApiChatEventsRoute,
   ApiEventsRoute: ApiEventsRoute,
   ApiScopedRagStreamRoute: ApiScopedRagStreamRoute,
+  SseWorkspaceEventsRoute: SseWorkspaceEventsRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiGraphWebhooksRoute: ApiGraphWebhooksRoute,
   ApiAsanaOauthCallbackRoute: ApiAsanaOauthCallbackRoute,

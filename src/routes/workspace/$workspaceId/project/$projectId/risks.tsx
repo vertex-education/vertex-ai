@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getSessionSnapshot } from "@/lib/auth-workflow";
+import { runServerMutation, mutationFailureMessage } from "@/lib/optimistic-mutations";
 import { generateRiskMitigation, listProjectRisks, type RiskRecord, type RiskSeverity } from "@/lib/risks";
 
 export const Route = createFileRoute("/workspace/$workspaceId/project/$projectId/risks")({
@@ -47,7 +48,7 @@ function ProjectRisksPage() {
   const [severityFilter, setSeverityFilter] = useState<RiskSeverity | "all">("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sorting, setSorting] = useState<SortingState>([{ id: "severity", desc: true }]);
-  const [message, setMessage] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
 
   const queryKey = ["risks", workspaceId, projectId] as const;
   const risksQuery = useQuery({
@@ -57,13 +58,49 @@ function ProjectRisksPage() {
   });
 
   const generateMutation = useMutation({
-    mutationFn: (riskId: string) => generateRiskMitigation({ data: { workspaceId, projectId, riskId } }),
-    onSuccess: async () => {
-      setMessage("Mitigation strategy generated and saved.");
-      await queryClient.invalidateQueries({ queryKey });
+    mutationFn: (riskId: string) =>
+      runServerMutation("Risk mitigation generation", () => generateRiskMitigation({ data: { workspaceId, projectId, riskId } })),
+    onMutate: async (riskId) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previousData = queryClient.getQueryData<typeof dashboard>(queryKey);
+      queryClient.setQueryData<typeof dashboard>(queryKey, (current) =>
+        current
+          ? {
+              ...current,
+              risks: current.risks.map((risk) =>
+                risk.id === riskId
+                  ? {
+                      ...risk,
+                      mitigationStrategy: risk.mitigationStrategy || "Generating mitigation strategy...",
+                      clientStatus: "pending",
+                    }
+                  : risk,
+              ),
+            }
+          : current,
+      );
+      setToastMessage("Generating mitigation strategy...");
+      return { previousData };
     },
-    onError: (error) => {
-      setMessage(error instanceof Error ? error.message : "Unable to generate mitigation.");
+    onSuccess: (updatedRisk) => {
+      queryClient.setQueryData<typeof dashboard>(queryKey, (current) =>
+        current
+          ? {
+              ...current,
+              risks: current.risks.map((risk) => (risk.id === updatedRisk.id ? updatedRisk : risk)),
+            }
+          : current,
+      );
+      setToastMessage("Mitigation strategy generated and saved.");
+    },
+    onError: (error, _riskId, context) => {
+      if (context?.previousData) queryClient.setQueryData(queryKey, context.previousData);
+      setToastMessage(
+        error instanceof Error ? error.message : mutationFailureMessage("Risk mitigation generation", "server mutation", error),
+      );
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey });
     },
   });
 
@@ -110,7 +147,12 @@ function ProjectRisksPage() {
         header: "Mitigation strategy",
         cell: ({ row }) => (
           <div className="prose prose-sm max-w-[38rem] text-foreground prose-headings:mb-2 prose-headings:mt-0 prose-p:my-1 prose-ul:my-1">
-            {row.original.mitigationStrategy ? (
+            {row.original.clientStatus === "pending" ? (
+              <div className="space-y-2">
+                <Badge variant="warning">Pending</Badge>
+                <p className="text-sm text-muted-foreground">Generating mitigation strategy...</p>
+              </div>
+            ) : row.original.mitigationStrategy ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{row.original.mitigationStrategy}</ReactMarkdown>
             ) : (
               <span className="text-muted-foreground">No mitigation generated yet.</span>
@@ -126,11 +168,13 @@ function ProjectRisksPage() {
             size="sm"
             variant="outline"
             onClick={() => generateMutation.mutate(row.original.id)}
-            disabled={!dashboardData.canGenerateMitigations || generateMutation.isPending}
+            disabled={!dashboardData.canGenerateMitigations || generateMutation.isPending || row.original.clientStatus === "pending"}
             title="Generate mitigation"
           >
             <Sparkles />
-            {generateMutation.isPending && generateMutation.variables === row.original.id ? "Generating" : "Generate Mitigation"}
+            {row.original.clientStatus === "pending" || (generateMutation.isPending && generateMutation.variables === row.original.id)
+              ? "Generating"
+              : "Generate Mitigation"}
           </Button>
         ),
       },
@@ -173,7 +217,7 @@ function ProjectRisksPage() {
           </div>
         </header>
 
-        {message ? <div className="rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground">{message}</div> : null}
+        {toastMessage ? <div className="rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground">{toastMessage}</div> : null}
 
         <Card>
           <CardHeader className="gap-1">

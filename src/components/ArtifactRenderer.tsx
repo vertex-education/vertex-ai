@@ -481,7 +481,13 @@ function InlineWorkflowAction({ action, workflowActions }: { action: ParsedWorkf
     <>
       <span>{resolved.title}</span>{" "}
       {resolved.id ? (
-        <CreatedIcon className="inline size-3.5 align-[-2px] text-primary" aria-label={`${workflowKindLabel(resolved.kind)} created`} />
+        isPending ? (
+          <span className="inline-flex items-center rounded-md border border-warning/35 bg-warning/10 px-1.5 py-0.5 text-[11px] font-medium text-warning">
+            Pending
+          </span>
+        ) : (
+          <CreatedIcon className="inline size-3.5 align-[-2px] text-primary" aria-label={`${workflowKindLabel(resolved.kind)} created`} />
+        )
       ) : (
         <InlineActionMenu action={resolved} canCreate={canCreate} isPending={isPending} workflowActions={workflowActions} />
       )}

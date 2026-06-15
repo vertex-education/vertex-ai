@@ -196,7 +196,7 @@ export function DetailPanel({
           icon={CheckCircle2}
           label="Task"
           title={task.title}
-          detail={`${task.owner} / ${task.source}${task.asanaTaskGid ? " / Synced to Asana" : ""}`}
+          detail={`${task.owner} / ${task.source}${task.clientStatus === "pending" ? " / Pending" : ""}${task.asanaTaskGid ? " / Synced to Asana" : ""}`}
           originalText={task.originalText}
           isPinned={Boolean(task.pinned)}
           canEdit={canEdit}

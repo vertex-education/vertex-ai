@@ -1,0 +1,24 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic "VertexAI" [ref=e5]:
+        - img [ref=e6]
+        - generic [ref=e7]: AI
+      - generic [ref=e8]: VertexAI
+      - generic [ref=e9]: Sign in with your invited account.
+    - generic [ref=e10]:
+      - button "Continue with Microsoft" [ref=e11] [cursor=pointer]:
+        - img
+        - text: Continue with Microsoft
+      - generic [ref=e14]: Email
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - text: Email
+          - textbox "Email" [ref=e18]
+        - generic [ref=e19]:
+          - text: Password
+          - generic [ref=e20]:
+            - textbox "Password" [ref=e21]
+            - button "Show password" [ref=e22] [cursor=pointer]:
+              - img
+        - button "Sign in" [ref=e23] [cursor=pointer]

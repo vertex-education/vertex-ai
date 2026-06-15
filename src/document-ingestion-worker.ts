@@ -6,4 +6,4 @@ export default {
   queue(batch: MessageBatch<DocumentIngestionJob>, env: DocumentIngestionEnv) {
     return handleDocumentIngestionQueue(batch, env);
   },
-};
+} satisfies ExportedHandler<DocumentIngestionEnv, DocumentIngestionJob>;

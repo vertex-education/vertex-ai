@@ -138,8 +138,9 @@ export const uploadArtifact = createServerFn({ method: "POST" })
     const artifactId = `artifact-${crypto.randomUUID()}`;
     const r2Key = createR2Key(scopeLevel, scopeId, originalFilename);
     const now = new Date().toISOString();
+    const fileBuffer = await file.arrayBuffer();
 
-    await getBucket().put(r2Key, file, {
+    await getBucket().put(r2Key, fileBuffer, {
       httpMetadata: {
         contentType: mimeType,
       },
@@ -190,18 +191,22 @@ export const uploadArtifact = createServerFn({ method: "POST" })
       )
       .run();
 
-    await getQueue().send({
-      artifactId,
-      r2Key,
-      originalFilename,
-      mimeType,
-      fileSize: file.size,
-      scopeLevel,
-      scopeId,
-      projectId,
-      documentType,
-      customTags,
-    });
+    await getQueue().send(
+      {
+        kind: "artifact-registry-upload",
+        artifactId,
+        r2Key,
+        originalFilename,
+        mimeType,
+        fileSize: file.size,
+        scopeLevel,
+        scopeId,
+        projectId,
+        documentType,
+        customTags,
+      },
+      { contentType: "json" },
+    );
 
     setResponseStatus(202);
 

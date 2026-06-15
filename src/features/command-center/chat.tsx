@@ -515,6 +515,7 @@ export function scopedRagStreamUrl(input: {
   workspaceId: string;
 }) {
   const params = new URLSearchParams({
+    stream: "scoped-rag",
     prompt: input.prompt,
     teamId: input.teamId,
     workspaceId: input.workspaceId,
@@ -524,7 +525,7 @@ export function scopedRagStreamUrl(input: {
     reasoningLevel: input.reasoningLevel,
     webSearchEnabled: input.webSearchEnabled ? "1" : "0",
   });
-  return `/api/scoped-rag-stream?${params.toString()}`;
+  return `/sse/workspace-events?${params.toString()}`;
 }
 
 export function parseScopedRagSsePayload(event: MessageEvent) {

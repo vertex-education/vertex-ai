@@ -83,12 +83,6 @@
     ],
     "consumers": [
       {
-        "queue": "document-ingestion-queue",
-        "max_batch_size": 5,
-        "max_batch_timeout": 30,
-        "max_retries": 3,
-      },
-      {
         "queue": "graph-webhook-notifications",
         "max_batch_size": 25,
         "max_batch_timeout": 5,

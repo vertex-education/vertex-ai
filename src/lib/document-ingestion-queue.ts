@@ -5,7 +5,7 @@ import { runTrackedAiGateway } from "@/lib/ai-gateway";
 export type ScopeLevel = "org" | "team" | "personal";
 
 export type RegistryDocumentIngestionJob = {
-  kind?: "artifact-registry-upload";
+  kind: "artifact-registry-upload";
   artifactId: string;
   r2Key: string;
   originalFilename: string;
@@ -32,6 +32,9 @@ type EmbeddingResponse = {
   data?: number[][];
 };
 
+type VectorMetadataValue = string | number | boolean | string[];
+type VectorMetadata = Record<string, VectorMetadataValue>;
+
 export type DocumentIngestionEnv = Env & {
   ARTIFACTS_BUCKET: R2Bucket;
   DB: D1Database;
@@ -42,6 +45,20 @@ export type DocumentIngestionEnv = Env & {
 const embeddingModelId = "@cf/baai/bge-large-en-v1.5";
 const maxChunkChars = 1_600;
 const embeddingBatchSize = 50;
+const maxVectorMetadataBytes = 2_048;
+const metadataEncoder = new TextEncoder();
+const stringMetadataTrimOrder = [
+  "custom_tags",
+  "document_name",
+  "r2_key",
+  "document_type",
+  "scope_id",
+  "project_id",
+  "team_id",
+  "artifact_id",
+  "chunk_id",
+];
+const removableMetadataKeys = ["custom_tags", "document_name", "r2_key", "document_type", "chunk_id", "artifact_id"];
 
 function fileExtension(fileName: string) {
   const match = fileName.toLowerCase().match(/\.([a-z0-9]{1,16})$/);
@@ -61,132 +78,51 @@ async function extractText(fileBuffer: ArrayBuffer, extension: string) {
   ].join("\n");
 }
 
-type MarkdownBlock = {
-  text: string;
-  kind: "code" | "text";
-};
-
 function isFenceLine(line: string) {
   const match = line.match(/^\s*(```+|~~~+)/);
   return match?.[1] ?? null;
 }
 
-function isTopLevelHeading(line: string) {
-  return /^#{1,3}\s+\S/.test(line);
+function isMarkdownHeading(line: string) {
+  return /^\s{0,3}#{1,6}\s+\S/.test(line);
 }
 
 function trimBlock(lines: string[]) {
   return lines.join("\n").trim();
 }
 
-function splitOversizedTextBlock(block: string) {
-  if (block.length <= maxChunkChars) return [block];
+type MarkdownSection = {
+  heading: string | null;
+  blocks: string[];
+};
 
-  const chunks: string[] = [];
-  let start = 0;
-
-  while (start < block.length) {
-    const hardEnd = Math.min(start + maxChunkChars, block.length);
-    if (hardEnd >= block.length) {
-      chunks.push(block.slice(start).trim());
-      break;
-    }
-
-    const candidate = block.slice(start, hardEnd);
-    const lineBreak = candidate.lastIndexOf("\n");
-    const sentenceBreak = candidate.lastIndexOf(". ");
-    const wordBreak = candidate.lastIndexOf(" ");
-    const breakAt = lineBreak > 200 ? lineBreak : sentenceBreak > 200 ? sentenceBreak + 1 : wordBreak > 200 ? wordBreak : candidate.length;
-
-    chunks.push(block.slice(start, start + breakAt).trim());
-    start += breakAt;
-    while (block[start] === "\n" || block[start] === " ") start += 1;
-  }
-
-  return chunks.filter(Boolean);
-}
-
-function splitSectionIntoSemanticBlocks(section: string) {
-  const lines = section.split("\n");
-  const blocks: MarkdownBlock[] = [];
-  let current: string[] = [];
+function parseMarkdownSections(text: string) {
+  const sections: MarkdownSection[] = [];
+  let currentSection: MarkdownSection = { heading: null, blocks: [] };
+  let currentBlock: string[] = [];
   let inCodeBlock = false;
   let fenceMarker: string | null = null;
 
-  const flush = () => {
-    const text = trimBlock(current);
-    if (text) blocks.push({ text, kind: inCodeBlock ? "code" : "text" });
-    current = [];
+  const flushBlock = () => {
+    const block = trimBlock(currentBlock);
+    if (block) currentSection.blocks.push(block);
+    currentBlock = [];
   };
 
-  for (const line of lines) {
-    const fence = isFenceLine(line);
-
-    if (fence && !inCodeBlock) {
-      flush();
-      inCodeBlock = true;
-      fenceMarker = fence[0];
-      current.push(line);
-      continue;
-    }
-
-    current.push(line);
-
-    if (fence && inCodeBlock && fence[0] === fenceMarker) {
-      flush();
-      inCodeBlock = false;
-      fenceMarker = null;
-      continue;
-    }
-
-    if (!inCodeBlock && line.trim() === "") {
-      flush();
-    }
-  }
-
-  flush();
-  return blocks;
-}
-
-function splitOversizedSection(section: string) {
-  const blocks = splitSectionIntoSemanticBlocks(section);
-  const chunks: string[] = [];
-  let current = "";
-
-  for (const block of blocks) {
-    const blockChunks = block.kind === "code" || block.text.length <= maxChunkChars ? [block.text] : splitOversizedTextBlock(block.text);
-
-    for (const blockChunk of blockChunks) {
-      if (!current) {
-        current = blockChunk;
-        continue;
-      }
-
-      const next = `${current}\n\n${blockChunk}`;
-      if (next.length <= maxChunkChars) {
-        current = next;
-      } else {
-        chunks.push(current);
-        current = blockChunk;
-      }
-    }
-  }
-
-  if (current) chunks.push(current);
-  return chunks;
-}
-
-export function chunkText(rawText: string) {
-  const text = rawText.replace(/\r\n/g, "\n").trim();
-  if (!text) return [];
-
-  const sections: string[] = [];
-  let current: string[] = [];
-  let inCodeBlock = false;
-  let fenceMarker: string | null = null;
+  const flushSection = () => {
+    flushBlock();
+    if (currentSection.heading || currentSection.blocks.length > 0) sections.push(currentSection);
+  };
 
   for (const line of text.split("\n")) {
     const fence = isFenceLine(line);
+
+    if (!inCodeBlock && isMarkdownHeading(line)) {
+      flushSection();
+      currentSection = { heading: line.trim(), blocks: [] };
+      continue;
+    }
+
     if (fence) {
       if (!inCodeBlock) {
         inCodeBlock = true;
@@ -197,18 +133,43 @@ export function chunkText(rawText: string) {
       }
     }
 
-    if (!inCodeBlock && isTopLevelHeading(line) && current.length > 0) {
-      sections.push(trimBlock(current));
-      current = [];
+    if (!inCodeBlock && line.trim() === "") {
+      flushBlock();
+      continue;
     }
 
-    current.push(line);
+    currentBlock.push(line);
   }
 
-  const tail = trimBlock(current);
-  if (tail) sections.push(tail);
+  flushSection();
+  return sections;
+}
 
-  return sections.flatMap((section) => (section.length <= maxChunkChars ? [section] : splitOversizedSection(section))).filter(Boolean);
+function chunkSection(section: MarkdownSection) {
+  if (section.blocks.length === 0) return section.heading ? [section.heading] : [];
+
+  const chunks: string[] = [];
+  let current = section.heading ?? "";
+
+  for (const block of section.blocks) {
+    const candidate = current ? `${current}\n\n${block}` : block;
+    if (!current || candidate.length <= maxChunkChars || current === section.heading) {
+      current = candidate;
+      continue;
+    }
+
+    chunks.push(current);
+    current = section.heading ? `${section.heading}\n\n${block}` : block;
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+export function chunkText(rawText: string) {
+  const text = rawText.replace(/\r\n/g, "\n").trim();
+  if (!text) return [];
+  return parseMarkdownSections(text).flatMap(chunkSection).filter(Boolean);
 }
 
 async function embedTexts(
@@ -287,6 +248,63 @@ export function inferSensitivityLabel({
   return values.some(isConfidentialTag) ? "Confidential" : "Standard";
 }
 
+export function vectorMetadataBytes(metadata: VectorMetadata) {
+  return metadataEncoder.encode(JSON.stringify(metadata)).byteLength;
+}
+
+function truncateStringToUtf8Bytes(value: string, maxBytes: number) {
+  if (maxBytes <= 0) return "";
+  if (metadataEncoder.encode(value).byteLength <= maxBytes) return value;
+
+  const chars = Array.from(value);
+  let low = 0;
+  let high = chars.length;
+
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const candidate = chars.slice(0, mid).join("");
+    if (metadataEncoder.encode(candidate).byteLength <= maxBytes) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return chars.slice(0, low).join("");
+}
+
+function shrinkStringMetadataKey(metadata: VectorMetadata, key: string, byteLimit: number) {
+  const value = metadata[key];
+  if (typeof value !== "string") return;
+
+  let nextValue = value;
+  while (nextValue && vectorMetadataBytes(metadata) > byteLimit) {
+    const overage = vectorMetadataBytes(metadata) - byteLimit;
+    const nextByteTarget = Math.max(0, metadataEncoder.encode(nextValue).byteLength - overage - 16);
+    const truncated = truncateStringToUtf8Bytes(nextValue, nextByteTarget);
+    metadata[key] = truncated;
+    if (truncated === nextValue) break;
+    nextValue = truncated;
+  }
+}
+
+export function clampVectorMetadata(metadata: VectorMetadata, byteLimit = maxVectorMetadataBytes): VectorMetadata {
+  const clamped: VectorMetadata = { ...metadata };
+  if (vectorMetadataBytes(clamped) <= byteLimit) return clamped;
+
+  for (const key of stringMetadataTrimOrder) {
+    shrinkStringMetadataKey(clamped, key, byteLimit);
+    if (vectorMetadataBytes(clamped) <= byteLimit) return clamped;
+  }
+
+  for (const key of removableMetadataKeys) {
+    if (key in clamped) delete clamped[key];
+    if (vectorMetadataBytes(clamped) <= byteLimit) return clamped;
+  }
+
+  throw new Error(`Vectorize metadata exceeds ${byteLimit} bytes after clamping.`);
+}
+
 async function updateArtifactStatus(
   env: DocumentIngestionEnv,
   artifactId: string,
@@ -349,7 +367,7 @@ async function processRegistryUploadJob(env: DocumentIngestionEnv, job: Registry
     rows.map((row) => ({
       id: row.vectorId,
       values: row.embedding,
-      metadata: {
+      metadata: clampVectorMetadata({
         artifact_id: job.artifactId,
         chunk_id: row.id,
         r2_key: job.r2Key,
@@ -362,7 +380,7 @@ async function processRegistryUploadJob(env: DocumentIngestionEnv, job: Registry
         confidentiality: sensitivityLabel,
         restricted,
         chunk_index: row.chunkIndex,
-      },
+      }),
     })),
   );
 
@@ -438,7 +456,7 @@ async function processScopedRagGeneratedArtifactJob(env: DocumentIngestionEnv, j
     rows.map((row) => ({
       id: row.id,
       values: row.embedding,
-      metadata: {
+      metadata: clampVectorMetadata({
         team_id: job.teamId,
         project_id: job.projectId,
         document_name: job.documentName,
@@ -446,7 +464,7 @@ async function processScopedRagGeneratedArtifactJob(env: DocumentIngestionEnv, j
         confidentiality: sensitivityLabel,
         restricted,
         chunk_index: row.chunkIndex,
-      },
+      }),
     })),
   );
 

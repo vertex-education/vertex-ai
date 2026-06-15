@@ -179,7 +179,11 @@ export function TasksTable({ tasks }: { tasks: Task[] }) {
       { accessorKey: "title", header: "Task" },
       { accessorKey: "owner", header: "Owner" },
       { accessorKey: "source", header: "Source" },
-      { accessorKey: "asanaTaskGid", header: "Asana Task" },
+      {
+        accessorKey: "asanaTaskGid",
+        header: "Asana Task",
+        cell: ({ row }) => (row.original.clientStatus === "pending" ? <Badge variant="warning">Pending</Badge> : row.original.asanaTaskGid),
+      },
     ],
     [],
   );

@@ -4,7 +4,6 @@ import serverEntry from "@tanstack/react-start/server-entry";
 import { Hono } from "hono";
 import { handleAsanaWebhookRequest } from "./lib/asana-webhook";
 import { runDailyProjectBriefings } from "./lib/daily-briefings";
-import { handleDocumentIngestionQueue, type DocumentIngestionEnv, type DocumentIngestionJob } from "./lib/document-ingestion-queue";
 import {
   processMicrosoftGraphWebhookJob,
   type MicrosoftGraphWebhookEnv,
@@ -12,9 +11,6 @@ import {
 } from "./lib/microsoft-graph-webhooks";
 
 export { ChatSyncRealtimeDurableObject } from "./lib/chat-sync";
-
-type AppQueueJob = DocumentIngestionJob | MicrosoftGraphWebhookJob;
-type AppQueueEnv = DocumentIngestionEnv & MicrosoftGraphWebhookEnv;
 
 const webhookApp = new Hono<{ Bindings: Env }>();
 webhookApp.post("/api/webhooks/asana", (c) => handleAsanaWebhookRequest(c.req.raw, c.env));
@@ -35,25 +31,20 @@ export default {
     return serverEntry.fetch(request, requestOptions);
   },
 
-  async queue(batch: MessageBatch<AppQueueJob>, env: AppQueueEnv) {
-    if (batch.queue === "graph-webhook-notifications") {
-      for (const message of batch.messages) {
-        try {
-          const job = message.body;
-          if (!isMicrosoftGraphWebhookJob(job)) throw new Error("Unexpected job body in Graph webhook queue.");
-          await processMicrosoftGraphWebhookJob(env, job);
-          message.ack();
-        } catch (error) {
-          console.error("Microsoft Graph webhook queue job failed.", {
-            error: error instanceof Error ? error.message : "Unknown queue failure",
-          });
-          message.retry();
-        }
+  async queue(batch: MessageBatch<MicrosoftGraphWebhookJob>, env: MicrosoftGraphWebhookEnv) {
+    for (const message of batch.messages) {
+      try {
+        const job = message.body;
+        if (!isMicrosoftGraphWebhookJob(job)) throw new Error("Unexpected job body in Graph webhook queue.");
+        await processMicrosoftGraphWebhookJob(env, job);
+        message.ack();
+      } catch (error) {
+        console.error("Microsoft Graph webhook queue job failed.", {
+          error: error instanceof Error ? error.message : "Unknown queue failure",
+        });
+        message.retry();
       }
-      return;
     }
-
-    return handleDocumentIngestionQueue(batch as MessageBatch<DocumentIngestionJob>, env);
   },
 
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
@@ -61,6 +52,7 @@ export default {
   },
 };
 
-function isMicrosoftGraphWebhookJob(job: AppQueueJob): job is MicrosoftGraphWebhookJob {
-  return "kind" in job && job.kind === "microsoft-graph-change-notification";
+function isMicrosoftGraphWebhookJob(job: unknown): job is MicrosoftGraphWebhookJob {
+  if (!job || typeof job !== "object" || !("kind" in job)) return false;
+  return job.kind === "microsoft-graph-change-notification";
 }

@@ -795,7 +795,7 @@ export function PinnedStrip({
               <span className="min-w-0">
                 <strong className="line-clamp-2 text-sm leading-snug">{task.title}</strong>
                 <em className="mt-0.5 block text-xs not-italic text-muted-foreground">
-                  Task / {task.asanaTaskGid ? "Synced" : "Not synced"}
+                  Task / {task.clientStatus === "pending" ? "Pending" : task.asanaTaskGid ? "Synced" : "Not synced"}
                 </em>
               </span>
             </button>

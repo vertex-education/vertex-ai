@@ -521,20 +521,23 @@ export function TaskView({
         const syncControl = getTaskAsanaSyncControlState({
           asanaTaskGid: task.asanaTaskGid,
           canEdit,
-          isSyncing: syncingTaskId === task.id,
+          isSyncing: syncingTaskId === task.id || task.clientStatus === "pending",
         });
         return {
           id: task.id,
           title: task.title,
           originalText: task.originalText,
-          meta: `${task.owner} / ${task.source}${task.asanaSyncError ? ` / Sync error: ${task.asanaSyncError}` : ""}`,
+          meta: `${task.owner} / ${task.source}${task.clientStatus === "pending" ? " / Pending" : ""}${task.asanaSyncError ? ` / Sync error: ${task.asanaSyncError}` : ""}`,
           pinned: task.pinned,
-          statusControl: syncControl.visible ? (
-            <Button type="button" variant="outline" size="sm" disabled={syncControl.disabled} onClick={() => onSyncToAsana(task.id)}>
-              {task.asanaTaskGid ? <CheckCircle2 /> : <UploadCloud />}
-              {syncControl.label}
-            </Button>
-          ) : null,
+          statusControl:
+            task.clientStatus === "pending" ? (
+              <Badge variant="warning">Pending</Badge>
+            ) : syncControl.visible ? (
+              <Button type="button" variant="outline" size="sm" disabled={syncControl.disabled} onClick={() => onSyncToAsana(task.id)}>
+                {task.asanaTaskGid ? <CheckCircle2 /> : <UploadCloud />}
+                {syncControl.label}
+              </Button>
+            ) : null,
         };
       }),
     [canEdit, onSyncToAsana, syncingTaskId, tasks],

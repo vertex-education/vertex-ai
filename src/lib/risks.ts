@@ -17,6 +17,7 @@ export type RiskRecord = {
   severity: RiskSeverity;
   status: string;
   mitigationStrategy: string;
+  clientStatus?: "pending";
 };
 
 export type RiskDashboard = {

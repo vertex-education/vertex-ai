@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
 import { type ChatMessageInsertEvent, type WorkspacePresenceUser } from "@/lib/chat-sync";
 import { type ChatOperationalEntity } from "@/lib/chat-entities";
+import { createOptimisticId, runServerMutation } from "@/lib/optimistic-mutations";
 import { cn } from "@/lib/utils";
 import { getScopedRisks, riskManagementHref } from "@/lib/risk-feature";
 import {
@@ -61,7 +62,6 @@ import {
   workspaceModes,
 } from "@/lib/pmo-data";
 import { type ChatWithScopedRagCitation } from "@/lib/rag";
-import { type RealtimeMutationEvent } from "@/lib/realtime-events";
 import {
   deleteScopedChat,
   deleteScopedProject,
@@ -97,20 +97,20 @@ import {
   type ToastLink,
   type TutorialStep,
   type WorkflowPreviewState,
+  addTaskToWorkspaceCache,
   appendChatMessageToCache,
   appendChatMessageToScopedChats,
   emptyScopedChatsResult,
   getDetailMetrics,
-  getRealtimeClientId,
   onboardingCompletedKey,
   onboardingRelaunchKey,
-  realtimeLastEventKey,
   removeOptimisticChatMessages,
   removeTaskFromWorkspaceCache,
   removeWorkflowItemFromWorkspaceCache,
   updateArtifactInWorkspaceCache,
   updateChatMessageInCache,
 } from "./shared";
+import { useWorkspaceEventSource } from "./use-workspace-events";
 import { CategoryTablePageSkeleton, DetailPanelSkeleton, ProjectNavSkeleton, WorkspaceMainSkeleton } from "./skeletons";
 import { LlmDevtools } from "./llm-devtools";
 import { Contextbar, PinnedStrip, PrimaryRail, ProjectNav, ScopeTabs, Topbar } from "./layout";
@@ -146,8 +146,6 @@ import {
 
 export function PMOCommandCenter({ session }: { session: CommandCenterSession }) {
   const queryClient = useQueryClient();
-  const realtimeClientIdRef = useRef("");
-  const realtimeSeenEventIdsRef = useRef<Set<number>>(new Set());
   const workspaceQuery = useSuspenseQuery(pmoWorkspaceQueryOptions());
   const teamsQuery = useSuspenseQuery({
     queryKey: ["my-teams"],
@@ -282,6 +280,12 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const canEdit = session.user.role === "admin" || session.user.role === "user";
+  useWorkspaceEventSource({
+    enabled: activeMode !== "Team" || Boolean(selectedTeam),
+    mode: activeMode,
+    teamId: activeMode === "Team" ? (selectedTeam?.id ?? null) : null,
+    userId: session.user.id,
+  });
 
   useEffect(() => {
     if (shareLinkHandledRef.current || typeof window === "undefined") return;
@@ -340,12 +344,12 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
       webSearchEnabled?: boolean;
       asanaSearchEnabled?: boolean;
       attachments?: ChatAttachment[];
-    }) => sendChatMessage({ data: input }),
+    }) => runServerMutation("Chat submission", () => sendChatMessage({ data: input })),
     onMutate: async (input) => {
       const queryKey = scopedChatsQueryKey;
       const conversationKey = getConversationKey(input.mode, input.projectId, input.chatId);
       const optimisticMessage: ChatMessage = {
-        id: `optimistic-user-${Date.now()}`,
+        id: createOptimisticId("optimistic-user"),
         author: "You",
         role: "user",
         avatar: avatarAlex,
@@ -371,9 +375,7 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
       focusChatComposer();
     },
     onError: (error, _input, context) => {
-      if (context?.previousScopedChats) {
-        queryClient.setQueryData(context.queryKey, context.previousScopedChats);
-      }
+      if (context) queryClient.setQueryData(context.queryKey, context.previousScopedChats ?? emptyScopedChatsResult);
       updateToast(error instanceof Error ? error.message : "Chat submission failed");
     },
     onSettled: async (_result, _error, _input, context) => {
@@ -528,14 +530,35 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
     },
   });
   const createTaskMutation = useMutation({
-    mutationFn: (input: CreateTaskInput) => createTaskFromSuggestion({ data: input }),
+    mutationFn: (input: CreateTaskInput) => runServerMutation("Create task", () => createTaskFromSuggestion({ data: input })),
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: pmoWorkspaceQueryKey });
+      const previousWorkspace = queryClient.getQueryData<PmoWorkspaceState>(pmoWorkspaceQueryKey);
+      const optimisticTask: Task = {
+        id: createOptimisticId("optimistic-task"),
+        projectId: input.projectId ?? null,
+        title: input.title.trim().slice(0, 140) || "New task",
+        originalText: input.originalText?.trim().slice(0, 1000) || input.title.trim().slice(0, 1000),
+        owner: input.owner?.trim().slice(0, 80) || "You",
+        source: input.source?.trim().slice(0, 96) || "VertexAI suggestion",
+        status: "Open",
+        clientStatus: "pending",
+      };
+      queryClient.setQueryData<PmoWorkspaceState>(pmoWorkspaceQueryKey, (current) =>
+        addTaskToWorkspaceCache(current, input.mode, optimisticTask),
+      );
+      setSelectedTaskId(optimisticTask.id);
+      return { previousWorkspace };
+    },
     onSuccess: (result) => {
       queryClient.setQueryData(pmoWorkspaceQueryKey, result.workspace);
+      setSelectedTaskId(result.task.id);
       if (!result.workspace.workspaces[activeMode].tasks.some((task) => task.id === result.task.id)) {
         updateToast("Task was created but is outside the current scope.");
       }
     },
-    onError: (error) => {
+    onError: (error, _input, context) => {
+      if (context?.previousWorkspace) queryClient.setQueryData(pmoWorkspaceQueryKey, context.previousWorkspace);
       updateToast(error instanceof Error ? error.message : "Could not create task.");
     },
     onSettled: async () => {
@@ -886,58 +909,6 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
 
     return () => events.close();
   }, [activeMode, queryClient, scopedChatsQueryKey, selectedTeam, session.user.email, session.user.id, session.user.name]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (activeMode === "Team" && !selectedTeam) return;
-
-    const clientId = getRealtimeClientId();
-    realtimeClientIdRef.current = clientId;
-    const teamId = activeMode === "Team" ? (selectedTeam?.id ?? null) : null;
-    const lastEventStorageKey = realtimeLastEventKey(activeMode, teamId, session.user.id);
-    const lastEventId = window.sessionStorage.getItem(lastEventStorageKey);
-    const params = new URLSearchParams({ mode: activeMode, clientId });
-    if (teamId) params.set("teamId", teamId);
-    if (lastEventId) params.set("lastEventId", lastEventId);
-
-    const events = new EventSource(`/api/events?${params.toString()}`);
-
-    events.addEventListener("mutation", (mutationEvent) => {
-      try {
-        const event = JSON.parse(mutationEvent.data) as RealtimeMutationEvent;
-        if (event.sourceClientId && event.sourceClientId === realtimeClientIdRef.current) return;
-        if (realtimeSeenEventIdsRef.current.has(event.id)) return;
-
-        realtimeSeenEventIdsRef.current.add(event.id);
-        if (realtimeSeenEventIdsRef.current.size > 500) {
-          const oldest = realtimeSeenEventIdsRef.current.values().next().value;
-          if (typeof oldest === "number") realtimeSeenEventIdsRef.current.delete(oldest);
-        }
-        window.sessionStorage.setItem(lastEventStorageKey, String(event.id));
-
-        if (event.invalidates.includes("workspace")) void invalidateWorkspace();
-        if (event.invalidates.includes("teams")) void invalidateTeams();
-        if (event.invalidates.includes("projects")) void invalidateProjects();
-        if (event.invalidates.includes("chats")) void invalidateChats();
-      } catch (error) {
-        console.warn("Could not apply realtime mutation event.", error);
-      }
-    });
-
-    events.addEventListener("stream-error", (errorEvent) => {
-      console.warn("Realtime event stream reported an error.", (errorEvent as MessageEvent).data);
-    });
-
-    events.onerror = () => {
-      if (events.readyState === EventSource.CLOSED) {
-        void invalidateWorkspace();
-        void invalidateProjects();
-        void invalidateChats();
-      }
-    };
-
-    return () => events.close();
-  }, [activeMode, queryClient, selectedTeam, session.user.id]);
 
   useEffect(() => {
     if (canEdit && activeTab === "Chat" && activeChatId) {
