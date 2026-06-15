@@ -1908,7 +1908,7 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
   }>;
   try {
     const result = await getPrepared(
-        `SELECT id,
+      `SELECT id,
                 workspace_id as workspaceId,
                 parent_artifact_id as parentArtifactId,
                 title,
@@ -2007,7 +2007,7 @@ async function mergePersistedIdeas(root: PmoWorkspaceState) {
   }>;
   try {
     const result = await getPrepared(
-        `SELECT id,
+      `SELECT id,
                 workspace_id as workspaceId,
                 project_id as projectId,
                 title,
@@ -2087,7 +2087,7 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
   }>;
   try {
     const result = await getPrepared(
-        `SELECT id,
+      `SELECT id,
                 workspace_id as workspaceId,
                 kind,
                 project_id as projectId,
@@ -2108,7 +2108,7 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
   } catch (error) {
     if (!isMissingAsanaSyncColumnError(error)) return root;
     const fallback = await getPrepared(
-        `SELECT id,
+      `SELECT id,
                 workspace_id as workspaceId,
                 kind,
                 project_id as projectId,
@@ -2190,7 +2190,7 @@ async function mergePersistedRisks(root: PmoWorkspaceState) {
   }>;
   try {
     const result = await getPrepared(
-        `SELECT id,
+      `SELECT id,
                 workspace_id as workspaceId,
                 project_id as projectId,
                 title,

@@ -457,10 +457,7 @@ async function briefingExists(db: AppDb, chatId: string, marker: string) {
       .select({ id: schema.chatMessages.id })
       .from(schema.chatMessages)
       .where(
-        and(
-          eq(schema.chatMessages.chatId, sql.placeholder("chatId")),
-          sql`${schema.chatMessages.body} LIKE ${sql.placeholder("marker")}`,
-        ),
+        and(eq(schema.chatMessages.chatId, sql.placeholder("chatId")), sql`${schema.chatMessages.body} LIKE ${sql.placeholder("marker")}`),
       )
       .limit(1)
       .prepare(),

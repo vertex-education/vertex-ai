@@ -1285,15 +1285,9 @@ export const createScopedChat = createServerFn({ method: "POST" })
 
     const id = chatId(title);
     const statements = [
-      getPrepared("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
-        id,
-        workspaceId,
-        data.section === "project" ? data.projectId : null,
-        data.section,
-        title,
-        description,
-        sort?.sortOrder ?? 1,
-      ),
+      getPrepared(
+        "INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(id, workspaceId, data.section === "project" ? data.projectId : null, data.section, title, description, sort?.sortOrder ?? 1),
     ];
     if (data.section === "workspace") {
       statements.push(
@@ -1424,7 +1418,9 @@ export const branchScopedChat = createServerFn({ method: "POST" })
     const description = branchChatDescription(sourceMessage.text);
     const nextChatId = chatId(title);
     const statements = [
-      getPrepared("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
+      getPrepared(
+        "INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(
         nextChatId,
         workspaceId,
         data.section === "project" ? data.projectId : null,
@@ -1478,8 +1474,7 @@ export const branchScopedChat = createServerFn({ method: "POST" })
           attachments_json,
           created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-        .bind(
+      ).bind(
         rootMessage.id,
         nextChatId,
         sourceMessage.id,
@@ -1494,7 +1489,7 @@ export const branchScopedChat = createServerFn({ method: "POST" })
         rootMessage.artifact?.meta ?? null,
         rootMessage.attachments?.length ? JSON.stringify(rootMessage.attachments) : null,
         new Date().toISOString(),
-        ),
+      ),
     );
     await runD1Batch(getDb(), statements);
     await recordScopedMutation({

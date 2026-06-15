@@ -20,10 +20,7 @@ export function cachedD1Statement(db: D1Database, query: string) {
   return statement;
 }
 
-export async function runD1Batch<T = unknown>(
-  db: D1Database,
-  statements: D1PreparedStatement[],
-): Promise<D1BatchResponse<T>> {
+export async function runD1Batch<T = unknown>(db: D1Database, statements: D1PreparedStatement[]): Promise<D1BatchResponse<T>> {
   // D1 batches are implicit SQL transactions: statements execute in order, and a failure rolls back the batch.
   return db.batch<T>(statements);
 }
