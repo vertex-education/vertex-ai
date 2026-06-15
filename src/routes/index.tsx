@@ -1,17 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
+  Archive,
   ArrowRight,
+  Bell,
   Bot,
-  BrainCircuit,
   CalendarCheck2,
   CheckCircle2,
+  ClipboardList,
   FileText,
+  FolderOpen,
   Layers3,
+  Lightbulb,
   LockKeyhole,
+  MessageCircle,
   MessageSquareText,
+  PanelRightOpen,
+  Paperclip,
+  Search,
   SearchCheck,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -37,19 +47,19 @@ const capabilityCards: Array<{
   icon: LucideIcon;
 }> = [
   {
-    title: "Project intelligence",
-    body: "Bring project notes, files, tasks, and decisions into one working view so teams can see what needs attention.",
-    icon: BrainCircuit,
+    title: "Workspace shell",
+    body: "A persistent rail, topbar search, scope tabs, and project navigation keep the main work surface stable.",
+    icon: Layers3,
   },
   {
-    title: "Guided AI workflows",
-    body: "Draft briefs, surface risks, summarize context, and turn team activity into practical next steps.",
-    icon: Bot,
+    title: "Chat and actions",
+    body: "The chat surface keeps reasoning controls, workspace context, attachments, and follow-up actions close together.",
+    icon: MessageCircle,
   },
   {
-    title: "Final artifacts",
-    body: "Keep the important documents, decks, spreadsheets, and outputs close to the work that created them.",
-    icon: FileText,
+    title: "Pinned outputs",
+    body: "Pinned ideas, decisions, approvals, tasks, risks, and artifacts stay visible above the active workspace tab.",
+    icon: Archive,
   },
 ];
 
@@ -83,7 +93,7 @@ function VertexAIHomePage() {
       </header>
 
       <section className="landing-grid-background relative border-y border-[#C0C3C2]/50">
-        <div className="mx-auto grid min-h-[calc(100svh-96px)] max-w-7xl items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(480px,1.1fr)] lg:px-8 lg:py-14">
+        <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-10 sm:px-6 lg:min-h-[calc(100svh-190px)] lg:grid-cols-[minmax(0,0.82fr)_minmax(600px,1.18fr)] lg:px-8 lg:py-14">
           <div className="relative z-10 max-w-3xl space-y-7">
             <Badge className="border-[#CBA052]/35 bg-[#CBA052]/15 text-[#003865]" variant="outline">
               Coming Soon
@@ -106,7 +116,7 @@ function VertexAIHomePage() {
                 Wider access is coming soon.
               </span>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="hidden gap-3 sm:grid sm:grid-cols-3">
               {previewTiles.map(({ icon: Icon, label, value }) => (
                 <div key={label} className="rounded-md border border-[#C0C3C2]/70 bg-white/90 p-4 shadow-sm">
                   <Icon className="mb-3 size-5 text-[#003865]" />
@@ -183,41 +193,67 @@ function VertexAIHomePage() {
 }
 
 function HeroMockup() {
+  const railItems = [
+    { label: "Workspaces", icon: FolderOpen, active: true },
+    { label: "Chats", icon: MessageCircle },
+    { label: "Ideas", icon: Lightbulb },
+    { label: "Artifacts", icon: Archive },
+    { label: "Risks", icon: ShieldAlert },
+  ];
+
   return (
-    <div className="landing-float-slow relative z-10 mx-auto w-full max-w-2xl">
+    <div className="landing-float-slow relative z-10 mx-auto hidden w-full max-w-[720px] lg:block">
       <div className="landing-flow-line left-4 top-8 hidden lg:block" />
       <div className="landing-flow-line landing-flow-line-delay bottom-18 right-8 hidden lg:block" />
       <div className="overflow-hidden rounded-md border border-[#003865]/15 bg-white shadow-2xl shadow-[#003865]/18">
-        <div className="flex items-center justify-between border-b border-[#C0C3C2]/50 bg-[#f8fafb] px-4 py-3">
-          <div className="flex items-center gap-2">
-            <span className="size-2.5 rounded-full bg-[#CBA052]" />
-            <span className="size-2.5 rounded-full bg-[#C0C3C2]" />
-            <span className="size-2.5 rounded-full bg-[#2DA44A]" />
-          </div>
-          <span className="text-xs font-bold text-[#707372]">Project Studio</span>
-        </div>
-        <div className="grid min-h-[430px] bg-white sm:grid-cols-[170px_minmax(0,1fr)]">
-          <aside className="hidden border-r border-[#C0C3C2]/45 bg-[#f8fafb] p-4 sm:block">
-            <div className="mb-4 h-2 w-24 rounded-full bg-[#003865]/20" />
-            {["Workspaces", "Chats", "Ideas", "Artifacts"].map((item, index) => (
-              <div
-                key={item}
-                className={`mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold ${
-                  index === 0 ? "bg-[#003865] text-white" : "text-[#707372]"
-                }`}
+        <div className="grid min-h-[520px] grid-cols-[56px_minmax(0,1fr)] bg-white">
+          <aside className="flex min-h-0 flex-col items-center gap-2 bg-[#003865] px-2 py-3 text-white">
+            <span className="mb-2 grid size-10 place-items-center rounded-md bg-white">
+              <img alt="" className="size-7" src="/vertex-mountain-blue.svg" />
+            </span>
+            {railItems.map(({ active, icon: Icon, label }) => (
+              <span
+                key={label}
+                className={`grid size-10 place-items-center rounded-md ${active ? "bg-white/18 text-white" : "text-white/72"}`}
+                title={label}
               >
-                <span className={`size-2 rounded-full ${index === 0 ? "bg-[#CBA052]" : "bg-[#C0C3C2]"}`} />
-                {item}
-              </div>
+                <Icon className="size-4" />
+              </span>
             ))}
+            <span className="mt-auto grid size-8 place-items-center rounded-full border border-white/35 bg-white/12 text-xs font-bold">
+              RC
+            </span>
           </aside>
 
-          <div className="grid min-w-0 grid-rows-[auto_minmax(0,1fr)_auto]">
-            <div className="border-b border-[#C0C3C2]/45 px-4 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold text-[#707372]">Team workspace</p>
-                  <p className="font-heading text-xl font-bold text-[#003865]">Launch readiness</p>
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-white">
+            <div className="grid min-h-14 grid-cols-[160px_minmax(0,1fr)_auto] items-center gap-3 border-b border-[#C0C3C2]/50 bg-white px-4">
+              <VertexAIBrand logoClassName="h-6 w-fit" aiClassName="text-lg text-[#003865]" />
+              <div className="flex h-8 min-w-0 items-center gap-2 rounded-md border border-[#C0C3C2]/65 bg-[#f8fafb] px-3 text-xs text-[#707372]">
+                <Search className="size-3.5 text-[#003865]" />
+                Search workspace knowledge
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="flex -space-x-1">
+                  <span className="grid size-6 place-items-center rounded-full border-2 border-white bg-[#003865] text-[9px] font-bold text-white">
+                    RC
+                  </span>
+                  <span className="grid size-6 place-items-center rounded-full border-2 border-white bg-[#CBA052] text-[9px] font-bold text-[#003865]">
+                    AI
+                  </span>
+                </span>
+                <Bell className="size-4 text-[#003865]" />
+              </div>
+            </div>
+
+            <div className="border-b border-[#C0C3C2]/50 bg-white px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 space-y-2">
+                  <div className="inline-flex overflow-hidden rounded-md border border-[#C0C3C2]/70 text-xs font-semibold">
+                    <span className="bg-[#003865] px-3 py-1.5 text-white">Personal</span>
+                    <span className="px-3 py-1.5 text-[#707372]">Team</span>
+                    <span className="px-3 py-1.5 text-[#707372]">Org</span>
+                  </div>
+                  <p className="truncate text-xs font-semibold text-[#707372]">Location / Team Vertex / Launch readiness</p>
                 </div>
                 <Badge className="border-[#2DA44A]/30 bg-[#2DA44A]/10 text-[#2DA44A]" variant="outline">
                   Live context
@@ -225,45 +261,132 @@ function HeroMockup() {
               </div>
             </div>
 
-            <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_190px]">
-              <div className="min-w-0 space-y-3">
-                <MockMessage
-                  icon={MessageSquareText}
-                  title="What changed this week?"
-                  body="3 decisions, 2 risks, and 4 artifact updates need review."
-                />
-                <MockMessage
-                  icon={Sparkles}
-                  title="Suggested next step"
-                  body="Prepare a short steering update with blockers and owner asks."
-                  active
-                />
-                <div className="rounded-md border border-[#C0C3C2]/55 bg-[#f8fafb] p-3">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-sm font-bold text-[#003865]">Generated artifact</p>
-                    <CheckCircle2 className="size-4 text-[#2DA44A]" />
+            <div className="grid min-h-0 flex-1 grid-cols-[170px_minmax(0,1fr)_190px] bg-white">
+              <aside className="min-h-0 border-r border-[#C0C3C2]/50 bg-[#f8fafb] p-3">
+                <div className="mb-2 flex items-center justify-between px-1 text-[10px] font-bold text-[#707372]">
+                  <span>PERSONAL PROJECTS</span>
+                  <span className="grid size-5 place-items-center rounded-md bg-white text-[#003865]">+</span>
+                </div>
+                <ProjectNavRow active icon={FolderOpen} label="Launch readiness" />
+                <ProjectNavRow icon={MessageCircle} inset label="Steering update" />
+                <ProjectNavRow icon={MessageCircle} inset label="Weekly status" />
+                <ProjectNavRow icon={FolderOpen} label="AI governance" />
+                <div className="mt-4 px-1 text-[10px] font-bold text-[#707372]">GENERAL CHATS</div>
+                <ProjectNavRow icon={MessageCircle} label="Workspace chat" />
+              </aside>
+
+              <section className="flex min-h-0 min-w-0 flex-col border-r border-[#C0C3C2]/50">
+                <div className="border-b border-[#C0C3C2]/45 bg-white px-3 py-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-[#707372]">PINNED ITEMS</span>
+                    <span className="text-[10px] font-semibold text-[#707372]">Current view</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <PinnedPreview icon={Lightbulb} label="Idea" title="Launch playbook" />
+                    <PinnedPreview icon={FileText} label="Artifact" title="Exec briefing" />
+                    <PinnedPreview icon={CheckCircle2} label="Task" title="Sync owners" />
+                  </div>
+                </div>
+
+                <div className="border-b border-[#C0C3C2]/45 bg-white px-3">
+                  <div className="flex h-10 items-end gap-4 text-xs font-semibold">
+                    {["Chat", "Ideas", "Artifacts", "Decisions", "Tasks"].map((tab, index) => (
+                      <span
+                        key={tab}
+                        className={`h-10 border-b-2 pt-3 ${index === 0 ? "border-[#003865] text-[#003865]" : "border-transparent text-[#707372]"}`}
+                      >
+                        {tab}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 space-y-2 overflow-hidden bg-[#f8fafb] p-3">
+                  <MockMessage icon={MessageSquareText} title="Roger" body="What changed this week on launch readiness?" />
+                  <MockMessage
+                    active
+                    icon={Bot}
+                    title="VertexAI"
+                    body="I found 3 decisions, 2 risks, and a draft executive update ready to review."
+                  />
+                  <div className="rounded-md border border-[#C0C3C2]/55 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-bold text-[#003865]">Reasoning</span>
+                      <span className="rounded-md bg-[#003865] px-2 py-1 text-[10px] font-bold text-white">Medium</span>
+                    </div>
+                    <div className="flex gap-2 text-[10px] font-bold text-[#707372]">
+                      <span className="rounded-full border border-[#C0C3C2] bg-[#f8fafb] px-2 py-1">Web Off</span>
+                      <span className="rounded-full border border-[#C0C3C2] bg-[#f8fafb] px-2 py-1">Asana On</span>
+                      <span className="rounded-full border border-[#C0C3C2] bg-[#f8fafb] px-2 py-1">8k tokens</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-[#C0C3C2]/45 bg-white p-3">
+                  <div className="grid grid-cols-[1fr_28px_34px] items-center gap-2 rounded-md border border-[#C0C3C2]/65 bg-white p-2 text-xs text-[#707372]">
+                    <span className="flex items-center gap-2">
+                      <Zap className="size-3.5 text-[#003865]" />
+                      Message VertexAI about Launch readiness
+                    </span>
+                    <Paperclip className="size-4 text-[#003865]" />
+                    <span className="grid size-8 place-items-center rounded-md bg-[#003865] text-white">
+                      <ArrowRight className="size-4" />
+                    </span>
+                  </div>
+                </div>
+              </section>
+
+              <aside className="min-h-0 bg-white p-3">
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold text-[#707372]">DETAIL PANEL</p>
+                    <p className="font-heading text-sm font-bold text-[#003865]">Launch readiness</p>
+                  </div>
+                  <PanelRightOpen className="size-4 text-[#003865]" />
+                </div>
+                <MiniMetric label="Pinned outputs" value="6" icon={FileText} />
+                <MiniMetric label="Open risks" value="4" icon={ShieldAlert} />
+                <MiniMetric label="Team actions" value="12" icon={CalendarCheck2} />
+                <div className="mt-3 rounded-md border border-[#C0C3C2]/55 bg-[#f8fafb] p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-bold text-[#003865]">
+                    <LockKeyhole className="size-3.5" />
+                    Scope guardrails
                   </div>
                   <div className="landing-pulse-bar mb-2 h-2 rounded-full bg-[#003865]/18" />
                   <div className="landing-pulse-bar landing-pulse-delay h-2 w-3/4 rounded-full bg-[#CBA052]/35" />
                 </div>
-              </div>
-
-              <div className="grid gap-3">
-                <MiniMetric label="Pinned outputs" value="6" icon={FileText} />
-                <MiniMetric label="Risks watched" value="4" icon={ShieldCheck} />
-                <MiniMetric label="Team actions" value="12" icon={CalendarCheck2} />
-              </div>
+              </aside>
             </div>
-
-            <div className="border-t border-[#C0C3C2]/45 bg-[#f8fafb] p-4">
-              <div className="flex items-center gap-3 rounded-md border border-[#C0C3C2]/55 bg-white px-3 py-2 text-sm text-[#707372]">
-                <LockKeyhole className="size-4 text-[#003865]" />
-                Private preview workspace
-              </div>
-            </div>
-          </div>
+          </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ProjectNavRow({ active, icon: Icon, inset, label }: { active?: boolean; icon: LucideIcon; inset?: boolean; label: string }) {
+  return (
+    <div className={`${inset ? "ml-3 border-l border-[#C0C3C2]/70 pl-2" : ""}`}>
+      <span
+        className={`mt-1 flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-xs font-semibold ${
+          active ? "bg-white text-[#003865] shadow-sm" : "text-[#707372]"
+        }`}
+      >
+        <Icon className="size-3.5 shrink-0" />
+        <span className="truncate">{label}</span>
+      </span>
+    </div>
+  );
+}
+
+function PinnedPreview({ icon: Icon, label, title }: { icon: LucideIcon; label: string; title: string }) {
+  return (
+    <div className="rounded-md border border-[#C0C3C2]/60 bg-[#f8fafb] p-2">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold text-[#707372]">
+        <Icon className="size-3 text-[#003865]" />
+        {label}
+      </div>
+      <p className="truncate text-xs font-bold text-[#003865]">{title}</p>
     </div>
   );
 }
@@ -310,12 +433,56 @@ function CapabilityCard({ body, icon: Icon, index, title }: { body: string; icon
       </div>
       <h3 className="font-heading text-xl font-bold text-[#003865]">{title}</h3>
       <p className="mt-3 text-sm leading-6 text-[#404342]">{body}</p>
-      <div className="mt-5 grid gap-2">
-        <span className="h-2 rounded-full bg-[#003865]/12" />
-        <span className="h-2 w-4/5 rounded-full bg-[#707372]/18" />
-        <span className="h-2 w-3/5 rounded-full bg-[#CBA052]/35" />
-      </div>
+      <CapabilityPreview index={index} />
     </article>
+  );
+}
+
+function CapabilityPreview({ index }: { index: number }) {
+  if (index === 0) {
+    return (
+      <div className="mt-5 overflow-hidden rounded-md border border-[#C0C3C2]/55 bg-white">
+        <div className="flex h-8 items-center gap-2 border-b border-[#C0C3C2]/45 px-2">
+          <span className="size-5 rounded-md bg-[#003865]" />
+          <span className="h-2 w-24 rounded-full bg-[#003865]/18" />
+          <span className="ml-auto h-2 w-16 rounded-full bg-[#707372]/20" />
+        </div>
+        <div className="grid grid-cols-[58px_minmax(0,1fr)]">
+          <div className="grid gap-1 bg-[#003865] p-2">
+            <span className="size-6 rounded-md bg-white/20" />
+            <span className="size-6 rounded-md bg-white/10" />
+            <span className="size-6 rounded-md bg-white/10" />
+          </div>
+          <div className="space-y-2 p-2">
+            <span className="block h-6 rounded-md bg-[#003865]/10" />
+            <span className="block h-6 rounded-md bg-[#C0C3C2]/25" />
+            <span className="block h-6 rounded-md bg-[#CBA052]/20" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (index === 1) {
+    return (
+      <div className="mt-5 grid gap-2 rounded-md border border-[#C0C3C2]/55 bg-white p-2">
+        <MockMessage icon={MessageSquareText} title="User" body="Summarize current blockers." />
+        <MockMessage active icon={Bot} title="VertexAI" body="2 risks and 1 owner ask found." />
+        <div className="flex items-center gap-2 rounded-md border border-[#C0C3C2]/55 bg-[#f8fafb] px-2 py-1.5 text-[10px] font-bold text-[#707372]">
+          <Zap className="size-3 text-[#003865]" />
+          Reasoning
+          <span className="ml-auto rounded-md bg-[#003865] px-1.5 py-0.5 text-white">Med</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 grid gap-2 rounded-md border border-[#C0C3C2]/55 bg-white p-2">
+      <PinnedPreview icon={Lightbulb} label="Idea" title="Launch playbook" />
+      <PinnedPreview icon={ClipboardList} label="Decision" title="Approve rollout" />
+      <PinnedPreview icon={FileText} label="Artifact" title="Exec briefing" />
+    </div>
   );
 }
 
