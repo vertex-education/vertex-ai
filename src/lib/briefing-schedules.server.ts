@@ -49,7 +49,7 @@ const recurrenceValues = new Set<BriefingRecurrence>(["daily", "weekdays", "week
 
 async function requireUser() {
   const request = getRequest();
-  const session = await getAuth(request).api.getSession({ headers: request.headers }) as AuthSession | null;
+  const session = (await getAuth(request).api.getSession({ headers: request.headers })) as AuthSession | null;
   if (!session?.user?.id) throw new Error("Sign in before managing briefing schedules.");
   return session.user;
 }
@@ -198,11 +198,14 @@ export function computeNextRunAtFromInput(input: BriefingScheduleInput, after = 
     return null;
   }
 
-  const allowedDays = normalized.recurrence === "daily"
-    ? [0, 1, 2, 3, 4, 5, 6]
-    : normalized.recurrence === "weekdays"
-      ? [1, 2, 3, 4, 5]
-      : normalized.weekdays.length ? normalized.weekdays : [weekdayForDate(afterLocal.year, afterLocal.month, afterLocal.day)];
+  const allowedDays =
+    normalized.recurrence === "daily"
+      ? [0, 1, 2, 3, 4, 5, 6]
+      : normalized.recurrence === "weekdays"
+        ? [1, 2, 3, 4, 5]
+        : normalized.weekdays.length
+          ? normalized.weekdays
+          : [weekdayForDate(afterLocal.year, afterLocal.month, afterLocal.day)];
 
   for (let offset = 0; offset < 370; offset += 1) {
     const { year, month, day } = addDays(afterLocal.year, afterLocal.month, afterLocal.day, offset);
@@ -341,16 +344,19 @@ async function getProjectScope(projectId: string) {
   return project;
 }
 
-async function resolveScheduleChatId(db: ReturnType<typeof getDb>, projectId: string, workspaceId: string, chatId: string | null, newChatTitle: string | null) {
+async function resolveScheduleChatId(
+  db: ReturnType<typeof getDb>,
+  projectId: string,
+  workspaceId: string,
+  chatId: string | null,
+  newChatTitle: string | null,
+) {
   if (chatId) {
     const [chatRows] = await db.batch([
       db
         .select({ id: schema.chats.id })
         .from(schema.chats)
-        .where(and(
-          eq(schema.chats.id, chatId),
-          eq(schema.chats.projectId, projectId),
-        ))
+        .where(and(eq(schema.chats.id, chatId), eq(schema.chats.projectId, projectId)))
         .limit(1),
     ]);
     if (!chatRows[0]) throw new Error("Choose a chat that belongs to the selected project.");
@@ -364,20 +370,19 @@ async function resolveScheduleChatId(db: ReturnType<typeof getDb>, projectId: st
     db
       .select({ id: schema.chats.id })
       .from(schema.chats)
-      .where(and(
-        eq(schema.chats.workspaceId, workspaceId),
-        eq(schema.chats.projectId, projectId),
-        eq(schema.chats.section, "project"),
-        eq(schema.chats.title, title),
-      ))
+      .where(
+        and(
+          eq(schema.chats.workspaceId, workspaceId),
+          eq(schema.chats.projectId, projectId),
+          eq(schema.chats.section, "project"),
+          eq(schema.chats.title, title),
+        ),
+      )
       .limit(1),
     db
       .select({ nextSortOrder: sql<number>`coalesce(max(${schema.chats.sortOrder}), 0) + 1` })
       .from(schema.chats)
-      .where(and(
-        eq(schema.chats.workspaceId, workspaceId),
-        eq(schema.chats.projectId, projectId),
-      )),
+      .where(and(eq(schema.chats.workspaceId, workspaceId), eq(schema.chats.projectId, projectId))),
   ]);
 
   if (existingRows[0]?.id) return existingRows[0].id;
@@ -440,7 +445,8 @@ export async function saveBriefingScheduleForCurrentUser(input: BriefingSchedule
 
   if (existing[0]) {
     await db.batch([
-      db.update(schema.briefingSchedules)
+      db
+        .update(schema.briefingSchedules)
         .set(values)
         .where(and(eq(schema.briefingSchedules.id, id), eq(schema.briefingSchedules.userId, user.id))),
     ]);
@@ -463,8 +469,7 @@ export async function deleteBriefingScheduleForCurrentUser(id: string) {
   const user = await requireUser();
   const db = getDb();
   await db.batch([
-    db.delete(schema.briefingSchedules)
-      .where(and(eq(schema.briefingSchedules.id, id), eq(schema.briefingSchedules.userId, user.id))),
+    db.delete(schema.briefingSchedules).where(and(eq(schema.briefingSchedules.id, id), eq(schema.briefingSchedules.userId, user.id))),
   ]);
   return { ok: true };
 }

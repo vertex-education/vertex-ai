@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  createScopedRagErrorResponse,
-  normalizeReasoningLevel,
-  parseScopedRagStreamInput,
-} from "@/routes/api/scoped-rag-stream";
+import { createScopedRagErrorResponse, normalizeReasoningLevel, parseScopedRagStreamInput } from "@/routes/api/scoped-rag-stream";
 
 async function responseText(response: Response) {
   return await response.text();
@@ -11,9 +7,11 @@ async function responseText(response: Response) {
 
 describe("scoped RAG stream route helpers", () => {
   it("parses the URL query contract into scoped RAG input", () => {
-    const input = parseScopedRagStreamInput(new Request(
-      "https://app.test/api/scoped-rag-stream?prompt=hello&teamId=team-1&workspaceId=ws-team&projectId=project-1&chatId=chat-1&asanaSearchEnabled=1&webSearchEnabled=1&reasoningLevel=high",
-    ));
+    const input = parseScopedRagStreamInput(
+      new Request(
+        "https://app.test/api/scoped-rag-stream?prompt=hello&teamId=team-1&workspaceId=ws-team&projectId=project-1&chatId=chat-1&asanaSearchEnabled=1&webSearchEnabled=1&reasoningLevel=high",
+      ),
+    );
 
     expect(input).toEqual({
       prompt: "hello",

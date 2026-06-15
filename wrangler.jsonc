@@ -1,117 +1,120 @@
 {
-	"$schema": "./node_modules/wrangler/config-schema.json",
-	"account_id": "101ae2c39c8dda6574c201e123edf24f",
-	"name": "ai-command-center",
-	"main": "./dist/server/index.js",
-	"workers_dev": true,
-	"preview_urls": true,
-	"compatibility_date": "2026-05-22",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"assets": {
-		"directory": "./dist/client"
-	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "ai-command-center-db",
-			"database_id": "b92787ed-58b0-429a-b6f3-7539c0a5e201",
-			"remote": true
-		}
-	],
-	"kv_namespaces": [
-		{
-			"binding": "MICROSOFT_TOKEN_VAULT",
-			"id": "79a29da0fd4a4b6ca90aa77aed5a39d8"
-		},
-		{
-			"binding": "ASANA_WEBHOOK_SECRETS",
-			"id": "3940400518f74a07acbe0beef0d46b8f"
-		}
-	],
-	"r2_buckets": [
-		{
-			"binding": "ARTIFACTS_BUCKET",
-			"bucket_name": "ai-command-center-artifacts",
-			"remote": true
-		},
-		{
-			"bucket_name": "ai-command-center-artifacts",
-			"binding": "ai_command_center_artifacts",
-			"remote": true
-		}
-	],
-	"vectorize": [
-		{
-			"binding": "VECTORIZE",
-			"index_name": "ai-command-center-rag",
-			"remote": true
-		}
-	],
-	"durable_objects": {
-		"bindings": [
-			{
-				"name": "CHAT_SYNC",
-				"class_name": "ChatSyncDurableObject"
-			}
-		]
-	},
-	"migrations": [
-		{
-			"tag": "v1",
-			"new_sqlite_classes": [
-				"ChatSyncDurableObject"
-			]
-		}
-	],
-	"queues": {
-		"producers": [
-			{
-				"binding": "DOCUMENT_INGESTION_QUEUE",
-				"queue": "document-ingestion-queue"
-			},
-			{
-				"binding": "GRAPH_WEBHOOK_QUEUE",
-				"queue": "graph-webhook-notifications"
-			}
-		],
-		"consumers": [
-			{
-				"queue": "document-ingestion-queue",
-				"max_batch_size": 5,
-				"max_batch_timeout": 30,
-				"max_retries": 3
-			},
-			{
-				"queue": "graph-webhook-notifications",
-				"max_batch_size": 25,
-				"max_batch_timeout": 5,
-				"max_retries": 5
-			}
-		]
-	},
-	"triggers": {
-		"crons": [
-			"*/15 * * * *"
-		]
-	},
-	"ai": {
-		"binding": "AI",
-		"remote": true
-	},
-	"vars": {
-		"CLOUDFLARE_AI_GATEWAY_ID": "default",
-		"BRIEFING_REPORTING_WINDOW_HOURS": "24",
-		"ASANA_WEBHOOK_ORIGIN": "https://ai-command-center.rcormier.workers.dev"
-	},
-	"send_email": [
-		{
-			"name": "EMAIL",
-			"remote": true
-		}
-	],
-	"observability": {
-		"enabled": true
-	}
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "account_id": "101ae2c39c8dda6574c201e123edf24f",
+  "name": "vertex-ai",
+  "main": "./dist/server/index.js",
+  "workers_dev": true,
+  "preview_urls": true,
+  "compatibility_date": "2026-05-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ai-command-center-db",
+      "database_id": "b92787ed-58b0-429a-b6f3-7539c0a5e201",
+      "remote": true,
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "MICROSOFT_TOKEN_VAULT",
+      "id": "79a29da0fd4a4b6ca90aa77aed5a39d8",
+    },
+    {
+      "binding": "ASANA_WEBHOOK_SECRETS",
+      "id": "3940400518f74a07acbe0beef0d46b8f",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS_BUCKET",
+      "bucket_name": "ai-command-center-artifacts",
+      "remote": true,
+    },
+    {
+      "bucket_name": "ai-command-center-artifacts",
+      "binding": "ai_command_center_artifacts",
+      "remote": true,
+    },
+  ],
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "ai-command-center-rag",
+      "remote": true,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_SYNC",
+        "class_name": "ChatSyncRealtimeDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChatSyncDurableObject"],
+    },
+    {
+      "tag": "v2",
+      "renamed_classes": [
+        {
+          "from": "ChatSyncDurableObject",
+          "to": "ChatSyncRealtimeDurableObject",
+        },
+      ],
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "DOCUMENT_INGESTION_QUEUE",
+        "queue": "document-ingestion-queue",
+      },
+      {
+        "binding": "GRAPH_WEBHOOK_QUEUE",
+        "queue": "graph-webhook-notifications",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "document-ingestion-queue",
+        "max_batch_size": 5,
+        "max_batch_timeout": 30,
+        "max_retries": 3,
+      },
+      {
+        "queue": "graph-webhook-notifications",
+        "max_batch_size": 25,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+      },
+    ],
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"],
+  },
+  "ai": {
+    "binding": "AI",
+    "remote": true,
+  },
+  "vars": {
+    "CLOUDFLARE_AI_GATEWAY_ID": "default",
+    "BRIEFING_REPORTING_WINDOW_HOURS": "24",
+    "ASANA_WEBHOOK_ORIGIN": "https://vertex-ai.rcormier.workers.dev",
+  },
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "remote": true,
+    },
+  ],
+  "observability": {
+    "enabled": true,
+  },
 }

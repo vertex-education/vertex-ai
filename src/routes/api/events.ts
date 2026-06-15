@@ -40,9 +40,7 @@ async function handleEvents({ request }: { request: Request }) {
 
   try {
     const scope = await getEventScope({ mode, teamId, userId: user.id });
-    const requestedLastEventId = parseLastEventId(
-      request.headers.get("Last-Event-ID") ?? url.searchParams.get("lastEventId"),
-    );
+    const requestedLastEventId = parseLastEventId(request.headers.get("Last-Event-ID") ?? url.searchParams.get("lastEventId"));
     return streamEvents({ request, scope, lastEventId: requestedLastEventId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Event stream is unavailable.";
@@ -51,7 +49,7 @@ async function handleEvents({ request }: { request: Request }) {
 }
 
 export function normalizeMode(value: string | null): WorkspaceMode | null {
-  return validModes.includes(value as WorkspaceMode) ? value as WorkspaceMode : null;
+  return validModes.includes(value as WorkspaceMode) ? (value as WorkspaceMode) : null;
 }
 
 export function parseLastEventId(value: string | null) {
@@ -83,15 +81,7 @@ async function getEventScope({
   return { mode, workspaceId: workspace.id, teamId, userId };
 }
 
-function streamEvents({
-  request,
-  scope,
-  lastEventId,
-}: {
-  request: Request;
-  scope: EventSubscriptionScope;
-  lastEventId: number;
-}) {
+function streamEvents({ request, scope, lastEventId }: { request: Request; scope: EventSubscriptionScope; lastEventId: number }) {
   let cursor = lastEventId;
   let closed = false;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -119,9 +109,13 @@ function streamEvents({
             controller.enqueue(encoder.encode(sseEncode("mutation", event.id, event)));
           }
         } catch (error) {
-          controller.enqueue(encoder.encode(sseEncode("stream-error", undefined, {
-            message: error instanceof Error ? error.message : "Could not read mutation events.",
-          })));
+          controller.enqueue(
+            encoder.encode(
+              sseEncode("stream-error", undefined, {
+                message: error instanceof Error ? error.message : "Could not read mutation events.",
+              }),
+            ),
+          );
         } finally {
           if (!closed) pollTimer = setTimeout(poll, pollIntervalMs);
         }
@@ -149,7 +143,7 @@ function streamEvents({
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     },
   });

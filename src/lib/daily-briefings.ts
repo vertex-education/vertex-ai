@@ -2,7 +2,12 @@ import { and, asc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import * as schema from "../../db/schema";
 import { runAiGateway } from "@/lib/ai-gateway";
-import { formatCustomInstructionTemplate, normalizeBriefingMarkdown, resolveInstructionPlaceholders, utcTimeLabel } from "@/lib/briefing-formatting";
+import {
+  formatCustomInstructionTemplate,
+  normalizeBriefingMarkdown,
+  resolveInstructionPlaceholders,
+  utcTimeLabel,
+} from "@/lib/briefing-formatting";
 import { vertexAiModelId } from "@/lib/prompts";
 
 type AppDb = DrizzleD1Database<typeof schema>;
@@ -86,7 +91,7 @@ type WorkersAiTextResult = {
 };
 
 const dailyBriefingsTitle = "Daily Briefings";
-const briefingAuthor = "Vertex AI Command Center";
+const briefingAuthor = "VertexAI";
 const defaultWindowHours = 24;
 
 function isoDateKey(date: Date) {
@@ -138,7 +143,14 @@ function summarizeAiResponseShape(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value)
       .slice(0, 12)
-      .map(([key, nestedValue]) => [key, Array.isArray(nestedValue) ? `array(${nestedValue.length})` : isRecord(nestedValue) ? Object.keys(nestedValue).slice(0, 8) : typeof nestedValue]),
+      .map(([key, nestedValue]) => [
+        key,
+        Array.isArray(nestedValue)
+          ? `array(${nestedValue.length})`
+          : isRecord(nestedValue)
+            ? Object.keys(nestedValue).slice(0, 8)
+            : typeof nestedValue,
+      ]),
   );
 }
 
@@ -188,7 +200,13 @@ function extractAiResponse(result: unknown) {
   return "";
 }
 
-function fallbackBriefing(project: BriefingProjectRow, windowEnd: Date, hasActivity: boolean, promptInstructions?: string | null, failureReason = "Workers AI did not return usable text.") {
+function fallbackBriefing(
+  project: BriefingProjectRow,
+  windowEnd: Date,
+  hasActivity: boolean,
+  promptInstructions?: string | null,
+  failureReason = "Workers AI did not return usable text.",
+) {
   const projectName = project.name?.trim() || "{Project Name}";
   const customInstructions = resolveInstructionPlaceholders(promptInstructions, project, windowEnd);
   return [
@@ -199,7 +217,9 @@ function fallbackBriefing(project: BriefingProjectRow, windowEnd: Date, hasActiv
     customInstructions ? `> Custom Instructions received: ${customInstructions}` : "",
     customInstructions ? "" : "",
     "## Strategic Decisions",
-    hasActivity ? "- Review the source activity in this thread; model synthesis was unavailable." : "- No new strategic decisions were identified in the reporting window.",
+    hasActivity
+      ? "- Review the source activity in this thread; model synthesis was unavailable."
+      : "- No new strategic decisions were identified in the reporting window.",
     "",
     "## Completed Asana Tasks",
     "- No completed Asana tasks were identified in the available source data.",
@@ -246,10 +266,7 @@ async function listActiveOrgProjects(db: AppDb) {
       })
       .from(schema.projects)
       .innerJoin(schema.workspaces, eq(schema.workspaces.id, schema.projects.workspaceId))
-      .where(and(
-        eq(schema.workspaces.scope, "org"),
-        inArray(schema.projects.status, ["Active", "In Progress", "Watch", "Blocked"]),
-      ))
+      .where(and(eq(schema.workspaces.scope, "org"), inArray(schema.projects.status, ["Active", "In Progress", "Watch", "Blocked"])))
       .orderBy(asc(schema.projects.sortOrder), asc(schema.projects.name)),
   ]);
   return projects as BriefingProjectRow[];
@@ -261,11 +278,13 @@ async function getOrCreateDailyBriefingsChat(db: AppDb, project: BriefingProject
       db
         .select({ id: schema.chats.id })
         .from(schema.chats)
-        .where(and(
-          eq(schema.chats.id, preferredChatId),
-          eq(schema.chats.workspaceId, project.workspaceId),
-          eq(schema.chats.projectId, project.id),
-        ))
+        .where(
+          and(
+            eq(schema.chats.id, preferredChatId),
+            eq(schema.chats.workspaceId, project.workspaceId),
+            eq(schema.chats.projectId, project.id),
+          ),
+        )
         .limit(1),
     ]);
     if (rows[0]?.id) return rows[0].id;
@@ -275,20 +294,19 @@ async function getOrCreateDailyBriefingsChat(db: AppDb, project: BriefingProject
     db
       .select({ id: schema.chats.id })
       .from(schema.chats)
-      .where(and(
-        eq(schema.chats.workspaceId, project.workspaceId),
-        eq(schema.chats.projectId, project.id),
-        eq(schema.chats.section, "project"),
-        eq(schema.chats.title, dailyBriefingsTitle),
-      ))
+      .where(
+        and(
+          eq(schema.chats.workspaceId, project.workspaceId),
+          eq(schema.chats.projectId, project.id),
+          eq(schema.chats.section, "project"),
+          eq(schema.chats.title, dailyBriefingsTitle),
+        ),
+      )
       .limit(1),
     db
       .select({ sortOrder: sql<number>`COALESCE(MAX(${schema.chats.sortOrder}), 0) + 1` })
       .from(schema.chats)
-      .where(and(
-        eq(schema.chats.workspaceId, project.workspaceId),
-        eq(schema.chats.projectId, project.id),
-      )),
+      .where(and(eq(schema.chats.workspaceId, project.workspaceId), eq(schema.chats.projectId, project.id))),
   ]);
 
   if (existing[0]?.id) return existing[0].id;
@@ -313,10 +331,7 @@ async function briefingExists(db: AppDb, chatId: string, marker: string) {
     db
       .select({ id: schema.chatMessages.id })
       .from(schema.chatMessages)
-      .where(and(
-        eq(schema.chatMessages.chatId, chatId),
-        sql`${schema.chatMessages.body} LIKE ${`%${marker}%`}`,
-      ))
+      .where(and(eq(schema.chatMessages.chatId, chatId), sql`${schema.chatMessages.body} LIKE ${`%${marker}%`}`))
       .limit(1),
   ]);
   return Boolean(rows[0]?.id);
@@ -335,12 +350,14 @@ async function collectProjectIntelligence(db: AppDb, project: BriefingProjectRow
       })
       .from(schema.chatMessages)
       .innerJoin(schema.chats, eq(schema.chats.id, schema.chatMessages.chatId))
-      .where(and(
-        eq(schema.chatMessages.workspaceId, project.workspaceId),
-        eq(schema.chats.projectId, project.id),
-        gte(schema.chatMessages.createdAt, windowStart.toISOString()),
-        sql`${schema.chats.title} <> ${dailyBriefingsTitle}`,
-      ))
+      .where(
+        and(
+          eq(schema.chatMessages.workspaceId, project.workspaceId),
+          eq(schema.chats.projectId, project.id),
+          gte(schema.chatMessages.createdAt, windowStart.toISOString()),
+          sql`${schema.chats.title} <> ${dailyBriefingsTitle}`,
+        ),
+      )
       .orderBy(asc(schema.chatMessages.createdAt)),
     db
       .select({
@@ -352,12 +369,14 @@ async function collectProjectIntelligence(db: AppDb, project: BriefingProjectRow
         createdAt: schema.workspaceActions.createdAt,
       })
       .from(schema.workspaceActions)
-      .where(and(
-        eq(schema.workspaceActions.workspaceId, project.workspaceId),
-        eq(schema.workspaceActions.projectId, project.id),
-        eq(schema.workspaceActions.kind, "task"),
-        gte(schema.workspaceActions.createdAt, windowStart),
-      ))
+      .where(
+        and(
+          eq(schema.workspaceActions.workspaceId, project.workspaceId),
+          eq(schema.workspaceActions.projectId, project.id),
+          eq(schema.workspaceActions.kind, "task"),
+          gte(schema.workspaceActions.createdAt, windowStart),
+        ),
+      )
       .orderBy(asc(schema.workspaceActions.createdAt)),
     db
       .select({
@@ -375,10 +394,7 @@ async function collectProjectIntelligence(db: AppDb, project: BriefingProjectRow
         schema.asanaProjectMappings,
         eq(schema.asanaProjectMappings.asanaProjectGid, schema.asanaWebhookTaskStates.asanaProjectGid),
       )
-      .where(and(
-        eq(schema.asanaProjectMappings.vertexProjectId, project.id),
-        gte(schema.asanaWebhookTaskStates.updatedAt, windowStart),
-      ))
+      .where(and(eq(schema.asanaProjectMappings.vertexProjectId, project.id), gte(schema.asanaWebhookTaskStates.updatedAt, windowStart)))
       .orderBy(asc(schema.asanaWebhookTaskStates.updatedAt)),
     db
       .select({
@@ -390,21 +406,23 @@ async function collectProjectIntelligence(db: AppDb, project: BriefingProjectRow
       })
       .from(schema.chatMessages)
       .innerJoin(schema.chats, eq(schema.chats.id, schema.chatMessages.chatId))
-      .where(and(
-        eq(schema.chatMessages.workspaceId, project.workspaceId),
-        gte(schema.chatMessages.createdAt, windowStart.toISOString()),
-        sql`(
+      .where(
+        and(
+          eq(schema.chatMessages.workspaceId, project.workspaceId),
+          gte(schema.chatMessages.createdAt, windowStart.toISOString()),
+          sql`(
           ${schema.chats.projectId} = ${project.id}
           OR ${schema.chats.projectId} IS NULL
         )`,
-        sql`(
+          sql`(
           LOWER(${schema.chats.title}) LIKE '%risk%'
           OR LOWER(${schema.chats.title}) LIKE '%escalation%'
           OR LOWER(${schema.chatMessages.body}) LIKE '%risk%'
           OR LOWER(${schema.chatMessages.body}) LIKE '%blocked%'
           OR LOWER(${schema.chatMessages.body}) LIKE '%escalat%'
         )`,
-      ))
+        ),
+      )
       .orderBy(asc(schema.chatMessages.createdAt)),
   ]);
 
@@ -449,33 +467,41 @@ function buildXmlContext({
     `    <description>${xmlEscape(project.description)}</description>`,
     "  </project>",
     "  <chat_messages>",
-    ...messages.map((message) => [
-      `    <message id="${xmlEscape(message.id)}" chat="${xmlEscape(message.chatTitle)}" role="${xmlEscape(message.role)}" author="${xmlEscape(message.author)}" created_at="${xmlEscape(message.createdAt)}">`,
-      `      ${xmlEscape(truncate(message.body, 900))}`,
-      "    </message>",
-    ].join("\n")),
+    ...messages.map((message) =>
+      [
+        `    <message id="${xmlEscape(message.id)}" chat="${xmlEscape(message.chatTitle)}" role="${xmlEscape(message.role)}" author="${xmlEscape(message.author)}" created_at="${xmlEscape(message.createdAt)}">`,
+        `      ${xmlEscape(truncate(message.body, 900))}`,
+        "    </message>",
+      ].join("\n"),
+    ),
     "  </chat_messages>",
-    "  <tasks source=\"workspace_actions\">",
-    ...tasks.map((task) => [
-      `    <task id="${xmlEscape(task.id)}" status="${xmlEscape(task.status)}" owner="${xmlEscape(task.owner)}" source="${xmlEscape(task.source)}" created_at="${xmlEscape(task.createdAt.toISOString())}">`,
-      `      <title>${xmlEscape(task.title)}</title>`,
-      "    </task>",
-    ].join("\n")),
+    '  <tasks source="workspace_actions">',
+    ...tasks.map((task) =>
+      [
+        `    <task id="${xmlEscape(task.id)}" status="${xmlEscape(task.status)}" owner="${xmlEscape(task.owner)}" source="${xmlEscape(task.source)}" created_at="${xmlEscape(task.createdAt.toISOString())}">`,
+        `      <title>${xmlEscape(task.title)}</title>`,
+        "    </task>",
+      ].join("\n"),
+    ),
     "  </tasks>",
     "  <asana_tasks>",
-    ...asanaTasks.map((task) => [
-      `    <task gid="${xmlEscape(task.asanaTaskGid)}" project="${xmlEscape(task.asanaProjectName)}" status="${xmlEscape(task.status)}" action="${xmlEscape(task.action)}" change_action="${xmlEscape(task.changeAction)}" change_field="${xmlEscape(task.changeField)}" updated_at="${xmlEscape(task.updatedAt.toISOString())}" completed="${completedAsanaTasks.includes(task) ? "true" : "false"}">`,
-      `      <name>${xmlEscape(task.taskName)}</name>`,
-      "    </task>",
-    ].join("\n")),
+    ...asanaTasks.map((task) =>
+      [
+        `    <task gid="${xmlEscape(task.asanaTaskGid)}" project="${xmlEscape(task.asanaProjectName)}" status="${xmlEscape(task.status)}" action="${xmlEscape(task.action)}" change_action="${xmlEscape(task.changeAction)}" change_field="${xmlEscape(task.changeField)}" updated_at="${xmlEscape(task.updatedAt.toISOString())}" completed="${completedAsanaTasks.includes(task) ? "true" : "false"}">`,
+        `      <name>${xmlEscape(task.taskName)}</name>`,
+        "    </task>",
+      ].join("\n"),
+    ),
     "  </asana_tasks>",
-    "  <risks source=\"risk_chats_and_status\">",
+    '  <risks source="risk_chats_and_status">',
     `    <project_status>${xmlEscape(project.status)}</project_status>`,
-    ...riskSignals.map((risk) => [
-      `    <risk_signal id="${xmlEscape(risk.id)}" chat="${xmlEscape(risk.chatTitle)}" author="${xmlEscape(risk.author)}" created_at="${xmlEscape(risk.createdAt)}">`,
-      `      ${xmlEscape(truncate(risk.body, 700))}`,
-      "    </risk_signal>",
-    ].join("\n")),
+    ...riskSignals.map((risk) =>
+      [
+        `    <risk_signal id="${xmlEscape(risk.id)}" chat="${xmlEscape(risk.chatTitle)}" author="${xmlEscape(risk.author)}" created_at="${xmlEscape(risk.createdAt)}">`,
+        `      ${xmlEscape(truncate(risk.body, 700))}`,
+        "    </risk_signal>",
+      ].join("\n"),
+    ),
     "  </risks>",
     "</briefing_context>",
   ].join("\n");
@@ -499,16 +525,18 @@ function buildSystemPrompt(project: BriefingProjectRow, windowEnd: Date, promptI
     "## Recommended Next Moves",
   ];
   const extra = formatCustomInstructionTemplate(resolveInstructionPlaceholders(promptInstructions, project, windowEnd));
-  return extra ? [
-    ...sharedRules,
-    "Custom Instructions are the controlling output template. Use only the sections, labels, and order requested in Custom Instructions. Do not add default briefing sections unless the Custom Instructions ask for them.",
-    "User-friendly template conversion has already been applied: plain label lines are section headers, Title: becomes the main title, and parenthetical guidance below a label is instruction text.",
-    "Template placeholder handling:",
-    "Placeholders in braces are requested fields to fill. Known placeholders such as {Project Name}, {Date}, {MM/DD/YY}, {Workspace}, and {Project Status} have been resolved below when the system has those values. For any remaining placeholder, fill it only from the XML context. If the XML does not support a value, leave that value blank rather than guessing.",
-    "Custom Instructions:",
-    "Treat the following Custom Instructions as schedule-specific direction for tone, emphasis, audience, and additional sections. Follow them unless they conflict with the XML-only evidence rule, the required Markdown-only output, or factual accuracy.",
-    extra,
-  ].join("\n") : [...sharedRules, ...defaultStructure].join("\n");
+  return extra
+    ? [
+        ...sharedRules,
+        "Custom Instructions are the controlling output template. Use only the sections, labels, and order requested in Custom Instructions. Do not add default briefing sections unless the Custom Instructions ask for them.",
+        "User-friendly template conversion has already been applied: plain label lines are section headers, Title: becomes the main title, and parenthetical guidance below a label is instruction text.",
+        "Template placeholder handling:",
+        "Placeholders in braces are requested fields to fill. Known placeholders such as {Project Name}, {Date}, {MM/DD/YY}, {Workspace}, and {Project Status} have been resolved below when the system has those values. For any remaining placeholder, fill it only from the XML context. If the XML does not support a value, leave that value blank rather than guessing.",
+        "Custom Instructions:",
+        "Treat the following Custom Instructions as schedule-specific direction for tone, emphasis, audience, and additional sections. Follow them unless they conflict with the XML-only evidence rule, the required Markdown-only output, or factual accuracy.",
+        extra,
+      ].join("\n")
+    : [...sharedRules, ...defaultStructure].join("\n");
 }
 
 type BriefingAiAttempt = {
@@ -536,31 +564,43 @@ const briefingAiAttempts: BriefingAiAttempt[] = [
   },
 ];
 
-async function runBriefingAiAttempt(env: Env, project: BriefingProjectRow, windowEnd: Date, contextXml: string, promptInstructions: string | null | undefined, attempt: BriefingAiAttempt) {
-  return runAiGateway(env.AI, vertexAiModelId, {
-    messages: [
-      { role: "system", content: buildSystemPrompt(project, windowEnd, promptInstructions) },
-      { role: "user", content: contextXml },
-    ],
-    max_completion_tokens: attempt.maxCompletionTokens,
-    reasoningLevel: attempt.reasoningEffort ?? "low",
-    reasoning_effort: attempt.reasoningEffort,
-    timeoutMs: attempt.label === "high-reasoning" ? 120_000 : 75_000,
-    chat_template_kwargs: {
-      enable_thinking: attempt.thinking,
-      thinking: attempt.thinking,
+async function runBriefingAiAttempt(
+  env: Env,
+  project: BriefingProjectRow,
+  windowEnd: Date,
+  contextXml: string,
+  promptInstructions: string | null | undefined,
+  attempt: BriefingAiAttempt,
+) {
+  return runAiGateway(
+    env.AI,
+    vertexAiModelId,
+    {
+      messages: [
+        { role: "system", content: buildSystemPrompt(project, windowEnd, promptInstructions) },
+        { role: "user", content: contextXml },
+      ],
+      max_completion_tokens: attempt.maxCompletionTokens,
+      reasoningLevel: attempt.reasoningEffort ?? "low",
+      reasoning_effort: attempt.reasoningEffort,
+      timeoutMs: attempt.label === "high-reasoning" ? 120_000 : 75_000,
+      chat_template_kwargs: {
+        enable_thinking: attempt.thinking,
+        thinking: attempt.thinking,
+      },
+      temperature: attempt.temperature,
     },
-    temperature: attempt.temperature,
-  }, {
-    env,
-    metadata: {
-      feature: "scheduled-intelligence-briefing",
-      projectId: project.id,
-      workspaceId: project.workspaceId,
-      attempt: attempt.label,
+    {
+      env,
+      metadata: {
+        feature: "scheduled-intelligence-briefing",
+        projectId: project.id,
+        workspaceId: project.workspaceId,
+        attempt: attempt.label,
+      },
+      skipCache: true,
     },
-    skipCache: true,
-  });
+  );
 }
 
 async function generateBriefingMarkdown({
@@ -615,15 +655,17 @@ export async function generateBriefingPreview(env: Env, input: BriefingGeneratio
   const scheduledAt = input.scheduledAt ?? new Date();
   const project = await getProjectById(db, input.projectId);
   if (!project) throw new Error("Briefing project was not found.");
-  if (input.workspaceId && input.workspaceId !== project.workspaceId) throw new Error("Briefing project does not belong to the selected workspace.");
+  if (input.workspaceId && input.workspaceId !== project.workspaceId)
+    throw new Error("Briefing project does not belong to the selected workspace.");
 
   const reportingWindowHours = clampReportingWindowHours(input.reportingWindowHours);
   const windowStart = new Date(scheduledAt.getTime() - reportingWindowHours * 60 * 60 * 1000);
   const intelligence = await collectProjectIntelligence(db, project, windowStart);
-  const hasActivity = intelligence.messages.length > 0
-    || intelligence.tasks.length > 0
-    || intelligence.asanaTasks.length > 0
-    || intelligence.riskSignals.length > 0;
+  const hasActivity =
+    intelligence.messages.length > 0 ||
+    intelligence.tasks.length > 0 ||
+    intelligence.asanaTasks.length > 0 ||
+    intelligence.riskSignals.length > 0;
   const contextXml = buildXmlContext({ ...intelligence, project, windowEnd: scheduledAt, windowStart });
   const markdown = await generateBriefingMarkdown({
     contextXml,
@@ -649,7 +691,15 @@ export async function generateBriefingPreview(env: Env, input: BriefingGeneratio
   };
 }
 
-async function insertBriefingMessage(db: AppDb, chatId: string, project: BriefingProjectRow, marker: string, body: string, scheduledAt: Date, source: "cloudflare-cron" | "manual-test") {
+async function insertBriefingMessage(
+  db: AppDb,
+  chatId: string,
+  project: BriefingProjectRow,
+  marker: string,
+  body: string,
+  scheduledAt: Date,
+  source: "cloudflare-cron" | "manual-test",
+) {
   const id = `scheduled-briefing-msg-${project.id}-${isoDateKey(scheduledAt)}-${crypto.randomUUID()}`;
   await db.batch([
     db.insert(schema.chatMessages).values({
@@ -678,7 +728,10 @@ async function insertBriefingMessage(db: AppDb, chatId: string, project: Briefin
   return id;
 }
 
-export async function postBriefing(env: Env, input: BriefingGenerationInput & { markdown?: string | null; source?: "cloudflare-cron" | "manual-test" }) {
+export async function postBriefing(
+  env: Env,
+  input: BriefingGenerationInput & { markdown?: string | null; source?: "cloudflare-cron" | "manual-test" },
+) {
   if (!env.DB || !env.AI) {
     throw new Error("DB or AI binding is unavailable.");
   }
@@ -786,11 +839,14 @@ function computeNextRunAtForSchedule(schedule: BriefingScheduleRow, after: Date)
   }
 
   const weekdays = parseWeekdays(schedule.weekdaysJson);
-  const allowedDays = schedule.recurrence === "daily"
-    ? [0, 1, 2, 3, 4, 5, 6]
-    : schedule.recurrence === "weekdays"
-      ? [1, 2, 3, 4, 5]
-      : weekdays.length ? weekdays : [weekdayForDate(afterLocal.year, afterLocal.month, afterLocal.day)];
+  const allowedDays =
+    schedule.recurrence === "daily"
+      ? [0, 1, 2, 3, 4, 5, 6]
+      : schedule.recurrence === "weekdays"
+        ? [1, 2, 3, 4, 5]
+        : weekdays.length
+          ? weekdays
+          : [weekdayForDate(afterLocal.year, afterLocal.month, afterLocal.day)];
 
   for (let offset = 0; offset < 370; offset += 1) {
     const { year, month, day } = addDays(afterLocal.year, afterLocal.month, afterLocal.day, offset);
@@ -839,7 +895,8 @@ async function runSchedule(db: AppDb, env: Env, schedule: BriefingScheduleRow, s
         error: null,
         createdAt: scheduledAt,
       }),
-      db.update(schema.briefingSchedules)
+      db
+        .update(schema.briefingSchedules)
         .set({
           enabled: schedule.recurrence === "once" ? false : schedule.enabled,
           nextRunAt,
@@ -864,7 +921,8 @@ async function runSchedule(db: AppDb, env: Env, schedule: BriefingScheduleRow, s
         error: message,
         createdAt: scheduledAt,
       }),
-      db.update(schema.briefingSchedules)
+      db
+        .update(schema.briefingSchedules)
         .set({
           enabled: schedule.recurrence === "once" ? false : schedule.enabled,
           nextRunAt,
@@ -891,13 +949,15 @@ export async function runDueBriefingSchedules(env: Env, scheduledTime: number = 
     db
       .select()
       .from(schema.briefingSchedules)
-      .where(and(
-        eq(schema.briefingSchedules.enabled, true),
-        or(
-          lte(schema.briefingSchedules.nextRunAt, scheduledAt),
-          and(eq(schema.briefingSchedules.recurrence, "once"), lte(schema.briefingSchedules.runOnceAt, scheduledAt)),
+      .where(
+        and(
+          eq(schema.briefingSchedules.enabled, true),
+          or(
+            lte(schema.briefingSchedules.nextRunAt, scheduledAt),
+            and(eq(schema.briefingSchedules.recurrence, "once"), lte(schema.briefingSchedules.runOnceAt, scheduledAt)),
+          ),
         ),
-      ))
+      )
       .orderBy(asc(schema.briefingSchedules.nextRunAt))
       .limit(25),
   ]);

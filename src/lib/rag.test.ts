@@ -39,9 +39,7 @@ describe("scoped RAG utilities", () => {
   });
 
   it("builds scoped R2 keys with sanitized filenames", () => {
-    expect(createR2Key("team-1", "project-1", "Launch Plan!.md")).toMatch(
-      /^rag\/team-1\/project-1\/\d+-[0-9a-f-]+-Launch-Plan-\.md$/i,
-    );
+    expect(createR2Key("team-1", "project-1", "Launch Plan!.md")).toMatch(/^rag\/team-1\/project-1\/\d+-[0-9a-f-]+-Launch-Plan-\.md$/i);
   });
 
   it("normalizes stream reasoning level and prompt truncation", () => {
@@ -53,12 +51,14 @@ describe("scoped RAG utilities", () => {
   });
 
   it("creates text SSE responses with citations, token, and done events", async () => {
-    const response = createTextSseResponse("Hello", [{
-      id: "chunk-1",
-      documentName: "Plan",
-      r2Key: "rag/key",
-      score: 0.8,
-    }]);
+    const response = createTextSseResponse("Hello", [
+      {
+        id: "chunk-1",
+        documentName: "Plan",
+        r2Key: "rag/key",
+        score: 0.8,
+      },
+    ]);
 
     expect(response.headers.get("Content-Type")).toBe("text/event-stream; charset=utf-8");
     const text = await response.text();
@@ -96,14 +96,18 @@ describe("scoped RAG utilities", () => {
 
   it("summarizes Tavily and Firecrawl payloads with safe fallbacks", () => {
     expect(tavilySummaryFromPayload({ answer: "Current summary." })).toBe("Current summary.");
-    expect(tavilySummaryFromPayload({
-      results: [{ title: "Result", url: "https://example.com", content: "Snippet" }],
-    })).toBe("Result - https://example.com - Snippet");
+    expect(
+      tavilySummaryFromPayload({
+        results: [{ title: "Result", url: "https://example.com", content: "Snippet" }],
+      }),
+    ).toBe("Result - https://example.com - Snippet");
     expect(tavilySummaryFromPayload({})).toBe("Tavily did not return an AI-generated summary.");
 
-    expect(firecrawlMarkdownFromPayload({
-      data: [{ title: "Source", url: "https://example.com", markdown: "# Source\nDetails" }],
-    })).toContain("### Source\nURL: https://example.com\n# Source Details");
+    expect(
+      firecrawlMarkdownFromPayload({
+        data: [{ title: "Source", url: "https://example.com", markdown: "# Source\nDetails" }],
+      }),
+    ).toContain("### Source\nURL: https://example.com\n# Source Details");
     expect(firecrawlMarkdownFromPayload({ data: [] })).toBe("Firecrawl did not return markdown content.");
   });
 });

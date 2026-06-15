@@ -18,10 +18,12 @@ describe("realtime mutation events", () => {
   };
 
   it("parses mutation rows into client event objects", () => {
-    expect(parseRealtimeEventRow({
-      ...baseRow,
-      invalidatesJson: JSON.stringify(["workspace", "projects", "not-real", "chats"]),
-    })).toEqual({
+    expect(
+      parseRealtimeEventRow({
+        ...baseRow,
+        invalidatesJson: JSON.stringify(["workspace", "projects", "not-real", "chats"]),
+      }),
+    ).toEqual({
       ...baseRow,
       type: "mutation",
       invalidates: ["workspace", "projects", "chats"],
@@ -29,16 +31,20 @@ describe("realtime mutation events", () => {
   });
 
   it("falls back to workspace invalidation for malformed invalidation JSON", () => {
-    expect(parseRealtimeEventRow({
-      ...baseRow,
-      invalidatesJson: "not json",
-    }).invalidates).toEqual(["workspace"]);
+    expect(
+      parseRealtimeEventRow({
+        ...baseRow,
+        invalidatesJson: "not json",
+      }).invalidates,
+    ).toEqual(["workspace"]);
   });
 
   it("allows empty invalidation lists when explicitly stored", () => {
-    expect(parseRealtimeEventRow({
-      ...baseRow,
-      invalidatesJson: JSON.stringify([]),
-    }).invalidates).toEqual([]);
+    expect(
+      parseRealtimeEventRow({
+        ...baseRow,
+        invalidatesJson: JSON.stringify([]),
+      }).invalidates,
+    ).toEqual([]);
   });
 });

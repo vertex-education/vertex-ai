@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  getRiskStats,
-  getScopedRisks,
-  riskManagementHref,
-  riskSeverityRank,
-  type LightweightRisk,
-} from "@/lib/risk-feature";
+import { getRiskStats, getScopedRisks, riskManagementHref, riskSeverityRank, type LightweightRisk } from "@/lib/risk-feature";
 
 const risks: LightweightRisk[] = [
   {
@@ -36,10 +30,7 @@ const risks: LightweightRisk[] = [
 
 describe("risk feature helpers", () => {
   it("returns only risks explicitly associated with the active project scope", () => {
-    expect(getScopedRisks(risks, "project-a").map((risk) => risk.id)).toEqual([
-      "project-a-critical",
-      "project-a-low",
-    ]);
+    expect(getScopedRisks(risks, "project-a").map((risk) => risk.id)).toEqual(["project-a-critical", "project-a-low"]);
   });
 
   it("returns workspace-level risks when the active scope has no project", () => {

@@ -57,8 +57,8 @@ export function inferMicrosoftGraphResourceKind(resource: string | undefined): M
   if (
     normalized.startsWith("/me/messages") ||
     normalized.startsWith("me/messages") ||
-    normalized.startsWith("/users/") && normalized.includes("/messages") ||
-    normalized.startsWith("users/") && normalized.includes("/messages")
+    (normalized.startsWith("/users/") && normalized.includes("/messages")) ||
+    (normalized.startsWith("users/") && normalized.includes("/messages"))
   ) {
     return "outlook";
   }
@@ -106,10 +106,7 @@ export async function assertMicrosoftGraphTeamsSubscriptionCapacity(env: Microso
   return usage;
 }
 
-export async function registerMicrosoftGraphSubscription(
-  env: MicrosoftGraphWebhookEnv,
-  subscription: MicrosoftGraphSubscriptionRecord,
-) {
+export async function registerMicrosoftGraphSubscription(env: MicrosoftGraphWebhookEnv, subscription: MicrosoftGraphSubscriptionRecord) {
   const resourceKind = inferMicrosoftGraphResourceKind(subscription.resource);
   if (resourceKind === "teams" && !(await microsoftGraphSubscriptionExists(env, subscription.subscriptionId))) {
     await assertMicrosoftGraphTeamsSubscriptionCapacity(env);
@@ -143,16 +140,18 @@ export async function processMicrosoftGraphWebhookJob(env: MicrosoftGraphWebhook
       connecting_ip,
       received_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    `graph-delivery-${crypto.randomUUID()}`,
-    job.requestId,
-    notifications.length,
-    Array.isArray(job.payload.validationTokens) ? job.payload.validationTokens.length : 0,
-    job.source.userAgent,
-    job.source.cfRay,
-    job.source.connectingIp,
-    receivedAt,
-  ).run();
+  )
+    .bind(
+      `graph-delivery-${crypto.randomUUID()}`,
+      job.requestId,
+      notifications.length,
+      Array.isArray(job.payload.validationTokens) ? job.payload.validationTokens.length : 0,
+      job.source.userAgent,
+      job.source.cfRay,
+      job.source.connectingIp,
+      receivedAt,
+    )
+    .run();
 
   for (const notification of notifications) {
     if (!notification.subscriptionId) continue;
@@ -212,18 +211,20 @@ async function upsertMicrosoftGraphSubscription(
       expiration_at = COALESCE(excluded.expiration_at, microsoft_graph_subscriptions.expiration_at),
       last_seen_at = excluded.last_seen_at,
       notification_count = microsoft_graph_subscriptions.notification_count + excluded.notification_count`,
-  ).bind(
-    subscription.subscriptionId,
-    subscription.tenantId,
-    subscription.resource,
-    subscription.resourceKind,
-    subscription.changeType,
-    subscription.status,
-    subscription.expirationAt,
-    subscription.observedAt,
-    subscription.observedAt,
-    subscription.notificationIncrement,
-  ).run();
+  )
+    .bind(
+      subscription.subscriptionId,
+      subscription.tenantId,
+      subscription.resource,
+      subscription.resourceKind,
+      subscription.changeType,
+      subscription.status,
+      subscription.expirationAt,
+      subscription.observedAt,
+      subscription.observedAt,
+      subscription.notificationIncrement,
+    )
+    .run();
 }
 
 async function microsoftGraphSubscriptionExists(env: MicrosoftGraphWebhookEnv, subscriptionId: string) {
@@ -232,7 +233,9 @@ async function microsoftGraphSubscriptionExists(env: MicrosoftGraphWebhookEnv, s
      FROM microsoft_graph_subscriptions
      WHERE subscription_id = ?
      LIMIT 1`,
-  ).bind(subscriptionId).first<{ subscription_id: string }>();
+  )
+    .bind(subscriptionId)
+    .first<{ subscription_id: string }>();
 
   return Boolean(row);
 }

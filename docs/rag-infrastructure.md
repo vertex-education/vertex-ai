@@ -38,11 +38,11 @@ Refresh `worker-configuration.d.ts` with `npm run cf-typegen` after changing bin
 
 Artifacts are append-only once written. The `artifacts` D1 table includes:
 
-| Field | Purpose |
-| --- | --- |
-| `version` | Integer version number for the artifact lineage. |
-| `parent_artifact_id` | Self-reference to the prior version row. |
-| `commit_message` | Short description of why the version was created. |
+| Field                | Purpose                                           |
+| -------------------- | ------------------------------------------------- |
+| `version`            | Integer version number for the artifact lineage.  |
+| `parent_artifact_id` | Self-reference to the prior version row.          |
+| `commit_message`     | Short description of why the version was created. |
 
 `drizzle/0008_artifact_versioning.sql` adds these fields and supporting indexes. Generated artifact updates write a distinct R2 object key and insert a new D1 row parented to the latest version in the lineage. Restore follows the same rule: the selected historical R2 object is copied to a new versioned R2 key and inserted as the new latest row. Historical rows and R2 objects are not overwritten or deleted, so the UI can render older states read-only in the artifact version timeline.
 
@@ -69,12 +69,12 @@ The route lives in `src/routes/api/scoped-rag-stream.ts`. Startup validation fai
 
 The stream emits named SSE events:
 
-| Event | Payload | Purpose |
-| --- | --- | --- |
-| `citations` | `{ "citations": [...] }` | Sends matched artifact metadata before answer tokens. |
-| `token` | `{ "token": "..." }` | Sends incremental Markdown text for the assistant response. |
-| `done` | `{ "response": "...", "citations": [...] }` | Ends the stream after Workers AI completes. |
-| `stream-error` | `{ "message": "..." }` | Reports validation, retrieval, or model failures inside the SSE protocol. |
+| Event          | Payload                                     | Purpose                                                                   |
+| -------------- | ------------------------------------------- | ------------------------------------------------------------------------- |
+| `citations`    | `{ "citations": [...] }`                    | Sends matched artifact metadata before answer tokens.                     |
+| `token`        | `{ "token": "..." }`                        | Sends incremental Markdown text for the assistant response.               |
+| `done`         | `{ "response": "...", "citations": [...] }` | Ends the stream after Workers AI completes.                               |
+| `stream-error` | `{ "message": "..." }`                      | Reports validation, retrieval, or model failures inside the SSE protocol. |
 
 The frontend consumes this endpoint with the browser `EventSource` API in `src/routes/index.tsx`. Tokens are appended to the optimistic assistant message as they arrive, so existing Markdown rendering updates incrementally. The client closes the `EventSource` on `done` or `stream-error`; network failures use the native `onerror` path.
 
@@ -120,12 +120,12 @@ The ingestion worker marks a chunk as confidential when the uploaded artifact's 
 
 Scoped project chat runs intent routing before retrieval work. The router uses `@cf/meta/llama-3-8b-instruct` as a fast Workers AI classifier and accepts only four labels:
 
-| Intent | Runtime path | Vectorize usage |
-| --- | --- | --- |
-| `RAG_SEARCH` | Embed the prompt, query Vectorize with `team_id`, `project_id`, and role-sensitive confidentiality filters, load D1 chunks, and stream a cited answer. | Required |
-| `WEB_SEARCH` | Concurrently fetch consolidated Tavily and Firecrawl context, query scoped D1-backed chunks with role-sensitive confidentiality filters, and stream an answer grounded in both sections. | Required for historical chunks |
-| `DIRECT_CHAT` | Send the prompt plus scoped workspace/project context directly to the primary generation model. | Bypassed |
-| `ARTIFACT_GENERATION` | Send the artifact request plus scoped workspace/project context directly to the primary generation model. | Bypassed |
+| Intent                | Runtime path                                                                                                                                                                             | Vectorize usage                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `RAG_SEARCH`          | Embed the prompt, query Vectorize with `team_id`, `project_id`, and role-sensitive confidentiality filters, load D1 chunks, and stream a cited answer.                                   | Required                       |
+| `WEB_SEARCH`          | Concurrently fetch consolidated Tavily and Firecrawl context, query scoped D1-backed chunks with role-sensitive confidentiality filters, and stream an answer grounded in both sections. | Required for historical chunks |
+| `DIRECT_CHAT`         | Send the prompt plus scoped workspace/project context directly to the primary generation model.                                                                                          | Bypassed                       |
+| `ARTIFACT_GENERATION` | Send the artifact request plus scoped workspace/project context directly to the primary generation model.                                                                                | Bypassed                       |
 
 If the classifier returns an invalid label, the router applies a lightweight deterministic fallback. If the classifier call fails, it falls back to `RAG_SEARCH` so scoped historical questions remain grounded in project artifacts.
 

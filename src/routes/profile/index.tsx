@@ -15,7 +15,7 @@ export const Route = createFileRoute("/profile/")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "User Profile | Vertex AI Command Center" }],
+    meta: [{ title: "User Profile | VertexAI" }],
   }),
   component: UserProfilePage,
 });
@@ -51,7 +51,9 @@ function UserProfilePage() {
                   {getInitials(displayName)}
                 </div>
                 <CardTitle>User Settings</CardTitle>
-                <CardDescription>Manage your account details, password, invites, integrations, and personal display preferences.</CardDescription>
+                <CardDescription>
+                  Manage your account details, password, invites, integrations, and personal display preferences.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
@@ -81,24 +83,49 @@ function UserProfilePage() {
                       <PlayCircle className="size-4" />
                       Relaunch Tutorial
                     </Button>
-                    <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/password")}>
+                    <Button
+                      className="w-full justify-start"
+                      type="button"
+                      variant="outline"
+                      onClick={() => (window.location.href = "/profile/password")}
+                    >
                       <KeyRound className="size-4" />
                       Reset Password
                     </Button>
-                    <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/invites")}>
+                    <Button
+                      className="w-full justify-start"
+                      type="button"
+                      variant="outline"
+                      onClick={() => (window.location.href = "/profile/invites")}
+                    >
                       <Inbox className="size-4" />
                       Invites
                     </Button>
-                    <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/asana")}>
+                    <Button
+                      className="w-full justify-start"
+                      type="button"
+                      variant="outline"
+                      onClick={() => (window.location.href = "/profile/asana")}
+                    >
                       <Plug className="size-4" />
                       Asana Integration
                     </Button>
-                    <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/profile/briefings")}>
+                    <Button
+                      className="w-full justify-start"
+                      type="button"
+                      variant="outline"
+                      onClick={() => (window.location.href = "/profile/briefings")}
+                    >
                       <CalendarClock className="size-4" />
                       Automated Briefings
                     </Button>
                     {session.user.role === "admin" ? (
-                      <Button className="w-full justify-start" type="button" variant="outline" onClick={() => (window.location.href = "/admin")}>
+                      <Button
+                        className="w-full justify-start"
+                        type="button"
+                        variant="outline"
+                        onClick={() => (window.location.href = "/admin")}
+                      >
                         <ShieldCheck className="size-4" />
                         Admin Settings
                       </Button>
@@ -116,7 +143,9 @@ function UserProfilePage() {
                       <Gauge className="mt-0.5 size-5 text-primary" />
                       <div className="min-w-0">
                         <p className="font-semibold">Show Token Usage</p>
-                        <p className="text-sm text-muted-foreground">Display token estimates, response token badges, and chat budget details.</p>
+                        <p className="text-sm text-muted-foreground">
+                          Display token estimates, response token badges, and chat budget details.
+                        </p>
                       </div>
                     </div>
                     <label className="inline-flex items-center gap-2 text-sm font-medium">
@@ -127,8 +156,12 @@ function UserProfilePage() {
                         checked={showTokenUsage}
                         onChange={(event) => setShowTokenUsage(event.target.checked)}
                       />
-                      <span className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${showTokenUsage ? "border-primary bg-primary" : "border-input bg-muted"}`}>
-                        <span className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${showTokenUsage ? "translate-x-5" : "translate-x-1"}`} />
+                      <span
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${showTokenUsage ? "border-primary bg-primary" : "border-input bg-muted"}`}
+                      >
+                        <span
+                          className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${showTokenUsage ? "translate-x-5" : "translate-x-1"}`}
+                        />
                       </span>
                     </label>
                   </div>

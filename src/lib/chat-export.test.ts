@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  exportFormatLabel,
-  parseChatExportRequest,
-  xlsxBlobFromRows,
-} from "@/lib/chat-export";
+import { exportFormatLabel, parseChatExportRequest, xlsxBlobFromRows } from "@/lib/chat-export";
 
 describe("chat export helpers", () => {
   it("detects requested export formats only when the user asks for a file action", () => {
@@ -24,9 +20,7 @@ describe("chat export helpers", () => {
   });
 
   it("builds a branded xlsx blob from row data", async () => {
-    const blob = await xlsxBlobFromRows("2026 Status Export", [
-      { Project: "Vertex Hub", Status: "In Progress", Count: 2 },
-    ]);
+    const blob = await xlsxBlobFromRows("2026 Status Export", [{ Project: "Vertex Hub", Status: "In Progress", Count: 2 }]);
 
     expect(blob).toBeInstanceOf(Blob);
     expect(blob.type).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

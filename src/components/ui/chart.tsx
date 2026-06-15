@@ -85,13 +85,7 @@ export function ChartTooltipContent({
   }>;
   className?: string;
   label?: React.ReactNode;
-  formatter?: (
-    value: unknown,
-    name: string | number | undefined,
-    item: unknown,
-    index: number,
-    payload: unknown[],
-  ) => React.ReactNode;
+  formatter?: (value: unknown, name: string | number | undefined, item: unknown, index: number, payload: unknown[]) => React.ReactNode;
 }) {
   const { config } = useChart();
 
@@ -113,7 +107,11 @@ export function ChartTooltipContent({
                 <span className="text-muted-foreground">{itemConfig?.label ?? item.name ?? key}</span>
               </div>
               <span className="font-mono font-medium tabular-nums">
-                {formatter ? formatter(item.value, item.name, item, index, payload) : typeof item.value === "number" ? item.value.toLocaleString() : String(item.value ?? "")}
+                {formatter
+                  ? formatter(item.value, item.name, item, index, payload)
+                  : typeof item.value === "number"
+                    ? item.value.toLocaleString()
+                    : String(item.value ?? "")}
               </span>
             </div>
           );

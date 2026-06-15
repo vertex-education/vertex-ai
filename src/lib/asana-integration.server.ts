@@ -460,7 +460,9 @@ export async function startAsanaConnectionForCurrentUser() {
   const codeChallenge = await pkceChallenge(codeVerifier);
   const now = Date.now();
   await getDb()
-    .prepare("INSERT INTO asana_oauth_states (state_hash, user_id, code_verifier, redirect_to, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .prepare(
+      "INSERT INTO asana_oauth_states (state_hash, user_id, code_verifier, redirect_to, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
     .bind(stateHash, user.id, codeVerifier, "/profile/asana", now, now + oauthStateTtlMs)
     .run();
 
@@ -510,11 +512,13 @@ export async function getAsanaConnectionSummaryForCurrentUser(): Promise<AsanaCo
   try {
     connection = await getConnectionForUser(user.id);
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_connection_summary_connection_failed",
-      userId: user.id,
-      error: error instanceof Error ? error.message : "Unknown Asana connection lookup failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_connection_summary_connection_failed",
+        userId: user.id,
+        error: error instanceof Error ? error.message : "Unknown Asana connection lookup failure",
+      }),
+    );
   }
   const scopes = parseScopes(connection?.scopes ?? "");
   const missingScopes = defaultAsanaScopes.filter((scope) => !hasAsanaScope(scopes, scope));
@@ -532,11 +536,13 @@ export async function getAsanaConnectionSummaryForCurrentUser(): Promise<AsanaCo
       asanaProjects = await listMemberAsanaProjects(user.id, scopes);
     } catch (error) {
       projectDiscoveryIssue = error instanceof Error ? error.message : "Unknown Asana project refresh failure";
-      console.warn(JSON.stringify({
-        event: "asana_project_refresh_failed",
-        userId: user.id,
-        error: projectDiscoveryIssue,
-      }));
+      console.warn(
+        JSON.stringify({
+          event: "asana_project_refresh_failed",
+          userId: user.id,
+          error: projectDiscoveryIssue,
+        }),
+      );
     }
   }
 
@@ -545,15 +551,15 @@ export async function getAsanaConnectionSummaryForCurrentUser(): Promise<AsanaCo
     configured,
     connection: connection
       ? {
-        id: connection.id,
-        asanaUserGid: connection.asanaUserGid,
-        asanaUserName: connection.asanaUserName,
-        asanaUserEmail: connection.asanaUserEmail,
-        scopes,
-        autoSyncTasksEnabled: Boolean(connection.autoSyncTasksEnabled),
-        connectedAt: connection.connectedAt,
-        updatedAt: connection.updatedAt,
-      }
+          id: connection.id,
+          asanaUserGid: connection.asanaUserGid,
+          asanaUserName: connection.asanaUserName,
+          asanaUserEmail: connection.asanaUserEmail,
+          scopes,
+          autoSyncTasksEnabled: Boolean(connection.autoSyncTasksEnabled),
+          connectedAt: connection.connectedAt,
+          updatedAt: connection.updatedAt,
+        }
       : null,
     requiredScopes: defaultAsanaScopes,
     missingScopes,
@@ -570,64 +576,73 @@ async function safeSummaryRead<T>(event: string, userId: string, read: () => Pro
   try {
     return await read();
   } catch (error) {
-    console.warn(JSON.stringify({
-      event,
-      userId,
-      error: error instanceof Error ? error.message : "Unknown Asana summary read failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event,
+        userId,
+        error: error instanceof Error ? error.message : "Unknown Asana summary read failure",
+      }),
+    );
     return fallback;
   }
 }
 
 export async function saveAsanaProjectMappingsForCurrentUser(data: { selections: AsanaMappingSelection[] }) {
-    const user = await requireWorkspaceEditor();
-    const request = getRequest();
-    const connection = await getConnectionForUser(user.id);
-    if (!connection) throw new Error("Connect Asana before mapping projects.");
+  const user = await requireWorkspaceEditor();
+  const request = getRequest();
+  const connection = await getConnectionForUser(user.id);
+  if (!connection) throw new Error("Connect Asana before mapping projects.");
 
-    const scopes = parseScopes(connection.scopes);
-    const asanaProjects = await listMemberAsanaProjects(user.id, scopes);
-    const asanaProjectByGid = new Map(asanaProjects.map((project) => [project.gid, project]));
-    const tokenSet = await getValidAsanaTokens({ env: integrationEnv(), userId: user.id });
-    const asanaUser = tokenSet ? await fetchAsanaMe(tokenSet.accessToken) : null;
-    const results: Array<{ asanaProjectGid: string; action: string; vertexProjectId?: string; webhookStatus?: string; webhookGid?: string | null }> = [];
+  const scopes = parseScopes(connection.scopes);
+  const asanaProjects = await listMemberAsanaProjects(user.id, scopes);
+  const asanaProjectByGid = new Map(asanaProjects.map((project) => [project.gid, project]));
+  const tokenSet = await getValidAsanaTokens({ env: integrationEnv(), userId: user.id });
+  const asanaUser = tokenSet ? await fetchAsanaMe(tokenSet.accessToken) : null;
+  const results: Array<{
+    asanaProjectGid: string;
+    action: string;
+    vertexProjectId?: string;
+    webhookStatus?: string;
+    webhookGid?: string | null;
+  }> = [];
 
-    for (const selection of data.selections) {
-      if (selection.action === "ignore") continue;
-      let asanaProject = asanaProjectByGid.get(selection.asanaProjectGid);
-      if (!asanaProject) throw new Error("Asana project is not visible to the connected user.");
-      if (tokenSet && asanaUser) {
-        asanaProject = await resolveAsanaProjectWriteAccess(tokenSet.accessToken, asanaUser.gid, asanaProject, scopes);
-      }
+  for (const selection of data.selections) {
+    if (selection.action === "ignore") continue;
+    let asanaProject = asanaProjectByGid.get(selection.asanaProjectGid);
+    if (!asanaProject) throw new Error("Asana project is not visible to the connected user.");
+    if (tokenSet && asanaUser) {
+      asanaProject = await resolveAsanaProjectWriteAccess(tokenSet.accessToken, asanaUser.gid, asanaProject, scopes);
+    }
 
-      const vertexProject = selection.action === "scaffold"
+    const vertexProject =
+      selection.action === "scaffold"
         ? await scaffoldVertexProjectForAsana(user.id, asanaProject, selection.targetMode ?? "Team", selection.targetTeamId ?? null)
         : await getAccessibleVertexProject(user.id, selection.vertexProjectId ?? "");
-      if (!vertexProject) throw new Error("Select a VertexAI project you can access.");
-      await upsertAsanaProjectMapping({ connectionId: connection.id, userId: user.id, asanaProject, vertexProject });
-      const webhook = tokenSet
-        ? await ensureAsanaProjectWebhook({
+    if (!vertexProject) throw new Error("Select a VertexAI project you can access.");
+    await upsertAsanaProjectMapping({ connectionId: connection.id, userId: user.id, asanaProject, vertexProject });
+    const webhook = tokenSet
+      ? await ensureAsanaProjectWebhook({
           accessToken: tokenSet.accessToken,
           asanaProject,
           origin: asanaWebhookOrigin(request),
           userId: user.id,
         })
-        : await recordAsanaProjectWebhookFailure({
+      : await recordAsanaProjectWebhookFailure({
           asanaProject,
           error: "Asana OAuth token is unavailable; reconnect Asana and retry webhook setup.",
           origin: asanaWebhookOrigin(request),
           userId: user.id,
         });
-      results.push({
-        asanaProjectGid: asanaProject.gid,
-        action: selection.action,
-        vertexProjectId: vertexProject.id,
-        webhookGid: webhook.webhookGid,
-        webhookStatus: webhook.status,
-      });
-    }
+    results.push({
+      asanaProjectGid: asanaProject.gid,
+      action: selection.action,
+      vertexProjectId: vertexProject.id,
+      webhookGid: webhook.webhookGid,
+      webhookStatus: webhook.status,
+    });
+  }
 
-    return { saved: results.length, results };
+  return { saved: results.length, results };
 }
 
 export async function repairAsanaProjectWebhooksForCurrentUser() {
@@ -690,7 +705,11 @@ export async function createAsanaTaskForMappedProjectForCurrentUser(data: { vert
   });
 }
 
-export async function createAsanaTaskForWorkflowTaskForCurrentUser(data: { title: string; notes?: string; vertexProjectId?: string | null }) {
+export async function createAsanaTaskForWorkflowTaskForCurrentUser(data: {
+  title: string;
+  notes?: string;
+  vertexProjectId?: string | null;
+}) {
   const user = await requireWorkspaceEditor();
   const title = data.title.trim();
   if (!title) throw new Error("Task title is required.");
@@ -721,7 +740,8 @@ export async function createAsanaTaskForWorkflowTaskForCurrentUser(data: { title
       .bind(user.id, data.vertexProjectId)
       .first<{ asanaProjectGid: string; canWriteTasks: number | boolean }>();
     if (!mapping) throw new Error("This VertexAI project is not mapped to Asana.");
-    if (!Boolean(mapping.canWriteTasks)) throw new Error("Your Asana permission for this project is read-only. Task submission is disabled.");
+    if (!Boolean(mapping.canWriteTasks))
+      throw new Error("Your Asana permission for this project is read-only. Task submission is disabled.");
     payload.projects = [mapping.asanaProjectGid];
   } else {
     const asanaUser = await fetchAsanaMe(tokenSet.accessToken);
@@ -750,7 +770,9 @@ async function resolveDefaultAsanaWorkspaceForUser(userId: string, asanaUser: As
   const mappedWorkspaceGids = (mappedWorkspaces.results ?? []).map((row) => row.gid).filter(Boolean);
   if (mappedWorkspaceGids.length === 1) return mappedWorkspaceGids[0];
   if (mappedWorkspaceGids.length > 1) {
-    throw new Error("Non-project Asana tasks need one default workspace, but this account has mapped projects in multiple Asana workspaces.");
+    throw new Error(
+      "Non-project Asana tasks need one default workspace, but this account has mapped projects in multiple Asana workspaces.",
+    );
   }
 
   const accountWorkspaceGids = (asanaUser.workspaces ?? []).map((workspace) => workspace.gid).filter(Boolean);
@@ -761,7 +783,9 @@ async function resolveDefaultAsanaWorkspaceForUser(userId: string, asanaUser: As
   throw new Error("No Asana workspace is available for non-project task creation.");
 }
 
-export async function listAsanaTaskStatusCustomFieldsForCurrentUser(data: { vertexProjectId: string }): Promise<AsanaTaskStatusCustomFieldOption[]> {
+export async function listAsanaTaskStatusCustomFieldsForCurrentUser(data: {
+  vertexProjectId: string;
+}): Promise<AsanaTaskStatusCustomFieldOption[]> {
   const user = await requireSignedInUser();
   const connection = await getConnectionForUser(user.id);
   if (!connection) return [];
@@ -884,12 +908,14 @@ export async function fetchAsanaProjectContextForCurrentUser({
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Asana context fetch failure.";
-    console.warn(JSON.stringify({
-      event: "asana_chat_context_failed",
-      vertexProjectId,
-      asanaProjectGid: mapping.asanaProjectGid,
-      error: message,
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_chat_context_failed",
+        vertexProjectId,
+        asanaProjectGid: mapping.asanaProjectGid,
+        error: message,
+      }),
+    );
     return `Asana search was enabled, but Asana context could not be loaded: ${message}`;
   }
 }
@@ -905,7 +931,9 @@ export async function handleAsanaOAuthCallback(request: Request) {
 
   const stateHash = await sha256Hex(state);
   const stateRecord = await getDb()
-    .prepare("SELECT user_id as userId, code_verifier as codeVerifier, redirect_to as redirectTo, expires_at as expiresAt FROM asana_oauth_states WHERE state_hash = ? LIMIT 1")
+    .prepare(
+      "SELECT user_id as userId, code_verifier as codeVerifier, redirect_to as redirectTo, expires_at as expiresAt FROM asana_oauth_states WHERE state_hash = ? LIMIT 1",
+    )
     .bind(stateHash)
     .first<{ userId: string; codeVerifier: string; redirectTo: string | null; expiresAt: number }>();
 
@@ -958,15 +986,7 @@ export async function handleAsanaOAuthCallback(request: Request) {
   return Response.redirect(`${url.origin}${stateRecord.redirectTo ?? "/profile/asana"}?connected=1`, 302);
 }
 
-async function exchangeAsanaCode({
-  code,
-  codeVerifier,
-  redirectUri,
-}: {
-  code: string;
-  codeVerifier: string;
-  redirectUri: string;
-}) {
+async function exchangeAsanaCode({ code, codeVerifier, redirectUri }: { code: string; codeVerifier: string; redirectUri: string }) {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: asanaClientId(),
@@ -1002,10 +1022,12 @@ async function listMemberAsanaProjects(userId: string, scopes: string[]) {
   const projects: AsanaProjectOption[] = [];
   for (const workspace of me.workspaces ?? []) {
     const teams = await listAsanaTeamsForUser(tokenSet.accessToken, me.gid, workspace.gid);
-    const membershipResults = await Promise.all(teams.map(async (team) => ({
-      team,
-      memberships: await listProjectMembershipsForTeam(tokenSet.accessToken, team.gid),
-    })));
+    const membershipResults = await Promise.all(
+      teams.map(async (team) => ({
+        team,
+        memberships: await listProjectMembershipsForTeam(tokenSet.accessToken, team.gid),
+      })),
+    );
     for (const { memberships, team } of membershipResults) {
       for (const membership of memberships) {
         if (!membership.parent?.gid || membership.parent.archived) continue;
@@ -1022,22 +1044,27 @@ async function listMemberAsanaProjects(userId: string, scopes: string[]) {
           portfolioName: null,
           canWriteTasks,
           permissionLevel: writeAccess === true ? "write" : "unknown",
-          permissionSource: writeAccess === true
-            ? "Asana team project membership access_level/write_access plus task-write authorization"
-            : writeAccess === false
-              ? `Asana team project membership is ${membership.access_level ?? "read-only"}; user write access will be checked when mapping is saved`
-              : "Asana did not return access_level or write_access; user write access will be checked when mapping is saved",
+          permissionSource:
+            writeAccess === true
+              ? "Asana team project membership access_level/write_access plus task-write authorization"
+              : writeAccess === false
+                ? `Asana team project membership is ${membership.access_level ?? "read-only"}; user write access will be checked when mapping is saved`
+                : "Asana did not return access_level or write_access; user write access will be checked when mapping is saved",
         });
       }
     }
     const portfolioMemberships = await listAsanaPortfolioMembershipsForUser(tokenSet.accessToken, workspace.gid);
-    const portfolios = dedupeAsanaPortfolios(portfolioMemberships
-      .map((membership) => membership.portfolio ?? membership.parent)
-      .filter((portfolio): portfolio is AsanaPortfolio => Boolean(portfolio?.gid)));
-    const portfolioResults = await Promise.all(portfolios.map(async (portfolio) => ({
-      portfolio,
-      items: await listAsanaPortfolioItems(tokenSet.accessToken, portfolio.gid),
-    })));
+    const portfolios = dedupeAsanaPortfolios(
+      portfolioMemberships
+        .map((membership) => membership.portfolio ?? membership.parent)
+        .filter((portfolio): portfolio is AsanaPortfolio => Boolean(portfolio?.gid)),
+    );
+    const portfolioResults = await Promise.all(
+      portfolios.map(async (portfolio) => ({
+        portfolio,
+        items: await listAsanaPortfolioItems(tokenSet.accessToken, portfolio.gid),
+      })),
+    );
     for (const { items, portfolio } of portfolioResults) {
       for (const item of items) {
         if (item.resource_type && item.resource_type !== "project") continue;
@@ -1063,77 +1090,69 @@ async function listMemberAsanaProjects(userId: string, scopes: string[]) {
 }
 
 async function listAsanaTeamsForUser(accessToken: string, userGid: string, workspaceGid: string) {
-  return asanaFetchPaginated<AsanaTeam>(
-    accessToken,
-    `/users/${encodeURIComponent(userGid)}/teams`,
-    {
-      organization: workspaceGid,
-      opt_fields: "gid,name",
-      limit: "100",
-    },
-  );
+  return asanaFetchPaginated<AsanaTeam>(accessToken, `/users/${encodeURIComponent(userGid)}/teams`, {
+    organization: workspaceGid,
+    opt_fields: "gid,name",
+    limit: "100",
+  });
 }
 
 async function listProjectMembershipsForTeam(accessToken: string, teamGid: string) {
   try {
-    return await asanaFetchPaginated<AsanaProjectMembership>(
-      accessToken,
-      "/memberships",
-      {
-        member: teamGid,
-        resource_subtype: "project_membership",
-        opt_fields: "gid,access_level,write_access,member.gid,member.resource_type,parent.gid,parent.name,parent.archived,parent.workspace.gid,parent.workspace.name",
-        limit: "100",
-      },
-    );
+    return await asanaFetchPaginated<AsanaProjectMembership>(accessToken, "/memberships", {
+      member: teamGid,
+      resource_subtype: "project_membership",
+      opt_fields:
+        "gid,access_level,write_access,member.gid,member.resource_type,parent.gid,parent.name,parent.archived,parent.workspace.gid,parent.workspace.name",
+      limit: "100",
+    });
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_team_project_memberships_failed",
-      teamGid,
-      error: error instanceof Error ? error.message : "Unknown Asana membership probe failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_team_project_memberships_failed",
+        teamGid,
+        error: error instanceof Error ? error.message : "Unknown Asana membership probe failure",
+      }),
+    );
     return [];
   }
 }
 
 async function listAsanaPortfolioMembershipsForUser(accessToken: string, workspaceGid: string) {
   try {
-    return await asanaFetchPaginated<AsanaPortfolioMembership>(
-      accessToken,
-      "/portfolio_memberships",
-      {
-        workspace: workspaceGid,
-        user: "me",
-        opt_fields: "gid,access_level,write_access,portfolio.gid,portfolio.name,portfolio.workspace.gid,portfolio.workspace.name,parent.gid,parent.name,parent.workspace.gid,parent.workspace.name",
-        limit: "100",
-      },
-    );
+    return await asanaFetchPaginated<AsanaPortfolioMembership>(accessToken, "/portfolio_memberships", {
+      workspace: workspaceGid,
+      user: "me",
+      opt_fields:
+        "gid,access_level,write_access,portfolio.gid,portfolio.name,portfolio.workspace.gid,portfolio.workspace.name,parent.gid,parent.name,parent.workspace.gid,parent.workspace.name",
+      limit: "100",
+    });
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_portfolio_memberships_failed",
-      workspaceGid,
-      error: error instanceof Error ? error.message : "Unknown Asana portfolio membership discovery failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_portfolio_memberships_failed",
+        workspaceGid,
+        error: error instanceof Error ? error.message : "Unknown Asana portfolio membership discovery failure",
+      }),
+    );
     return [];
   }
 }
 
 async function listAsanaPortfolioItems(accessToken: string, portfolioGid: string) {
   try {
-    return await asanaFetchPaginated<AsanaPortfolioItem>(
-      accessToken,
-      `/portfolios/${encodeURIComponent(portfolioGid)}/items`,
-      {
-        opt_fields: "gid,name,resource_type,archived,workspace.gid,workspace.name",
-        limit: "100",
-      },
-    );
+    return await asanaFetchPaginated<AsanaPortfolioItem>(accessToken, `/portfolios/${encodeURIComponent(portfolioGid)}/items`, {
+      opt_fields: "gid,name,resource_type,archived,workspace.gid,workspace.name",
+      limit: "100",
+    });
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_portfolio_items_failed",
-      portfolioGid,
-      error: error instanceof Error ? error.message : "Unknown Asana portfolio item discovery failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_portfolio_items_failed",
+        portfolioGid,
+        error: error instanceof Error ? error.message : "Unknown Asana portfolio item discovery failure",
+      }),
+    );
     return [];
   }
 }
@@ -1165,11 +1184,12 @@ async function resolveAsanaProjectWriteAccess(accessToken: string, userGid: stri
     ...project,
     canWriteTasks: hasAsanaScope(scopes, "tasks:write") && writeAccess === true,
     permissionLevel: writeAccess === true ? "write" : writeAccess === false ? "read" : "unknown",
-    permissionSource: writeAccess === true
-      ? "Asana user project membership access_level/write_access plus task-write authorization"
-      : writeAccess === false
-        ? `Asana user project membership is ${membership.access_level ?? "read-only"}`
-        : "Asana did not return user access_level or write_access; task writes are disabled until permission is confirmed",
+    permissionSource:
+      writeAccess === true
+        ? "Asana user project membership access_level/write_access plus task-write authorization"
+        : writeAccess === false
+          ? `Asana user project membership is ${membership.access_level ?? "read-only"}`
+          : "Asana did not return user access_level or write_access; task writes are disabled until permission is confirmed",
   } satisfies AsanaProjectOption;
 }
 
@@ -1186,30 +1206,30 @@ async function getProjectMembershipForUser(accessToken: string, projectGid: stri
     );
     return memberships[0] ?? null;
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_user_project_membership_failed",
-      projectGid,
-      error: error instanceof Error ? error.message : "Unknown Asana user membership probe failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_user_project_membership_failed",
+        projectGid,
+        error: error instanceof Error ? error.message : "Unknown Asana user membership probe failure",
+      }),
+    );
     return null;
   }
 }
 
 async function fetchAsanaProject(accessToken: string, projectGid: string) {
   try {
-    return await asanaFetch<AsanaProject>(
-      accessToken,
-      `/projects/${encodeURIComponent(projectGid)}`,
-      {
-        query: { opt_fields: "gid,name,archived,owner.gid,owner.name" },
-      },
-    );
+    return await asanaFetch<AsanaProject>(accessToken, `/projects/${encodeURIComponent(projectGid)}`, {
+      query: { opt_fields: "gid,name,archived,owner.gid,owner.name" },
+    });
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_project_owner_probe_failed",
-      projectGid,
-      error: error instanceof Error ? error.message : "Unknown Asana project owner probe failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_project_owner_probe_failed",
+        projectGid,
+        error: error instanceof Error ? error.message : "Unknown Asana project owner probe failure",
+      }),
+    );
     return null;
   }
 }
@@ -1271,11 +1291,13 @@ async function listAsanaProjectCustomFields(accessToken: string, projectGid: str
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_custom_field_settings_failed",
-      projectGid,
-      error: error instanceof Error ? error.message : "Unknown Asana custom field settings failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_custom_field_settings_failed",
+        projectGid,
+        error: error instanceof Error ? error.message : "Unknown Asana custom field settings failure",
+      }),
+    );
     return [];
   }
 }
@@ -1297,28 +1319,32 @@ function collectTaskCustomFieldOptions(tasks: AsanaTaskContextRow[]) {
 }
 
 async function fetchStoriesForContextTasks(accessToken: string, tasks: AsanaTaskContextRow[]) {
-  const entries = await Promise.all(tasks.map(async (task) => {
-    try {
-      const stories = await asanaFetchPaginated<AsanaStoryContextRow>(
-        accessToken,
-        `/tasks/${encodeURIComponent(task.gid)}/stories`,
-        {
-          opt_fields: "gid,created_at,created_by.name,text,type,resource_subtype",
-          limit: "20",
-        },
-        5,
-        { limitBehavior: "truncate", limitLabel: "Asana task story context" },
-      );
-      return [task.gid, stories.filter(isUsefulAsanaStory).slice(-asanaContextStoriesPerTask)] as const;
-    } catch (error) {
-      console.warn(JSON.stringify({
-        event: "asana_task_stories_context_failed",
-        taskGid: task.gid,
-        error: error instanceof Error ? error.message : "Unknown Asana task story failure",
-      }));
-      return [task.gid, [] as AsanaStoryContextRow[]] as const;
-    }
-  }));
+  const entries = await Promise.all(
+    tasks.map(async (task) => {
+      try {
+        const stories = await asanaFetchPaginated<AsanaStoryContextRow>(
+          accessToken,
+          `/tasks/${encodeURIComponent(task.gid)}/stories`,
+          {
+            opt_fields: "gid,created_at,created_by.name,text,type,resource_subtype",
+            limit: "20",
+          },
+          5,
+          { limitBehavior: "truncate", limitLabel: "Asana task story context" },
+        );
+        return [task.gid, stories.filter(isUsefulAsanaStory).slice(-asanaContextStoriesPerTask)] as const;
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "asana_task_stories_context_failed",
+            taskGid: task.gid,
+            error: error instanceof Error ? error.message : "Unknown Asana task story failure",
+          }),
+        );
+        return [task.gid, [] as AsanaStoryContextRow[]] as const;
+      }
+    }),
+  );
   return new Map(entries);
 }
 
@@ -1346,8 +1372,8 @@ async function listAsanaStatusUpdatesForMappedProject(
   const [projectUpdates, portfolioUpdates] = await Promise.all([projectUpdatesPromise, portfolioUpdatesPromise]);
   return [...projectUpdates, ...portfolioUpdates]
     .sort((left, right) => {
-      const leftHierarchy = left.sourceType === "portfolio" ? left.sourceDepth ?? 0 : 999;
-      const rightHierarchy = right.sourceType === "portfolio" ? right.sourceDepth ?? 0 : 999;
+      const leftHierarchy = left.sourceType === "portfolio" ? (left.sourceDepth ?? 0) : 999;
+      const rightHierarchy = right.sourceType === "portfolio" ? (right.sourceDepth ?? 0) : 999;
       if (leftHierarchy !== rightHierarchy) return leftHierarchy - rightHierarchy;
       const dateDiff = Date.parse(right.created_at ?? "") - Date.parse(left.created_at ?? "");
       if (dateDiff !== 0) return dateDiff;
@@ -1369,28 +1395,32 @@ async function listAsanaPortfolioStatusUpdatesForProject(
   const portfolios = await listAsanaPortfoliosContainingProject(accessToken, mapping.asanaWorkspaceGid, mapping.asanaProjectGid);
   if (!portfolios.length) return [];
 
-  const updateGroups = await Promise.all(portfolios.map((portfolio) => (
-    listAsanaStatusUpdatesForContext(accessToken, {
-      parentGid: portfolio.gid,
-      sourceType: "portfolio",
-      sourceName: portfolio.name,
-      sourceDepth: portfolio.depth,
-      sourcePath: portfolio.path,
-      logContext: {
-        projectGid: mapping.asanaProjectGid,
-        portfolioGid: portfolio.gid,
-      },
-    })
-  )));
+  const updateGroups = await Promise.all(
+    portfolios.map((portfolio) =>
+      listAsanaStatusUpdatesForContext(accessToken, {
+        parentGid: portfolio.gid,
+        sourceType: "portfolio",
+        sourceName: portfolio.name,
+        sourceDepth: portfolio.depth,
+        sourcePath: portfolio.path,
+        logContext: {
+          projectGid: mapping.asanaProjectGid,
+          portfolioGid: portfolio.gid,
+        },
+      }),
+    ),
+  );
   return updateGroups.flat();
 }
 
 async function listAsanaPortfoliosContainingProject(accessToken: string, workspaceGid: string, projectGid: string) {
   try {
     const memberships = await listAsanaPortfolioMembershipsForUser(accessToken, workspaceGid);
-    const rootPortfolios = dedupeAsanaPortfolios(memberships
-      .map((membership) => membership.portfolio ?? membership.parent)
-      .filter((portfolio): portfolio is AsanaPortfolio => Boolean(portfolio?.gid)));
+    const rootPortfolios = dedupeAsanaPortfolios(
+      memberships
+        .map((membership) => membership.portfolio ?? membership.parent)
+        .filter((portfolio): portfolio is AsanaPortfolio => Boolean(portfolio?.gid)),
+    );
     const contextsByGid = new Map<string, AsanaPortfolioContext>();
 
     async function visitPortfolio(portfolio: AsanaPortfolio, path: string[], visited: Set<string>) {
@@ -1399,19 +1429,19 @@ async function listAsanaPortfoliosContainingProject(accessToken: string, workspa
       nextVisited.add(portfolio.gid);
       const nextPath = [...path, portfolio.name];
       const items = await listAsanaPortfolioItems(accessToken, portfolio.gid);
-      let containsProject = items.some((item) =>
-        item.gid === projectGid
-          && (!item.resource_type || item.resource_type === "project")
-          && !item.archived,
+      let containsProject = items.some(
+        (item) => item.gid === projectGid && (!item.resource_type || item.resource_type === "project") && !item.archived,
       );
 
       const childPortfolios = items
         .filter((item) => item.gid && item.resource_type === "portfolio" && !item.archived)
-        .map((item): AsanaPortfolio => ({
-          gid: item.gid,
-          name: item.name,
-          workspace: item.workspace ?? portfolio.workspace,
-        }));
+        .map(
+          (item): AsanaPortfolio => ({
+            gid: item.gid,
+            name: item.name,
+            workspace: item.workspace ?? portfolio.workspace,
+          }),
+        );
 
       for (const childPortfolio of childPortfolios) {
         const childContainsProject = await visitPortfolio(childPortfolio, nextPath, nextVisited);
@@ -1433,18 +1463,19 @@ async function listAsanaPortfoliosContainingProject(accessToken: string, workspa
     }
 
     await Promise.all(rootPortfolios.map((portfolio) => visitPortfolio(portfolio, [], new Set())));
-    return [...contextsByGid.values()].sort((left, right) =>
-      left.depth - right.depth
-        || left.path.join(" / ").localeCompare(right.path.join(" / "))
-        || left.name.localeCompare(right.name),
+    return [...contextsByGid.values()].sort(
+      (left, right) =>
+        left.depth - right.depth || left.path.join(" / ").localeCompare(right.path.join(" / ")) || left.name.localeCompare(right.name),
     );
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_project_portfolio_context_failed",
-      workspaceGid,
-      projectGid,
-      error: error instanceof Error ? error.message : "Unknown Asana project portfolio context failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_project_portfolio_context_failed",
+        workspaceGid,
+        projectGid,
+        error: error instanceof Error ? error.message : "Unknown Asana project portfolio context failure",
+      }),
+    );
     return [];
   }
 }
@@ -1461,17 +1492,19 @@ async function listAsanaStatusUpdatesForContext(
   },
 ) {
   try {
-    return (await asanaFetchPaginated<AsanaStatusUpdateContextRow>(
-      accessToken,
-      "/status_updates",
-      {
-        parent: source.parentGid,
-        opt_fields: "gid,title,text,color,created_at,created_by.name",
-        limit: "20",
-      },
-      5,
-      { limitBehavior: "truncate", limitLabel: `Asana ${source.sourceType} status update context` },
-    ))
+    return (
+      await asanaFetchPaginated<AsanaStatusUpdateContextRow>(
+        accessToken,
+        "/status_updates",
+        {
+          parent: source.parentGid,
+          opt_fields: "gid,title,text,color,created_at,created_by.name",
+          limit: "20",
+        },
+        5,
+        { limitBehavior: "truncate", limitLabel: `Asana ${source.sourceType} status update context` },
+      )
+    )
       .sort((left, right) => Date.parse(right.created_at ?? "") - Date.parse(left.created_at ?? ""))
       .slice(0, 10)
       .map((update) => ({
@@ -1483,13 +1516,15 @@ async function listAsanaStatusUpdatesForContext(
         sourcePath: source.sourcePath,
       }));
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_status_updates_context_failed",
-      sourceType: source.sourceType,
-      parentGid: source.parentGid,
-      ...source.logContext,
-      error: error instanceof Error ? error.message : "Unknown Asana status update failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_status_updates_context_failed",
+        sourceType: source.sourceType,
+        parentGid: source.parentGid,
+        ...source.logContext,
+        error: error instanceof Error ? error.message : "Unknown Asana status update failure",
+      }),
+    );
     return [];
   }
 }
@@ -1499,7 +1534,12 @@ function isUsefulAsanaStory(story: AsanaStoryContextRow) {
 }
 
 function rankAsanaTasksForPrompt(tasks: AsanaTaskContextRow[], prompt: string) {
-  const terms = new Set(prompt.toLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length > 2));
+  const terms = new Set(
+    prompt
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length > 2),
+  );
   return [...tasks].sort((left, right) => {
     const leftScore = scoreAsanaTask(left, terms);
     const rightScore = scoreAsanaTask(right, terms);
@@ -1509,12 +1549,10 @@ function rankAsanaTasksForPrompt(tasks: AsanaTaskContextRow[], prompt: string) {
 }
 
 function scoreAsanaTask(task: AsanaTaskContextRow, terms: Set<string>) {
-  const haystack = [
-    task.name,
-    task.notes,
-    task.assignee?.name,
-    ...(task.memberships ?? []).map((membership) => membership.section?.name),
-  ].filter(Boolean).join(" ").toLowerCase();
+  const haystack = [task.name, task.notes, task.assignee?.name, ...(task.memberships ?? []).map((membership) => membership.section?.name)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
   let score = task.completed ? 0 : 8;
   for (const term of terms) {
     if (haystack.includes(term)) score += 5;
@@ -1529,12 +1567,17 @@ function scoreAsanaTask(task: AsanaTaskContextRow, terms: Set<string>) {
 }
 
 function asanaCustomFieldValue(field: AsanaTaskCustomFieldContextRow) {
-  const multiEnum = field.multi_enum_values?.map((value) => value.name).filter(Boolean).join(", ");
-  return field.display_value
-    ?? field.enum_value?.name
-    ?? multiEnum
-    ?? field.text_value
-    ?? (typeof field.number_value === "number" ? String(field.number_value) : null);
+  const multiEnum = field.multi_enum_values
+    ?.map((value) => value.name)
+    .filter(Boolean)
+    .join(", ");
+  return (
+    field.display_value ??
+    field.enum_value?.name ??
+    multiEnum ??
+    field.text_value ??
+    (typeof field.number_value === "number" ? String(field.number_value) : null)
+  );
 }
 
 function resolveAsanaTaskStatus(task: AsanaTaskContextRow, settings: AsanaTaskStatusSettings) {
@@ -1546,16 +1589,15 @@ function resolveAsanaTaskStatus(task: AsanaTaskContextRow, settings: AsanaTaskSt
   }
 
   const configuredName = settings.customFieldName?.trim().toLowerCase() ?? "";
-  const field = (task.custom_fields ?? []).find((customField) =>
-    (settings.customFieldGid && customField.gid === settings.customFieldGid)
-      || (configuredName && customField.name?.trim().toLowerCase() === configuredName),
+  const field = (task.custom_fields ?? []).find(
+    (customField) =>
+      (settings.customFieldGid && customField.gid === settings.customFieldGid) ||
+      (configuredName && customField.name?.trim().toLowerCase() === configuredName),
   );
   const statusValue = field ? asanaCustomFieldValue(field) : null;
   return {
     label: statusValue?.trim() || "Blank",
-    sourceLabel: settings.customFieldName
-      ? `Asana custom field: ${settings.customFieldName}`
-      : "Asana custom field",
+    sourceLabel: settings.customFieldName ? `Asana custom field: ${settings.customFieldName}` : "Asana custom field",
   };
 }
 
@@ -1575,9 +1617,10 @@ function buildAsanaTaskStatusSummary(tasks: AsanaTaskContextRow[], settings: Asa
 
   return {
     lines: sortedCounts,
-    sourceLabel: settings.source === "custom_field"
-      ? `Asana custom field ${settings.customFieldName ?? settings.customFieldGid ?? "(not selected)"}`
-      : "Native Asana completion",
+    sourceLabel:
+      settings.source === "custom_field"
+        ? `Asana custom field ${settings.customFieldName ?? settings.customFieldGid ?? "(not selected)"}`
+        : "Native Asana completion",
     totalTasks: tasks.length,
   };
 }
@@ -1586,7 +1629,10 @@ function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value);
 }
@@ -1597,7 +1643,12 @@ function cleanSnapshotText(value: string | null | undefined, maxLength = 260) {
 }
 
 function taskSection(task: AsanaTaskContextRow) {
-  return task.memberships?.map((membership) => membership.section?.name).filter(Boolean).join(", ") ?? "";
+  return (
+    task.memberships
+      ?.map((membership) => membership.section?.name)
+      .filter(Boolean)
+      .join(", ") ?? ""
+  );
 }
 
 function normalizeCustomFields(fields: AsanaTaskCustomFieldContextRow[] | undefined) {
@@ -1627,83 +1678,85 @@ async function normalizeAsanaSnapshot({
   taskStatusSettings: AsanaTaskStatusSettings;
   tasks: AsanaTaskContextRow[];
 }): Promise<NormalizedAsanaSnapshot> {
-  const normalizedTasks = await Promise.all(tasks.map(async (task) => {
-    const customFieldsHash = await sha256Hex(stableJson(normalizeCustomFields(task.custom_fields)));
-    const notesHash = await sha256Hex(task.notes?.trim() ?? "");
-    const status = resolveAsanaTaskStatus(task, taskStatusSettings).label;
-    const snapshotBase = {
-      gid: task.gid,
-      name: task.name,
-      status,
-      completed: Boolean(task.completed),
-      assignee: task.assignee?.name?.trim() ?? "",
-      due: task.due_on ?? task.due_at ?? "",
-      modifiedAt: task.modified_at ?? "",
-      section: taskSection(task),
-      notesPreview: cleanSnapshotText(task.notes),
-      notesHash,
-      customFieldsHash,
-    };
-    return {
-      ...snapshotBase,
-      fingerprint: await sha256Hex(stableJson(snapshotBase)),
-    };
-  }));
-
-  const normalizedStatusUpdates = await Promise.all(statusUpdates.map(async (update) => {
-    const textHash = await sha256Hex(update.text?.trim() ?? "");
-    const snapshotBase = {
-      gid: update.gid,
-      sourceType: update.sourceType,
-      sourceName: update.sourceName,
-      title: update.title?.trim() ?? "",
-      color: update.color?.trim() ?? "",
-      createdAt: update.created_at ?? "",
-      textPreview: cleanSnapshotText(update.text),
-      textHash,
-    };
-    return {
-      ...snapshotBase,
-      fingerprint: await sha256Hex(stableJson(snapshotBase)),
-    };
-  }));
-
-  const storyEntries = [...storiesByTaskGid.entries()].flatMap(([taskGid, stories]) =>
-    stories.map((story) => ({ taskGid, story })),
+  const normalizedTasks = await Promise.all(
+    tasks.map(async (task) => {
+      const customFieldsHash = await sha256Hex(stableJson(normalizeCustomFields(task.custom_fields)));
+      const notesHash = await sha256Hex(task.notes?.trim() ?? "");
+      const status = resolveAsanaTaskStatus(task, taskStatusSettings).label;
+      const snapshotBase = {
+        gid: task.gid,
+        name: task.name,
+        status,
+        completed: Boolean(task.completed),
+        assignee: task.assignee?.name?.trim() ?? "",
+        due: task.due_on ?? task.due_at ?? "",
+        modifiedAt: task.modified_at ?? "",
+        section: taskSection(task),
+        notesPreview: cleanSnapshotText(task.notes),
+        notesHash,
+        customFieldsHash,
+      };
+      return {
+        ...snapshotBase,
+        fingerprint: await sha256Hex(stableJson(snapshotBase)),
+      };
+    }),
   );
-  const normalizedStories = await Promise.all(storyEntries.map(async ({ taskGid, story }) => {
-    const textHash = await sha256Hex(story.text?.trim() ?? "");
-    const snapshotBase = {
-      gid: story.gid,
-      taskGid,
-      createdAt: story.created_at ?? "",
-      author: story.created_by?.name?.trim() ?? "",
-      textPreview: cleanSnapshotText(story.text),
-      textHash,
-    };
-    return {
-      ...snapshotBase,
-      fingerprint: await sha256Hex(stableJson(snapshotBase)),
-    };
-  }));
+
+  const normalizedStatusUpdates = await Promise.all(
+    statusUpdates.map(async (update) => {
+      const textHash = await sha256Hex(update.text?.trim() ?? "");
+      const snapshotBase = {
+        gid: update.gid,
+        sourceType: update.sourceType,
+        sourceName: update.sourceName,
+        title: update.title?.trim() ?? "",
+        color: update.color?.trim() ?? "",
+        createdAt: update.created_at ?? "",
+        textPreview: cleanSnapshotText(update.text),
+        textHash,
+      };
+      return {
+        ...snapshotBase,
+        fingerprint: await sha256Hex(stableJson(snapshotBase)),
+      };
+    }),
+  );
+
+  const storyEntries = [...storiesByTaskGid.entries()].flatMap(([taskGid, stories]) => stories.map((story) => ({ taskGid, story })));
+  const normalizedStories = await Promise.all(
+    storyEntries.map(async ({ taskGid, story }) => {
+      const textHash = await sha256Hex(story.text?.trim() ?? "");
+      const snapshotBase = {
+        gid: story.gid,
+        taskGid,
+        createdAt: story.created_at ?? "",
+        author: story.created_by?.name?.trim() ?? "",
+        textPreview: cleanSnapshotText(story.text),
+        textHash,
+      };
+      return {
+        ...snapshotBase,
+        fingerprint: await sha256Hex(stableJson(snapshotBase)),
+      };
+    }),
+  );
 
   return {
     asanaProjectGid: mapping.asanaProjectGid,
     asanaProjectName: mapping.asanaProjectName,
     asanaWorkspaceName: mapping.asanaWorkspaceName,
-    taskStatusSource: taskStatusSettings.source === "custom_field"
-      ? `custom_field:${taskStatusSettings.customFieldName ?? taskStatusSettings.customFieldGid ?? ""}`
-      : "native",
+    taskStatusSource:
+      taskStatusSettings.source === "custom_field"
+        ? `custom_field:${taskStatusSettings.customFieldName ?? taskStatusSettings.customFieldGid ?? ""}`
+        : "native",
     tasks: normalizedTasks.sort((left, right) => left.gid.localeCompare(right.gid)),
     statusUpdates: normalizedStatusUpdates.sort((left, right) => left.gid.localeCompare(right.gid)),
     stories: normalizedStories.sort((left, right) => left.gid.localeCompare(right.gid)),
   };
 }
 
-function diffRecords<T extends { gid: string; fingerprint: string }>(
-  previous: T[],
-  current: T[],
-) {
+function diffRecords<T extends { gid: string; fingerprint: string }>(previous: T[], current: T[]) {
   const previousByGid = new Map(previous.map((item) => [item.gid, item]));
   const currentByGid = new Map(current.map((item) => [item.gid, item]));
   const added = current.filter((item) => !previousByGid.has(item.gid));
@@ -1719,8 +1772,7 @@ function diffRecords<T extends { gid: string; fingerprint: string }>(
 
 function changedFields<T extends Record<string, unknown>>(previous: T, current: T, ignored: string[] = ["fingerprint"]) {
   const ignoredSet = new Set(ignored);
-  return Object.keys(current)
-    .filter((key) => !ignoredSet.has(key) && stableJson(previous[key]) !== stableJson(current[key]));
+  return Object.keys(current).filter((key) => !ignoredSet.has(key) && stableJson(previous[key]) !== stableJson(current[key]));
 }
 
 function buildSnapshotDiff(previous: NormalizedAsanaSnapshot | null, current: NormalizedAsanaSnapshot): AsanaSnapshotDiff {
@@ -1758,13 +1810,15 @@ function buildSnapshotDiff(previous: NormalizedAsanaSnapshot | null, current: No
 }
 
 function hasSnapshotDiff(diff: AsanaSnapshotDiff) {
-  return diff.initial
-    || diff.addedTasks.length > 0
-    || diff.removedTasks.length > 0
-    || diff.changedTasks.length > 0
-    || diff.addedStatusUpdates.length > 0
-    || diff.changedStatusUpdates.length > 0
-    || diff.addedStories.length > 0;
+  return (
+    diff.initial ||
+    diff.addedTasks.length > 0 ||
+    diff.removedTasks.length > 0 ||
+    diff.changedTasks.length > 0 ||
+    diff.addedStatusUpdates.length > 0 ||
+    diff.changedStatusUpdates.length > 0 ||
+    diff.addedStories.length > 0
+  );
 }
 
 function taskSnapshotLine(task: NormalizedAsanaTaskSnapshot) {
@@ -1775,7 +1829,9 @@ function taskSnapshotLine(task: NormalizedAsanaTaskSnapshot) {
     task.due ? `due=${task.due}` : "",
     task.section ? `section=${task.section}` : "",
     task.modifiedAt ? `modified=${task.modifiedAt}` : "",
-  ].filter(Boolean).join("; ");
+  ]
+    .filter(Boolean)
+    .join("; ");
 }
 
 function buildSnapshotDiffSummary(diff: AsanaSnapshotDiff) {
@@ -1840,10 +1896,14 @@ function buildAsanaSnapshotDocument({
 
   lines.push("", "## Status Update Changes");
   for (const update of diff.addedStatusUpdates.slice(0, 30)) {
-    lines.push(`- Added: [${update.sourceType}] ${update.sourceName}; ${update.title || "Untitled"}; ${update.createdAt}; ${update.color}; ${update.textPreview}`);
+    lines.push(
+      `- Added: [${update.sourceType}] ${update.sourceName}; ${update.title || "Untitled"}; ${update.createdAt}; ${update.color}; ${update.textPreview}`,
+    );
   }
   for (const update of diff.changedStatusUpdates.slice(0, 30)) {
-    lines.push(`- Changed: [${update.current.sourceType}] ${update.current.sourceName}; ${update.current.title || "Untitled"}; fields changed=${update.fields.join(", ") || "unknown"}; ${update.current.textPreview}`);
+    lines.push(
+      `- Changed: [${update.current.sourceType}] ${update.current.sourceName}; ${update.current.title || "Untitled"}; fields changed=${update.fields.join(", ") || "unknown"}; ${update.current.textPreview}`,
+    );
   }
   if (!diff.addedStatusUpdates.length && !diff.changedStatusUpdates.length) lines.push("- No status update changes detected.");
 
@@ -1961,11 +2021,13 @@ async function persistAsanaSnapshotForRag({
       });
       queued = true;
     } else {
-      console.warn(JSON.stringify({
-        event: "asana_snapshot_rag_bindings_missing",
-        vertexProjectId: mapping.vertexProjectId,
-        asanaProjectGid: mapping.asanaProjectGid,
-      }));
+      console.warn(
+        JSON.stringify({
+          event: "asana_snapshot_rag_bindings_missing",
+          vertexProjectId: mapping.vertexProjectId,
+          asanaProjectGid: mapping.asanaProjectGid,
+        }),
+      );
     }
 
     await getDb()
@@ -2013,12 +2075,14 @@ async function persistAsanaSnapshotForRag({
 
     return `Asana snapshot comparison: ${diffSummary}${queued ? " The changed snapshot was queued for future RAG vector search." : " Snapshot metadata was stored, but RAG ingestion was skipped because storage/queue bindings were unavailable."}`;
   } catch (error) {
-    console.warn(JSON.stringify({
-      event: "asana_snapshot_persist_failed",
-      vertexProjectId: mapping.vertexProjectId,
-      asanaProjectGid: mapping.asanaProjectGid,
-      error: error instanceof Error ? error.message : "Unknown Asana snapshot persistence failure",
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_snapshot_persist_failed",
+        vertexProjectId: mapping.vertexProjectId,
+        asanaProjectGid: mapping.asanaProjectGid,
+        error: error instanceof Error ? error.message : "Unknown Asana snapshot persistence failure",
+      }),
+    );
     return "Asana snapshot comparison: unavailable because snapshot persistence failed.";
   }
 }
@@ -2080,10 +2144,13 @@ function buildAsanaProjectContext({
       "Portfolio updates below include parent portfolios and nested portfolios that contain the mapped project. Use the highest-level relevant portfolio status as the primary context for status questions, then use nested portfolio/project updates for more specific or fresher details.",
     );
     for (const update of statusUpdates) {
-      const sourceLabel = update.sourceType === "portfolio"
-        ? `Portfolio${typeof update.sourceDepth === "number" ? ` L${update.sourceDepth + 1}` : ""}: ${update.sourcePath?.length ? update.sourcePath.join(" / ") : update.sourceName}`
-        : `Project: ${update.sourceName}`;
-      lines.push(`- ${formatDateTime(update.created_at)} [${sourceLabel}]${update.title ? ` ${update.title}` : ""}${update.color ? ` [${update.color}]` : ""}${update.created_by?.name ? ` by ${update.created_by.name}` : ""}: ${truncateAsanaContext(update.text ?? "", 450)}`);
+      const sourceLabel =
+        update.sourceType === "portfolio"
+          ? `Portfolio${typeof update.sourceDepth === "number" ? ` L${update.sourceDepth + 1}` : ""}: ${update.sourcePath?.length ? update.sourcePath.join(" / ") : update.sourceName}`
+          : `Project: ${update.sourceName}`;
+      lines.push(
+        `- ${formatDateTime(update.created_at)} [${sourceLabel}]${update.title ? ` ${update.title}` : ""}${update.color ? ` [${update.color}]` : ""}${update.created_by?.name ? ` by ${update.created_by.name}` : ""}: ${truncateAsanaContext(update.text ?? "", 450)}`,
+      );
     }
   }
 
@@ -2091,22 +2158,31 @@ function buildAsanaProjectContext({
     lines.push("", "Relevant Asana tasks:");
     tasks.forEach((task, index) => {
       const stories = storiesByTaskGid.get(task.gid) ?? [];
-      const section = task.memberships?.map((membership) => membership.section?.name).filter(Boolean).join(", ");
+      const section = task.memberships
+        ?.map((membership) => membership.section?.name)
+        .filter(Boolean)
+        .join(", ");
       const taskStatus = resolveAsanaTaskStatus(task, taskStatusSettings);
-      lines.push([
-        `[Task ${index + 1}] ${task.name} (${task.gid})`,
-        `Status: ${taskStatus.label} (${taskStatus.sourceLabel})`,
-        task.assignee?.name ? `Assignee: ${task.assignee.name}` : "",
-        task.due_on || task.due_at ? `Due: ${task.due_on ?? task.due_at}` : "",
-        task.modified_at ? `Modified: ${task.modified_at}` : "",
-        section ? `Section: ${section}` : "",
-        task.permalink_url ? `URL: ${task.permalink_url}` : "",
-        task.notes?.trim() ? `Notes: ${truncateAsanaContext(task.notes, 500)}` : "",
-      ].filter(Boolean).join("\n"));
+      lines.push(
+        [
+          `[Task ${index + 1}] ${task.name} (${task.gid})`,
+          `Status: ${taskStatus.label} (${taskStatus.sourceLabel})`,
+          task.assignee?.name ? `Assignee: ${task.assignee.name}` : "",
+          task.due_on || task.due_at ? `Due: ${task.due_on ?? task.due_at}` : "",
+          task.modified_at ? `Modified: ${task.modified_at}` : "",
+          section ? `Section: ${section}` : "",
+          task.permalink_url ? `URL: ${task.permalink_url}` : "",
+          task.notes?.trim() ? `Notes: ${truncateAsanaContext(task.notes, 500)}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
       if (stories.length) {
         lines.push("Recent task messages/stories:");
         for (const story of stories) {
-          lines.push(`- ${formatDateTime(story.created_at)}${story.created_by?.name ? ` ${story.created_by.name}` : ""}: ${truncateAsanaContext(story.text ?? "", 300)}`);
+          lines.push(
+            `- ${formatDateTime(story.created_at)}${story.created_by?.name ? ` ${story.created_by.name}` : ""}: ${truncateAsanaContext(story.text ?? "", 300)}`,
+          );
         }
       }
     });
@@ -2118,7 +2194,11 @@ function buildAsanaProjectContext({
 }
 
 function truncateAsanaContext(value: string, maxLength: number) {
-  const normalized = value.replace(/\r/g, "\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  const normalized = value
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trim()}...` : normalized;
 }
 
@@ -2142,7 +2222,9 @@ function dedupeAsanaProjects(projects: AsanaProjectOption[]) {
       byGid.set(project.gid, project);
     }
   }
-  return [...byGid.values()].sort((left, right) => left.workspaceName.localeCompare(right.workspaceName) || left.name.localeCompare(right.name));
+  return [...byGid.values()].sort(
+    (left, right) => left.workspaceName.localeCompare(right.workspaceName) || left.name.localeCompare(right.name),
+  );
 }
 
 function projectPermissionRank(project: AsanaProjectOption) {
@@ -2184,13 +2266,15 @@ async function ensureAsanaProjectWebhook({
     try {
       remoteWebhook = await findExistingAsanaWebhook(accessToken, asanaProject, targetUrl);
     } catch (error) {
-      console.warn(JSON.stringify({
-        asanaProjectGid: asanaProject.gid,
-        event: "asana_project_webhook_lookup_failed",
-        error: error instanceof Error ? error.message : "Unknown Asana webhook lookup failure",
-      }));
+      console.warn(
+        JSON.stringify({
+          asanaProjectGid: asanaProject.gid,
+          event: "asana_project_webhook_lookup_failed",
+          error: error instanceof Error ? error.message : "Unknown Asana webhook lookup failure",
+        }),
+      );
     }
-    const webhook = remoteWebhook ?? await createAsanaProjectWebhook(accessToken, asanaProject, targetUrl);
+    const webhook = remoteWebhook ?? (await createAsanaProjectWebhook(accessToken, asanaProject, targetUrl));
     await upsertAsanaProjectWebhookRecord({
       asanaProject,
       status: "active",
@@ -2228,11 +2312,13 @@ async function recordAsanaProjectWebhookFailure({
     userId,
     webhookGid: null,
   });
-  console.warn(JSON.stringify({
-    asanaProjectGid: asanaProject.gid,
-    event: "asana_project_webhook_setup_failed",
-    error,
-  }));
+  console.warn(
+    JSON.stringify({
+      asanaProjectGid: asanaProject.gid,
+      event: "asana_project_webhook_setup_failed",
+      error,
+    }),
+  );
   return { status: "failed", webhookGid: null };
 }
 
@@ -2329,17 +2415,7 @@ async function upsertAsanaProjectWebhookRecord({
         created_by_user_id = excluded.created_by_user_id,
         updated_at = excluded.updated_at`,
     )
-    .bind(
-      asanaProject.gid,
-      asanaProject.workspaceGid,
-      webhookGid,
-      targetUrl,
-      status,
-      lastError,
-      userId,
-      now,
-      now,
-    )
+    .bind(asanaProject.gid, asanaProject.workspaceGid, webhookGid, targetUrl, status, lastError, userId, now, now)
     .run();
 }
 
@@ -2367,7 +2443,10 @@ async function asanaFetch<T>(
   });
   const envelope = await response.json<AsanaApiEnvelope<T>>();
   if (!response.ok) {
-    const message = envelope.errors?.map((item) => item.message).filter(Boolean).join("; ");
+    const message = envelope.errors
+      ?.map((item) => item.message)
+      .filter(Boolean)
+      .join("; ");
     throw new Error(message || `Asana API request failed with ${response.status}.`);
   }
   return envelope.data;
@@ -2393,7 +2472,10 @@ async function asanaFetchPaginated<T>(
     });
     const envelope = await response.json<AsanaApiEnvelope<T[]>>();
     if (!response.ok) {
-      const message = envelope.errors?.map((item) => item.message).filter(Boolean).join("; ");
+      const message = envelope.errors
+        ?.map((item) => item.message)
+        .filter(Boolean)
+        .join("; ");
       throw new Error(message || `Asana API request failed with ${response.status}.`);
     }
     rows.push(...(envelope.data ?? []));
@@ -2404,7 +2486,9 @@ async function asanaFetchPaginated<T>(
         break;
       }
       const label = options.limitLabel ?? "Asana request";
-      throw new Error(`${label} returned more than ${pageLimit * 100} rows. Narrow the connected project or increase the Asana pagination cap.`);
+      throw new Error(
+        `${label} returned more than ${pageLimit * 100} rows. Narrow the connected project or increase the Asana pagination cap.`,
+      );
     }
     if (offset && seenOffsets.has(offset)) {
       throw new Error("Asana project discovery returned a repeated pagination offset.");
@@ -2416,7 +2500,7 @@ async function asanaFetchPaginated<T>(
 
 function asanaHeaders(accessToken: string) {
   return {
-    "Authorization": `Bearer ${accessToken}`,
+    Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
   };
 }
@@ -2501,15 +2585,18 @@ async function listVertexProjectsForUser(userId: string) {
       chatId: string | null;
     }>();
 
-  return (rows.results ?? []).map((row) => ({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    workspaceId: row.workspaceId,
-    mode: modeForScope(row.workspaceScope),
-    teamId: row.teamId,
-    chatId: row.chatId,
-  } satisfies VertexProjectOption));
+  return (rows.results ?? []).map(
+    (row) =>
+      ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        workspaceId: row.workspaceId,
+        mode: modeForScope(row.workspaceScope),
+        teamId: row.teamId,
+        chatId: row.chatId,
+      }) satisfies VertexProjectOption,
+  );
 }
 
 async function getAccessibleVertexProject(userId: string, projectId: string) {
@@ -2583,18 +2670,16 @@ async function listAsanaProjectWebhookStatusesForUser(userId: string) {
     .bind(userId)
     .all<Omit<AsanaProjectWebhookStatusView, "status"> & { status: AsanaProjectWebhookStatusView["status"] | null }>();
 
-  return (rows.results ?? []).map((row) => ({
-    ...row,
-    status: row.status ?? "missing",
-  } satisfies AsanaProjectWebhookStatusView));
+  return (rows.results ?? []).map(
+    (row) =>
+      ({
+        ...row,
+        status: row.status ?? "missing",
+      }) satisfies AsanaProjectWebhookStatusView,
+  );
 }
 
-async function scaffoldVertexProjectForAsana(
-  userId: string,
-  asanaProject: AsanaProjectOption,
-  mode: WorkspaceMode,
-  teamId: string | null,
-) {
+async function scaffoldVertexProjectForAsana(userId: string, asanaProject: AsanaProjectOption, mode: WorkspaceMode, teamId: string | null) {
   if (mode === "Team") {
     if (!teamId) throw new Error("Select a VertexAI team before scaffolding a team project.");
     await requireTeamMember(userId, teamId);
@@ -2792,7 +2877,14 @@ function normalizeScopeString(scope: string) {
 }
 
 function parseScopes(scope: string) {
-  return [...new Set(scope.split(/\s+/).map((item) => item.trim()).filter(Boolean))].sort();
+  return [
+    ...new Set(
+      scope
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ].sort();
 }
 
 function hasAsanaScope(scopes: string[], scope: string) {

@@ -42,12 +42,7 @@ export function normalizePromptIntent(value: string): PromptIntent | null {
     .toUpperCase()
     .replace(/[^A-Z]+/g, "_")
     .replace(/^_+|_+$/g, "");
-  if (
-    normalized === "RAG_SEARCH" ||
-    normalized === "WEB_SEARCH" ||
-    normalized === "DIRECT_CHAT" ||
-    normalized === "ARTIFACT_GENERATION"
-  ) {
+  if (normalized === "RAG_SEARCH" || normalized === "WEB_SEARCH" || normalized === "DIRECT_CHAT" || normalized === "ARTIFACT_GENERATION") {
     return normalized;
   }
   return null;
@@ -76,9 +71,7 @@ export function inferPromptIntentFallback(prompt: string): PromptIntent {
   ];
   if (liveWebPatterns.some((pattern) => pattern.test(normalized))) return "WEB_SEARCH";
 
-  const ragPatterns = [
-    /\b(citation|source)\b/,
-  ];
+  const ragPatterns = [/\b(citation|source)\b/];
   if (ragPatterns.some((pattern) => pattern.test(normalized))) return "RAG_SEARCH";
 
   return "DIRECT_CHAT";
@@ -86,31 +79,36 @@ export function inferPromptIntentFallback(prompt: string): PromptIntent {
 
 export async function classifyPromptIntent(prompt: string, ai: Ai): Promise<PromptIntent> {
   try {
-    const result = await runTrackedAiGateway(ai, intentRoutingModelId, {
-      messages: [
-        {
-          role: "system",
-          content: [
-            "Classify the user's latest prompt for a scoped command-center assistant.",
-            "Return exactly one label with no explanation: RAG_SEARCH, WEB_SEARCH, DIRECT_CHAT, or ARTIFACT_GENERATION.",
-            "Use RAG_SEARCH when the user asks about existing workspace, team, project, uploaded artifact, document, file, record, history, source, citation, or prior generated content.",
-            "Use WEB_SEARCH when the user asks for current, recent, latest, online, web, internet, news, pricing, public, cited external, or URL-based information.",
-            "Use DIRECT_CHAT for greetings, administrative questions, general conversation, planning, brainstorming, explanation, or requests that do not need scoped records or external facts.",
-            "Use ARTIFACT_GENERATION when the user asks to draft, write, create, generate, format, compose, build, or produce a standalone artifact from the prompt itself.",
-            "When unsure, choose RAG_SEARCH.",
-          ].join(" "),
-        },
-        { role: "user", content: prompt },
-      ],
-      max_completion_tokens: 8,
-      temperature: 0,
-    }, {
-      feature: "intent-routing",
-      metadata: {
-        feature: "intent-routing",
-        model: intentRoutingModelId,
+    const result = await runTrackedAiGateway(
+      ai,
+      intentRoutingModelId,
+      {
+        messages: [
+          {
+            role: "system",
+            content: [
+              "Classify the user's latest prompt for a scoped command-center assistant.",
+              "Return exactly one label with no explanation: RAG_SEARCH, WEB_SEARCH, DIRECT_CHAT, or ARTIFACT_GENERATION.",
+              "Use RAG_SEARCH when the user asks about existing workspace, team, project, uploaded artifact, document, file, record, history, source, citation, or prior generated content.",
+              "Use WEB_SEARCH when the user asks for current, recent, latest, online, web, internet, news, pricing, public, cited external, or URL-based information.",
+              "Use DIRECT_CHAT for greetings, administrative questions, general conversation, planning, brainstorming, explanation, or requests that do not need scoped records or external facts.",
+              "Use ARTIFACT_GENERATION when the user asks to draft, write, create, generate, format, compose, build, or produce a standalone artifact from the prompt itself.",
+              "When unsure, choose RAG_SEARCH.",
+            ].join(" "),
+          },
+          { role: "user", content: prompt },
+        ],
+        max_completion_tokens: 8,
+        temperature: 0,
       },
-    });
+      {
+        feature: "intent-routing",
+        metadata: {
+          feature: "intent-routing",
+          model: intentRoutingModelId,
+        },
+      },
+    );
 
     return normalizePromptIntent(extractGeneratedText(result)) ?? inferPromptIntentFallback(prompt);
   } catch (error) {

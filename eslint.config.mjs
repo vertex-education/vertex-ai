@@ -3,14 +3,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 
 const eslintConfig = defineConfig([
   js.configs.recommended,
-  globalIgnores([
-    "build/**",
-    "dist/**",
-    ".output/**",
-    ".vinext/**",
-    ".wrangler/**",
-    "node_modules/**",
-  ]),
+  globalIgnores(["build/**", "dist/**", ".output/**", ".vinext/**", ".wrangler/**", "node_modules/**"]),
   {
     files: ["scripts/**/*.mjs"],
     languageOptions: {

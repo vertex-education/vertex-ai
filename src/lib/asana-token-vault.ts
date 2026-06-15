@@ -48,27 +48,13 @@ type AsanaTokenRefreshResponse = {
   error_description?: string;
 };
 
-export async function storeAsanaTokens({
-  env,
-  userId,
-  tokens,
-}: {
-  env: AsanaTokenVaultEnv;
-  userId: string;
-  tokens: AsanaTokenSet;
-}) {
+export async function storeAsanaTokens({ env, userId, tokens }: { env: AsanaTokenVaultEnv; userId: string; tokens: AsanaTokenSet }) {
   validateTokenSet(tokens);
   const record = await encryptTokenRecord({ env, userId, tokens });
   await env.MICROSOFT_TOKEN_VAULT.put(asanaTokenKey(userId), JSON.stringify(record));
 }
 
-export async function getAsanaTokens({
-  env,
-  userId,
-}: {
-  env: AsanaTokenVaultEnv;
-  userId: string;
-}) {
+export async function getAsanaTokens({ env, userId }: { env: AsanaTokenVaultEnv; userId: string }) {
   const record = await getTokenRecord(env, userId);
   if (!record) return null;
 
@@ -82,13 +68,7 @@ export async function getAsanaTokens({
   } satisfies AsanaTokenSet;
 }
 
-export async function getValidAsanaTokens({
-  env,
-  userId,
-}: {
-  env: AsanaTokenVaultEnv;
-  userId: string;
-}) {
+export async function getValidAsanaTokens({ env, userId }: { env: AsanaTokenVaultEnv; userId: string }) {
   const tokenSet = await getAsanaTokens({ env, userId });
   if (!tokenSet) return null;
 
@@ -99,23 +79,11 @@ export async function getValidAsanaTokens({
   return refreshedTokens;
 }
 
-export async function deleteAsanaTokens({
-  env,
-  userId,
-}: {
-  env: AsanaTokenVaultEnv;
-  userId: string;
-}) {
+export async function deleteAsanaTokens({ env, userId }: { env: AsanaTokenVaultEnv; userId: string }) {
   await env.MICROSOFT_TOKEN_VAULT.delete(asanaTokenKey(userId));
 }
 
-async function refreshAsanaTokens({
-  env,
-  tokenSet,
-}: {
-  env: AsanaTokenVaultEnv;
-  tokenSet: AsanaTokenSet;
-}) {
+async function refreshAsanaTokens({ env, tokenSet }: { env: AsanaTokenVaultEnv; tokenSet: AsanaTokenSet }) {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: tokenSet.refreshToken,
@@ -143,21 +111,15 @@ async function refreshAsanaTokens({
   } satisfies AsanaTokenSet;
 }
 
-async function encryptTokenRecord({
-  env,
-  userId,
-  tokens,
-}: {
-  env: AsanaTokenVaultEnv;
-  userId: string;
-  tokens: AsanaTokenSet;
-}) {
+async function encryptTokenRecord({ env, userId, tokens }: { env: AsanaTokenVaultEnv; userId: string; tokens: AsanaTokenSet }) {
   const iv = crypto.getRandomValues(new Uint8Array(ivBytes));
   const key = await importEncryptionKey(env.TOKEN_VAULT_KEY);
-  const plaintext = new TextEncoder().encode(JSON.stringify({
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-  } satisfies EncryptedAsanaTokenPayload));
+  const plaintext = new TextEncoder().encode(
+    JSON.stringify({
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    } satisfies EncryptedAsanaTokenPayload),
+  );
   const ciphertext = await crypto.subtle.encrypt({ name: encryptionAlgorithm, iv }, key, plaintext);
 
   return {
@@ -242,7 +204,10 @@ function bytesToBase64Url(bytes: Uint8Array) {
 }
 
 function base64UrlToBytes(value: string) {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const padded = value
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(Math.ceil(value.length / 4) * 4, "=");
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);

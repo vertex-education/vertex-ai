@@ -77,14 +77,15 @@ function contentTypeForArtifact(fileType: string) {
 
 function downloadFileName(title: string, fileType: string) {
   const extension = fileType.toLowerCase() || "bin";
-  const safeName = title
-    .trim()
-    .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/\d+/g, " ")
-    .replace(/[^a-z0-9._-]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 72) || "vertex-artifact";
+  const safeName =
+    title
+      .trim()
+      .replace(/\.[a-z0-9]+$/i, "")
+      .replace(/\d+/g, " ")
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 72) || "vertex-artifact";
   return `${safeName}.${extension}`;
 }
 

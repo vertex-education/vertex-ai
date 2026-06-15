@@ -21,13 +21,7 @@ import {
 } from "@/lib/asana-webhook";
 
 async function hmacSignature(secret: string, body: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const digest = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -84,17 +78,21 @@ describe("Asana webhook utilities", () => {
     const body = JSON.stringify({ events: [taskEvent] });
     const signature = await hmacSignature("secret-value", body);
 
-    await expect(verifyAsanaSignature({
-      rawBody: new TextEncoder().encode(body).buffer,
-      secret: "secret-value",
-      signature,
-    })).resolves.toBe(true);
+    await expect(
+      verifyAsanaSignature({
+        rawBody: new TextEncoder().encode(body).buffer,
+        secret: "secret-value",
+        signature,
+      }),
+    ).resolves.toBe(true);
 
-    await expect(verifyAsanaSignature({
-      rawBody: new TextEncoder().encode(body).buffer,
-      secret: "wrong-secret",
-      signature,
-    })).resolves.toBe(false);
+    await expect(
+      verifyAsanaSignature({
+        rawBody: new TextEncoder().encode(body).buffer,
+        secret: "wrong-secret",
+        signature,
+      }),
+    ).resolves.toBe(false);
   });
 
   it("normalizes task-state events and extracts status changes", () => {
@@ -122,10 +120,14 @@ describe("Asana webhook utilities", () => {
   });
 
   it("parses optional project map JSON without guessing invalid values", () => {
-    expect(parseProjectMap(JSON.stringify({
-      "project-1": { projectId: "vertex-project-1", chatId: "chat-1", mode: "Team" },
-      "task-2": "vertex-project-2",
-    }))).toEqual({
+    expect(
+      parseProjectMap(
+        JSON.stringify({
+          "project-1": { projectId: "vertex-project-1", chatId: "chat-1", mode: "Team" },
+          "task-2": "vertex-project-2",
+        }),
+      ),
+    ).toEqual({
       "project-1": { projectId: "vertex-project-1", chatId: "chat-1", mode: "Team" },
       "task-2": "vertex-project-2",
     });
@@ -145,6 +147,8 @@ describe("Asana webhook utilities", () => {
     expect(modeForScope("personal")).toBe("Personal");
     expect(chatSyncScopeKey({ mode: "Team", workspaceId: "ws-team", teamId: "team-1", userId: "user-1" })).toBe("ws-team:team:team-1");
     expect(chatSyncScopeKey({ mode: "Org", workspaceId: "ws-org", teamId: null, userId: "user-1" })).toBe("ws-org:org");
-    expect(chatSyncScopeKey({ mode: "Personal", workspaceId: "ws-personal", teamId: null, userId: "user-1" })).toBe("ws-personal:user:user-1");
+    expect(chatSyncScopeKey({ mode: "Personal", workspaceId: "ws-personal", teamId: null, userId: "user-1" })).toBe(
+      "ws-personal:user:user-1",
+    );
   });
 });

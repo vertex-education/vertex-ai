@@ -15,7 +15,7 @@ export const Route = createFileRoute("/sign-in")({
     if (session) throw redirect({ to: "/" });
   },
   head: () => ({
-    meta: [{ title: "Sign in | Vertex AI Command Center" }],
+    meta: [{ title: "Sign in | VertexAI" }],
   }),
   component: SignInPage,
 });
@@ -30,7 +30,7 @@ function SignInPage() {
       ? "Email verified. Sign in to continue."
       : typeof window !== "undefined" && new URLSearchParams(window.location.search).get("oauthError") === "1"
         ? "Microsoft sign-in failed. Try again or use your invited account."
-      : "",
+        : "",
   );
   const [isPending, setIsPending] = useState(false);
   const [isMicrosoftPending, setIsMicrosoftPending] = useState(false);
@@ -60,7 +60,7 @@ function SignInPage() {
         return;
       }
 
-      setMessage("Signed in. Opening Vertex AI Command Center...");
+      setMessage("Signed in. Opening VertexAI...");
       window.setTimeout(() => {
         if (window.location.pathname === "/sign-in") window.location.replace("/");
       }, 750);
@@ -97,11 +97,17 @@ function SignInPage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <VertexAIBrand className="mb-3" logoClassName="h-10 w-fit" aiClassName="text-[1.75rem]" />
-          <CardTitle>Vertex AI Command Center</CardTitle>
+          <CardTitle>VertexAI</CardTitle>
           <CardDescription>Sign in with your invited account.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <Button className="w-full" type="button" variant="outline" disabled={isMicrosoftPending || isPending} onClick={handleMicrosoftSignIn}>
+          <Button
+            className="w-full"
+            type="button"
+            variant="outline"
+            disabled={isMicrosoftPending || isPending}
+            onClick={handleMicrosoftSignIn}
+          >
             <LogIn className="mr-2 size-4" />
             {isMicrosoftPending ? "Opening Microsoft..." : "Continue with Microsoft"}
           </Button>
@@ -127,7 +133,13 @@ function SignInPage() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                 />
-                <Button type="button" variant="outline" size="icon" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((value) => !value)}
+                >
                   {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </Button>
               </div>

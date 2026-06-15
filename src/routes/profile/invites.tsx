@@ -15,7 +15,7 @@ export const Route = createFileRoute("/profile/invites")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Invites | Vertex AI Command Center" }],
+    meta: [{ title: "Invites | VertexAI" }],
   }),
   component: InvitesPage,
 });
@@ -54,8 +54,20 @@ function InvitesPage() {
               <VertexAIBrand />
             </div>
 
-            <InviteSection title="Team Invites" description="Teams you have been invited to join." invites={teamInvites} pendingId={acceptMutation.variables} onAccept={(id) => acceptMutation.mutate(id)} />
-            <InviteSection title="Project Invites" description="Projects assigned directly to you." invites={projectInvites} pendingId={acceptMutation.variables} onAccept={(id) => acceptMutation.mutate(id)} />
+            <InviteSection
+              title="Team Invites"
+              description="Teams you have been invited to join."
+              invites={teamInvites}
+              pendingId={acceptMutation.variables}
+              onAccept={(id) => acceptMutation.mutate(id)}
+            />
+            <InviteSection
+              title="Project Invites"
+              description="Projects assigned directly to you."
+              invites={projectInvites}
+              pendingId={acceptMutation.variables}
+              onAccept={(id) => acceptMutation.mutate(id)}
+            />
           </div>
         </section>
       </div>
@@ -99,7 +111,12 @@ function InviteSection({
                 {invite.status} / {invite.createdLabel}
               </p>
             </div>
-            <Button type="button" size="sm" disabled={invite.status !== "Pending" || pendingId === invite.id} onClick={() => onAccept(invite.id)}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={invite.status !== "Pending" || pendingId === invite.id}
+              onClick={() => onAccept(invite.id)}
+            >
               <Check className="size-4" />
               Accept
             </Button>

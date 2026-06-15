@@ -12,9 +12,7 @@ export function isMissingAsanaSyncColumnError(error: unknown) {
   return asanaTaskSyncColumnNames.some((column) => normalized.includes(column));
 }
 
-export function withDefaultAsanaSyncState<T extends object>(
-  row: T,
-): PersistedWorkflowActionRowWithOptionalAsanaSync<T> {
+export function withDefaultAsanaSyncState<T extends object>(row: T): PersistedWorkflowActionRowWithOptionalAsanaSync<T> {
   return {
     ...row,
     asanaTaskGid: null,

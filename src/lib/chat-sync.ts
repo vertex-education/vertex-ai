@@ -28,7 +28,7 @@ type ChatSyncConnection = {
   user: WorkspacePresenceUser;
 };
 
-export class ChatSyncDurableObject extends DurableObject<Env> {
+export class ChatSyncRealtimeDurableObject extends DurableObject<Env> {
   private readonly encoder = new TextEncoder();
   private readonly connections = new Map<string, ChatSyncConnection>();
 
@@ -59,10 +59,14 @@ export class ChatSyncDurableObject extends DurableObject<Env> {
         this.send(controller, "ready", { chatCount: payload.chatIds.length });
         this.broadcastPresence();
         heartbeat = setInterval(() => this.send(controller, "heartbeat", { at: Date.now() }), 25_000);
-        request.signal.addEventListener("abort", () => {
-          if (heartbeat) clearInterval(heartbeat);
-          this.removeConnection(connectionId);
-        }, { once: true });
+        request.signal.addEventListener(
+          "abort",
+          () => {
+            if (heartbeat) clearInterval(heartbeat);
+            this.removeConnection(connectionId);
+          },
+          { once: true },
+        );
       },
       cancel: () => {
         if (heartbeat) clearInterval(heartbeat);
@@ -74,7 +78,7 @@ export class ChatSyncDurableObject extends DurableObject<Env> {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
-        "Connection": "keep-alive",
+        Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       },
     });

@@ -68,13 +68,7 @@ export async function storeMicrosoftGraphTokens({
   await env.MICROSOFT_TOKEN_VAULT.put(graphTokenKey(userId), JSON.stringify(record));
 }
 
-export async function getMicrosoftGraphTokens({
-  env,
-  userId,
-}: {
-  env: MicrosoftTokenVaultEnv;
-  userId: string;
-}) {
+export async function getMicrosoftGraphTokens({ env, userId }: { env: MicrosoftTokenVaultEnv; userId: string }) {
   const record = await getTokenRecord(env, userId);
   if (!record) return null;
 
@@ -88,13 +82,7 @@ export async function getMicrosoftGraphTokens({
   } satisfies MicrosoftGraphTokenSet;
 }
 
-export async function getValidMicrosoftGraphTokens({
-  env,
-  userId,
-}: {
-  env: MicrosoftTokenVaultEnv;
-  userId: string;
-}) {
+export async function getValidMicrosoftGraphTokens({ env, userId }: { env: MicrosoftTokenVaultEnv; userId: string }) {
   const tokenSet = await getMicrosoftGraphTokens({ env, userId });
   if (!tokenSet) return null;
 
@@ -105,23 +93,11 @@ export async function getValidMicrosoftGraphTokens({
   return refreshedTokens;
 }
 
-export async function deleteMicrosoftGraphTokens({
-  env,
-  userId,
-}: {
-  env: MicrosoftTokenVaultEnv;
-  userId: string;
-}) {
+export async function deleteMicrosoftGraphTokens({ env, userId }: { env: MicrosoftTokenVaultEnv; userId: string }) {
   await env.MICROSOFT_TOKEN_VAULT.delete(graphTokenKey(userId));
 }
 
-async function refreshMicrosoftGraphTokens({
-  env,
-  tokenSet,
-}: {
-  env: MicrosoftTokenVaultEnv;
-  tokenSet: MicrosoftGraphTokenSet;
-}) {
+async function refreshMicrosoftGraphTokens({ env, tokenSet }: { env: MicrosoftTokenVaultEnv; tokenSet: MicrosoftGraphTokenSet }) {
   const body = new URLSearchParams({
     client_id: microsoftClientId(env),
     client_secret: microsoftClientSecret(env),
@@ -163,10 +139,12 @@ async function encryptTokenRecord({
 }) {
   const iv = crypto.getRandomValues(new Uint8Array(ivBytes));
   const key = await importEncryptionKey(env.TOKEN_VAULT_KEY);
-  const plaintext = new TextEncoder().encode(JSON.stringify({
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-  } satisfies EncryptedTokenPayload));
+  const plaintext = new TextEncoder().encode(
+    JSON.stringify({
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    } satisfies EncryptedTokenPayload),
+  );
   const ciphertext = await crypto.subtle.encrypt({ name: encryptionAlgorithm, iv }, key, plaintext);
 
   return {
@@ -260,7 +238,10 @@ function bytesToBase64Url(bytes: Uint8Array) {
 }
 
 function base64UrlToBytes(value: string) {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const padded = value
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
+    .padEnd(Math.ceil(value.length / 4) * 4, "=");
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);

@@ -12,19 +12,21 @@ describe("AI Gateway wrapper", () => {
       },
     } as unknown as Ai;
 
-    await expect(runAiGateway(ai, "@cf/test/model", { prompt: "hello" }, {
-      env: { CLOUDFLARE_AI_GATEWAY_ID: " vertex-gateway " },
-      metadata: {
-        feature: "test",
-        one: 1,
-        two: 2,
-        three: 3,
-        four: 4,
-        five: 5,
-      },
-      cacheTtl: 60,
-      skipCache: false,
-    } as unknown as Parameters<typeof runAiGateway>[3])).resolves.toEqual({ response: "ok" });
+    await expect(
+      runAiGateway(ai, "@cf/test/model", { prompt: "hello" }, {
+        env: { CLOUDFLARE_AI_GATEWAY_ID: " vertex-gateway " },
+        metadata: {
+          feature: "test",
+          one: 1,
+          two: 2,
+          three: 3,
+          four: 4,
+          five: 5,
+        },
+        cacheTtl: 60,
+        skipCache: false,
+      } as unknown as Parameters<typeof runAiGateway>[3]),
+    ).resolves.toEqual({ response: "ok" });
 
     expect(getAiGatewayLogId(ai)).toBe("log-123");
     expect(calls).toHaveLength(1);
@@ -37,7 +39,7 @@ describe("AI Gateway wrapper", () => {
           skipCache: false,
           cacheTtl: 60,
           metadata: {
-            app: "ai-command-center",
+            app: "vertex-ai",
             feature: "test",
             one: 1,
             two: 2,

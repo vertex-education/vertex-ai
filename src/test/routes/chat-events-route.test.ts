@@ -12,6 +12,8 @@ describe("chat event subscription helpers", () => {
   it("builds Durable Object presence scope keys by workspace mode", () => {
     expect(presenceScopeKey({ mode: "Team", workspaceId: "ws-team", teamId: "team-1", userId: "user-1" })).toBe("ws-team:team:team-1");
     expect(presenceScopeKey({ mode: "Org", workspaceId: "ws-org", teamId: null, userId: "user-1" })).toBe("ws-org:org");
-    expect(presenceScopeKey({ mode: "Personal", workspaceId: "ws-personal", teamId: null, userId: "user-1" })).toBe("ws-personal:user:user-1");
+    expect(presenceScopeKey({ mode: "Personal", workspaceId: "ws-personal", teamId: null, userId: "user-1" })).toBe(
+      "ws-personal:user:user-1",
+    );
   });
 });

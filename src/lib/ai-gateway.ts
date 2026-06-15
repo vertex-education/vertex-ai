@@ -47,7 +47,8 @@ const usageIndexesSql = [
 ];
 
 function gatewayIdFromEnv(runtimeEnv?: Pick<Env, "CLOUDFLARE_AI_GATEWAY_ID"> | null) {
-  const bindingValue = runtimeEnv?.CLOUDFLARE_AI_GATEWAY_ID ?? (env as Env & { CLOUDFLARE_AI_GATEWAY_ID?: string }).CLOUDFLARE_AI_GATEWAY_ID;
+  const bindingValue =
+    runtimeEnv?.CLOUDFLARE_AI_GATEWAY_ID ?? (env as Env & { CLOUDFLARE_AI_GATEWAY_ID?: string }).CLOUDFLARE_AI_GATEWAY_ID;
   const processValue = typeof process !== "undefined" ? process.env.CLOUDFLARE_AI_GATEWAY_ID : undefined;
   return bindingValue?.trim() || processValue?.trim() || defaultAiGatewayId;
 }
@@ -57,7 +58,7 @@ function compactMetadata(metadata: AiGatewayMetadata | undefined) {
   const entries = Object.entries(metadata)
     .filter(([, value]) => value !== undefined)
     .slice(0, 5);
-  return entries.length ? Object.fromEntries(entries) as AiGatewayMetadata : undefined;
+  return entries.length ? (Object.fromEntries(entries) as AiGatewayMetadata) : undefined;
 }
 
 function jsonSafeMetadata(metadata: AiGatewayMetadata | undefined) {
@@ -108,9 +109,8 @@ function tokenUsageFromResult(result: unknown) {
   const usageRecord = isRecord(usage) ? usage : {};
   const inputTokens = finiteNumber(usageRecord.prompt_tokens ?? usageRecord.input_tokens);
   const outputTokens = finiteNumber(usageRecord.completion_tokens ?? usageRecord.output_tokens);
-  const totalTokens = finiteNumber(usageRecord.total_tokens) ?? (
-    inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null
-  );
+  const totalTokens =
+    finiteNumber(usageRecord.total_tokens) ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
   return { inputTokens, outputTokens, totalTokens };
 }
 
@@ -194,12 +194,7 @@ async function recordWorkersAiGatewayUsageEvent({
   }
 }
 
-export function runAiGateway(
-  ai: Ai,
-  model: string,
-  inputs: Record<string, unknown>,
-  options: AiGatewayRunOptions = {},
-) {
+export function runAiGateway(ai: Ai, model: string, inputs: Record<string, unknown>, options: AiGatewayRunOptions = {}) {
   return ai.run(model, inputs, {
     signal: options.signal,
     gateway: {
@@ -207,7 +202,7 @@ export function runAiGateway(
       skipCache: options.skipCache ?? true,
       cacheTtl: options.cacheTtl,
       metadata: compactMetadata({
-        app: "ai-command-center",
+        app: "vertex-ai",
         feature: "ai-gateway",
         ...options.metadata,
       }),
@@ -215,12 +210,7 @@ export function runAiGateway(
   });
 }
 
-export async function runTrackedAiGateway(
-  ai: Ai,
-  model: string,
-  inputs: Record<string, unknown>,
-  options: AiGatewayUsageTrackingOptions,
-) {
+export async function runTrackedAiGateway(ai: Ai, model: string, inputs: Record<string, unknown>, options: AiGatewayUsageTrackingOptions) {
   const startedAt = Date.now();
   try {
     const result = await runAiGateway(ai, model, inputs, options);

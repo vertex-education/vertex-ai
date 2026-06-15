@@ -5,9 +5,13 @@ import { Hono } from "hono";
 import { handleAsanaWebhookRequest } from "./lib/asana-webhook";
 import { runDailyProjectBriefings } from "./lib/daily-briefings";
 import { handleDocumentIngestionQueue, type DocumentIngestionEnv, type DocumentIngestionJob } from "./lib/document-ingestion-queue";
-import { processMicrosoftGraphWebhookJob, type MicrosoftGraphWebhookEnv, type MicrosoftGraphWebhookJob } from "./lib/microsoft-graph-webhooks";
+import {
+  processMicrosoftGraphWebhookJob,
+  type MicrosoftGraphWebhookEnv,
+  type MicrosoftGraphWebhookJob,
+} from "./lib/microsoft-graph-webhooks";
 
-export { ChatSyncDurableObject } from "./lib/chat-sync";
+export { ChatSyncRealtimeDurableObject } from "./lib/chat-sync";
 
 type AppQueueJob = DocumentIngestionJob | MicrosoftGraphWebhookJob;
 type AppQueueEnv = DocumentIngestionEnv & MicrosoftGraphWebhookEnv;

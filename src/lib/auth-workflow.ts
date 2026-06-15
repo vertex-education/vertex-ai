@@ -155,9 +155,9 @@ async function createInviteRecord({
   const emailResult = await sendAuthEmail({
     actionUrl: link,
     to: normalizedEmail,
-    subject: "Your Vertex AI Command Center invite",
-    text: `You have been invited to Vertex AI Command Center. Create your account here: ${link}`,
-    html: `<p>You have been invited to Vertex AI Command Center.</p><p><a href="${link}">Create your account</a></p><p>This link expires in 7 days.</p>`,
+    subject: "Your VertexAI invite",
+    text: `You have been invited to VertexAI. Create your account here: ${link}`,
+    html: `<p>You have been invited to VertexAI.</p><p><a href="${link}">Create your account</a></p><p>This link expires in 7 days.</p>`,
   });
 
   return { id, email: normalizedEmail, role, inviteLink: link, emailResult };
@@ -225,7 +225,7 @@ export const acceptInvite = createServerFn({ method: "POST" })
     const request = getRequest();
     const invite = await getValidInvite(data.token);
     const headers = new Headers(request.headers);
-    headers.set("x-ai-command-center-invite-flow", getInternalSignupSecret());
+    headers.set("x-vertex-ai-invite-flow", getInternalSignupSecret());
 
     const result = await getAuth(request).api.signUpEmail({
       body: {
@@ -240,16 +240,10 @@ export const acceptInvite = createServerFn({ method: "POST" })
     const userId = (result as { user?: { id?: string } }).user?.id;
     if (!userId) throw new Error("Account was not created.");
 
-    await getDb()
-      .prepare('UPDATE "user" SET role = ?, updatedAt = ? WHERE id = ?')
-      .bind(invite.role, Date.now(), userId)
-      .run();
-    await getDb()
-      .prepare("UPDATE auth_invites SET accepted_at = ? WHERE id = ?")
-      .bind(Date.now(), invite.id)
-      .run();
+    await getDb().prepare('UPDATE "user" SET role = ?, updatedAt = ? WHERE id = ?').bind(invite.role, Date.now(), userId).run();
+    await getDb().prepare("UPDATE auth_invites SET accepted_at = ? WHERE id = ?").bind(Date.now(), invite.id).run();
 
-    const verificationEmail = await latestAuthActionUrl(invite.email, "Verify your Vertex AI Command Center email");
+    const verificationEmail = await latestAuthActionUrl(invite.email, "Verify your VertexAI email");
 
     return {
       email: invite.email,
@@ -326,10 +320,7 @@ export const deleteManagedUser = createServerFn({ method: "POST" })
     const session = await requireAdmin();
     if (data.userId === session.user.id) throw new Error("You cannot delete your own account.");
 
-    const result = await getDb()
-      .prepare('DELETE FROM "user" WHERE id = ?')
-      .bind(data.userId)
-      .run();
+    const result = await getDb().prepare('DELETE FROM "user" WHERE id = ?').bind(data.userId).run();
 
     if (!result.meta.changes) throw new Error("User was not found.");
     return { id: data.userId };
@@ -348,10 +339,7 @@ export const revokeUserInvite = createServerFn({ method: "POST" })
     if (invite.acceptedAt) throw new Error("Accepted invites cannot be revoked.");
     if (invite.revokedAt) return { id: invite.id, status: "Revoked" };
 
-    await getDb()
-      .prepare("UPDATE auth_invites SET revoked_at = ? WHERE id = ?")
-      .bind(Date.now(), invite.id)
-      .run();
+    await getDb().prepare("UPDATE auth_invites SET revoked_at = ? WHERE id = ?").bind(Date.now(), invite.id).run();
 
     return { id: invite.id, status: "Revoked" };
   });

@@ -1,15 +1,5 @@
 import { useState, type ComponentType, type ReactNode } from "react";
-import {
-  Archive,
-  BookOpen,
-  FolderOpen,
-  Lightbulb,
-  LogOut,
-  MessageCircle,
-  ShieldAlert,
-  ShieldCheck,
-  UserRound,
-} from "lucide-react";
+import { Archive, BookOpen, FolderOpen, Lightbulb, LogOut, MessageCircle, ShieldAlert, ShieldCheck, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type AppRailItem = "Workspaces" | "Chats" | "Ideas" | "Artifacts" | "Risks" | "Docs";
@@ -53,15 +43,18 @@ export function AppRail({
   persist?: boolean;
 }) {
   return (
-    <aside className={cn(
-      "min-h-0 flex-col items-center gap-2 bg-sidebar px-2 py-5 text-sidebar-foreground",
-      persist ? "flex" : "hidden lg:flex",
-    )}>
+    <aside
+      className={cn(
+        "min-h-0 flex-col items-center gap-2 bg-sidebar px-2 py-5 text-sidebar-foreground",
+        persist ? "flex" : "hidden lg:flex",
+      )}
+    >
       <div className="mb-4 grid size-10 place-items-center rounded-md bg-white">
         <img alt="Vertex" className="size-7" src="/vertex-mountain-blue.svg" />
       </div>
       {appRailItems.map(({ label, icon: Icon }) => {
-        const isWorkspaceItem = label === "Workspaces" || label === "Chats" || label === "Ideas" || label === "Artifacts" || label === "Risks";
+        const isWorkspaceItem =
+          label === "Workspaces" || label === "Chats" || label === "Ideas" || label === "Artifacts" || label === "Risks";
         return (
           <button
             key={label}

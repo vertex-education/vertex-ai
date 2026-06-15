@@ -158,11 +158,9 @@ export const generateRiskMitigation = createServerFn({ method: "POST" })
     const [risk] = await db
       .select()
       .from(schema.risks)
-      .where(and(
-        eq(schema.risks.id, data.riskId),
-        eq(schema.risks.workspaceId, data.workspaceId),
-        eq(schema.risks.projectId, data.projectId),
-      ))
+      .where(
+        and(eq(schema.risks.id, data.riskId), eq(schema.risks.workspaceId, data.workspaceId), eq(schema.risks.projectId, data.projectId)),
+      )
       .limit(1);
     if (!risk) throw new Error("Risk was not found in this scope.");
 
@@ -213,11 +211,9 @@ export const generateRiskMitigation = createServerFn({ method: "POST" })
     const [updatedRisk] = await db
       .update(schema.risks)
       .set({ mitigationStrategy })
-      .where(and(
-        eq(schema.risks.id, data.riskId),
-        eq(schema.risks.workspaceId, data.workspaceId),
-        eq(schema.risks.projectId, data.projectId),
-      ))
+      .where(
+        and(eq(schema.risks.id, data.riskId), eq(schema.risks.workspaceId, data.workspaceId), eq(schema.risks.projectId, data.projectId)),
+      )
       .returning();
     if (!updatedRisk) throw new Error("Risk mitigation was generated but the row could not be updated.");
 

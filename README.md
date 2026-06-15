@@ -1,6 +1,6 @@
-# Vertex AI Command Center
+# VertexAI
 
-Vertex AI Command Center is a TanStack Start workspace app for AI-assisted chat, project, idea, task, decision, approval, and artifact workflows.
+VertexAI is a TanStack Start workspace app for AI-assisted chat, project, idea, task, decision, approval, and artifact workflows.
 
 The app is organized around three explicit workspace scopes:
 
@@ -388,12 +388,15 @@ Recommended assistant patterns:
 
 ```markdown
 ## Pending Approvals
+
 - [ ] approval:team-approval-1 Confirm launch readiness sign-off
 
 ## Assigned Tasks
+
 - [ ] task:team-task-1 Package Vertex Hub roadmap evidence
 
 ## Suggested Ideas
+
 - idea:team-idea-1 Add a lightweight launch-readiness checklist to project chats
 ```
 
@@ -405,9 +408,7 @@ Recommended assistant patterns:
   "assignedTasks": [
     { "id": "team-task-1", "title": "Package Vertex Hub roadmap evidence", "owner": "Maya Chen", "source": "Vertex Hub Roadmap Brief" }
   ],
-  "suggestedIdeas": [
-    { "title": "Add a lightweight launch-readiness checklist to project chats", "owner": "Maya Chen" }
-  ]
+  "suggestedIdeas": [{ "title": "Add a lightweight launch-readiness checklist to project chats", "owner": "Maya Chen" }]
 }
 ```
 

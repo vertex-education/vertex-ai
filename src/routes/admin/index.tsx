@@ -17,7 +17,7 @@ import {
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({
-    meta: [{ title: "Admin Settings Dashboard | Vertex AI Command Center" }],
+    meta: [{ title: "Admin Settings Dashboard | VertexAI" }],
   }),
   component: AdminDashboardPage,
 });
@@ -116,7 +116,11 @@ function AdminDashboardPage() {
   }
 
   if (metricCardsQuery.isError || providerUsageQuery.isError || appHealthQuery.isError || recentUsageQuery.isError || !appHealth) {
-    return <p className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">Could not load admin metrics.</p>;
+    return (
+      <p className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+        Could not load admin metrics.
+      </p>
+    );
   }
 
   const requestRows = providerUsage.map((row) => ({
@@ -148,7 +152,10 @@ function AdminDashboardPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold">Dashboard</h2>
-          <p className="text-sm text-muted-foreground">Live app health and 30-day provider usage. Sections refresh independently{generatedAt ? `; latest refresh ${new Date(generatedAt).toLocaleTimeString()}` : ""}.</p>
+          <p className="text-sm text-muted-foreground">
+            Live app health and 30-day provider usage. Sections refresh independently
+            {generatedAt ? `; latest refresh ${new Date(generatedAt).toLocaleTimeString()}` : ""}.
+          </p>
         </div>
         <Badge variant="secondary">Primary Admin Tab</Badge>
       </div>
@@ -157,32 +164,32 @@ function AdminDashboardPage() {
         {metricCards.map((card, index) => {
           const query = metricCardQueries[index];
           return (
-          <Card key={card.id}>
-            <CardHeader className="space-y-0 pb-2">
-              <div className="flex items-center justify-between gap-2">
-                <CardDescription>{card.label}</CardDescription>
-                <div className="flex items-center gap-2">
-                  <MetricStatusIcon status={card.status} />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7"
-                    aria-label={`Refresh ${card.label}`}
-                    title={`Refresh ${card.label}`}
-                    disabled={query?.isFetching}
-                    onClick={() => void query?.refetch()}
-                  >
-                    <RefreshCw className={`size-3.5 ${query?.isFetching ? "animate-spin" : ""}`} />
-                  </Button>
+            <Card key={card.id}>
+              <CardHeader className="space-y-0 pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <CardDescription>{card.label}</CardDescription>
+                  <div className="flex items-center gap-2">
+                    <MetricStatusIcon status={card.status} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      aria-label={`Refresh ${card.label}`}
+                      title={`Refresh ${card.label}`}
+                      disabled={query?.isFetching}
+                      onClick={() => void query?.refetch()}
+                    >
+                      <RefreshCw className={`size-3.5 ${query?.isFetching ? "animate-spin" : ""}`} />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <CardTitle className="truncate text-2xl">{card.value}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">{card.detail}</p>
-            </CardContent>
-          </Card>
+                <CardTitle className="truncate text-2xl">{card.value}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground">{card.detail}</p>
+              </CardContent>
+            </Card>
           );
         })}
       </div>
@@ -194,7 +201,11 @@ function AdminDashboardPage() {
             <CardDescription>Tracked usage events by service over the last 30 days.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh Provider Requests" onRefresh={() => void providerUsageQuery.refetch()} />
+            <SectionRefreshButton
+              isFetching={providerUsageQuery.isFetching}
+              label="Refresh Provider Requests"
+              onRefresh={() => void providerUsageQuery.refetch()}
+            />
             <ChartContainer config={providerChartConfig} className="h-72 w-full">
               <BarChart data={requestRows} margin={{ left: 4, right: 12, top: 8, bottom: 0 }}>
                 <CartesianGrid vertical={false} />
@@ -213,9 +224,16 @@ function AdminDashboardPage() {
             <CardDescription>Gemma token totals from AI Gateway usage events and Gateway logs.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh Token Usage" onRefresh={() => void providerUsageQuery.refetch()} />
+            <SectionRefreshButton
+              isFetching={providerUsageQuery.isFetching}
+              label="Refresh Token Usage"
+              onRefresh={() => void providerUsageQuery.refetch()}
+            />
             <ChartContainer config={tokenChartConfig} className="h-72 w-full">
-              <BarChart data={tokenRows.length ? tokenRows : [{ provider: "No tracked tokens", totalTokens: 0 }]} margin={{ left: 4, right: 12, top: 8, bottom: 0 }}>
+              <BarChart
+                data={tokenRows.length ? tokenRows : [{ provider: "No tracked tokens", totalTokens: 0 }]}
+                margin={{ left: 4, right: 12, top: 8, bottom: 0 }}
+              >
                 <CartesianGrid vertical={false} />
                 <XAxis dataKey="provider" tickLine={false} axisLine={false} tickMargin={8} />
                 <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={48} />
@@ -234,7 +252,11 @@ function AdminDashboardPage() {
             <CardDescription>Core app records that indicate operational volume and health.</CardDescription>
           </CardHeader>
           <CardContent>
-            <SectionRefreshButton isFetching={appHealthQuery.isFetching} label="Refresh Storage and Activity" onRefresh={() => void appHealthQuery.refetch()} />
+            <SectionRefreshButton
+              isFetching={appHealthQuery.isFetching}
+              label="Refresh Storage and Activity"
+              onRefresh={() => void appHealthQuery.refetch()}
+            />
             <ChartContainer config={healthChartConfig} className="h-72 w-full">
               <BarChart data={healthRows} layout="vertical" margin={{ left: 12, right: 24, top: 8, bottom: 8 }}>
                 <CartesianGrid horizontal={false} />
@@ -253,7 +275,11 @@ function AdminDashboardPage() {
             <CardDescription>Runtime bindings and provider keys visible to the Worker.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
-            <SectionRefreshButton isFetching={appHealthQuery.isFetching} label="Refresh Service Configuration" onRefresh={() => void appHealthQuery.refetch()} />
+            <SectionRefreshButton
+              isFetching={appHealthQuery.isFetching}
+              label="Refresh Service Configuration"
+              onRefresh={() => void appHealthQuery.refetch()}
+            />
             <ChartContainer config={{ value: { label: "Services", color: serviceColors[0] } }} className="mx-auto h-48 w-full max-w-72">
               <PieChart>
                 <ChartTooltip content={<ChartTooltipContent />} />
@@ -279,10 +305,16 @@ function AdminDashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Provider Usage Detail</CardTitle>
-          <CardDescription>Credits are recorded when provider APIs expose them; otherwise request counts and runtime token diagnostics are tracked.</CardDescription>
+          <CardDescription>
+            Credits are recorded when provider APIs expose them; otherwise request counts and runtime token diagnostics are tracked.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <SectionRefreshButton isFetching={providerUsageQuery.isFetching} label="Refresh Provider Usage Detail" onRefresh={() => void providerUsageQuery.refetch()} />
+          <SectionRefreshButton
+            isFetching={providerUsageQuery.isFetching}
+            label="Refresh Provider Usage Detail"
+            onRefresh={() => void providerUsageQuery.refetch()}
+          />
           <Table>
             <TableHeader>
               <TableRow>
@@ -321,10 +353,16 @@ function AdminDashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Recent Usage Events</CardTitle>
-          <CardDescription>Consolidated by chat or workflow; expand a group to inspect each inference, naming call, retrieval step, and API tool request.</CardDescription>
+          <CardDescription>
+            Consolidated by chat or workflow; expand a group to inspect each inference, naming call, retrieval step, and API tool request.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
-          <SectionRefreshButton isFetching={recentUsageQuery.isFetching} label="Refresh Recent Usage Events" onRefresh={() => void recentUsageQuery.refetch()} />
+          <SectionRefreshButton
+            isFetching={recentUsageQuery.isFetching}
+            label="Refresh Recent Usage Events"
+            onRefresh={() => void recentUsageQuery.refetch()}
+          />
           {usageGroups.length ? (
             usageGroups.map((group) => (
               <details key={group.key} className="group rounded-md border bg-background">
@@ -420,9 +458,7 @@ function groupRecentUsage(events: RecentUsageEventView[]): UsageGroup[] {
     existing.events.push(event);
     existing.latestAt = Math.max(existing.latestAt, event.createdAt);
     existing.totalTokens += eventTokens;
-    existing.totalCost = existing.totalCost === null && eventCost === null
-      ? null
-      : (existing.totalCost ?? 0) + (eventCost ?? 0);
+    existing.totalCost = existing.totalCost === null && eventCost === null ? null : (existing.totalCost ?? 0) + (eventCost ?? 0);
   }
 
   return Array.from(groups.values())
@@ -469,9 +505,7 @@ function usageGroupDetail(event: RecentUsageEventView) {
 }
 
 function usageFeatureLabel(feature: string) {
-  return feature
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return feature.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function usageScopeDetail(event: RecentUsageEventView) {
@@ -504,15 +538,7 @@ function providerLabel(provider: string) {
   return provider;
 }
 
-function SectionRefreshButton({
-  isFetching,
-  label,
-  onRefresh,
-}: {
-  isFetching: boolean;
-  label: string;
-  onRefresh: () => void;
-}) {
+function SectionRefreshButton({ isFetching, label, onRefresh }: { isFetching: boolean; label: string; onRefresh: () => void }) {
   return (
     <div className="mb-3 flex justify-end">
       <Button type="button" variant="outline" size="sm" disabled={isFetching} onClick={onRefresh}>

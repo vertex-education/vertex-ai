@@ -53,7 +53,7 @@ async function handleChatEvents({ request }: { request: Request }) {
 }
 
 export function normalizeMode(value: string | null): WorkspaceMode | null {
-  return validModes.includes(value as WorkspaceMode) ? value as WorkspaceMode : null;
+  return validModes.includes(value as WorkspaceMode) ? (value as WorkspaceMode) : null;
 }
 
 async function getSubscriptionScope({

@@ -2,15 +2,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { uploadArtifact, type ArtifactUploadResult, type ScopeLevel } from "@/lib/artifact-upload";
@@ -105,7 +97,13 @@ export function ArtifactUploader() {
 
             <div className="grid gap-2">
               <Label htmlFor="artifact-document-type">Document type</Label>
-              <Input id="artifact-document-type" name="document_type" placeholder="policy, spec, onboarding" required disabled={isUploading} />
+              <Input
+                id="artifact-document-type"
+                name="document_type"
+                placeholder="policy, spec, onboarding"
+                required
+                disabled={isUploading}
+              />
             </div>
           </div>
 

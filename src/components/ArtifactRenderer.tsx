@@ -4,14 +4,7 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { Circle, ClipboardCheck, GitPullRequest, Lightbulb, MoreHorizontal, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -124,13 +117,7 @@ export type ParsedWorkflowAction = {
   status?: string;
 };
 
-export function ArtifactRenderer({
-  className,
-  fallbackPreview = [],
-  fileType,
-  previewJson,
-  workflowActions,
-}: ArtifactRendererProps) {
+export function ArtifactRenderer({ className, fallbackPreview = [], fileType, previewJson, workflowActions }: ArtifactRendererProps) {
   const normalizedFileType = fileType.trim().toLowerCase();
   const parsedPreview = parsePreviewJson(previewJson);
   const structuredActions = normalizeWorkflowActionPreview(parsedPreview);
@@ -161,7 +148,11 @@ export function ArtifactRenderer({
               table.rows.map((row, rowIndex) => (
                 <TableRow key={`artifact-row-${rowIndex}`}>
                   {table.columns.map((_column, columnIndex) => (
-                    <TableCell key={`artifact-cell-${rowIndex}-${columnIndex}`} className="max-w-72 truncate" title={row[columnIndex] ?? ""}>
+                    <TableCell
+                      key={`artifact-cell-${rowIndex}-${columnIndex}`}
+                      className="max-w-72 truncate"
+                      title={row[columnIndex] ?? ""}
+                    >
                       {row[columnIndex] ?? ""}
                     </TableCell>
                   ))}
@@ -197,9 +188,7 @@ export function ArtifactRenderer({
           </div>
         ))
       ) : (
-        <div className="rounded-md border border-dashed bg-background px-3 py-6 text-center">
-          No inline preview is available.
-        </div>
+        <div className="rounded-md border border-dashed bg-background px-3 py-6 text-center">No inline preview is available.</div>
       )}
     </div>
   );
@@ -234,13 +223,11 @@ export function normalizeCodePreview(value: unknown, fileType: string): CodePayl
 }
 
 export function normalizeTablePreview(value: unknown): NormalizedTable | null {
-  const rowsValue = isRecord(value) ? value.rows ?? value.data : Array.isArray(value) ? value : undefined;
+  const rowsValue = isRecord(value) ? (value.rows ?? value.data) : Array.isArray(value) ? value : undefined;
   if (!Array.isArray(rowsValue) || rowsValue.length === 0) return null;
 
   if (rowsValue.every((row) => isRecord(row))) {
-    const explicitColumns = isRecord(value) && Array.isArray(value.columns)
-      ? value.columns.map((column) => String(column))
-      : [];
+    const explicitColumns = isRecord(value) && Array.isArray(value.columns) ? value.columns.map((column) => String(column)) : [];
     const derivedColumns = Array.from(new Set(rowsValue.flatMap((row) => Object.keys(row as Record<string, unknown>))));
     const columns = explicitColumns.length ? explicitColumns : derivedColumns;
     if (!columns.length) return null;
@@ -252,10 +239,10 @@ export function normalizeTablePreview(value: unknown): NormalizedTable | null {
 
   if (rowsValue.every((row) => Array.isArray(row))) {
     const rawRows = rowsValue as unknown[][];
-    const explicitColumns = isRecord(value) && Array.isArray(value.columns)
-      ? value.columns.map((column) => String(column))
-      : [];
-    const header = explicitColumns.length ? explicitColumns : rawRows[0]?.map((cell, index) => stringifyCell(cell) || columnLabel(index)) ?? [];
+    const explicitColumns = isRecord(value) && Array.isArray(value.columns) ? value.columns.map((column) => String(column)) : [];
+    const header = explicitColumns.length
+      ? explicitColumns
+      : (rawRows[0]?.map((cell, index) => stringifyCell(cell) || columnLabel(index)) ?? []);
     const bodyRows = explicitColumns.length ? rawRows : rawRows.slice(1);
     if (!header.length) return null;
     return {
@@ -334,7 +321,10 @@ function normalizeWorkflowAction(candidate: { kind: WorkflowActionKind; value: u
   };
 }
 
-export function resolveMarkdownWorkflowAction(text: string, workflowActions: WorkflowActionContext | undefined): ParsedWorkflowAction | null {
+export function resolveMarkdownWorkflowAction(
+  text: string,
+  workflowActions: WorkflowActionContext | undefined,
+): ParsedWorkflowAction | null {
   const rawText = text.replace(/\s+/g, " ").trim();
   const explicit = rawText.match(/\b(approval|decision|idea|task)\s*[:#]\s*([a-z0-9][\w:-]*)/i);
   if (explicit) {
@@ -368,13 +358,14 @@ export function resolveMarkdownWorkflowAction(text: string, workflowActions: Wor
 }
 
 function resolveWorkflowAction(action: ParsedWorkflowAction, workflowActions: WorkflowActionContext | undefined) {
-  const collection = action.kind === "approval"
-    ? workflowActions?.approvals
-    : action.kind === "decision"
-      ? workflowActions?.decisions
-      : action.kind === "idea"
-        ? workflowActions?.ideas
-        : workflowActions?.tasks;
+  const collection =
+    action.kind === "approval"
+      ? workflowActions?.approvals
+      : action.kind === "decision"
+        ? workflowActions?.decisions
+        : action.kind === "idea"
+          ? workflowActions?.ideas
+          : workflowActions?.tasks;
   const exact = action.id ? collection?.find((item) => item.id === action.id) : undefined;
   const titleMatch = collection?.find((item) => titleMatches(action.title, item.originalText ?? item.title));
   const matched = exact ?? titleMatch;
@@ -383,8 +374,8 @@ function resolveWorkflowAction(action: ParsedWorkflowAction, workflowActions: Wo
     id: matched?.id ?? action.id,
     title: action.title,
     owner: matched?.owner ?? action.owner,
-    due: action.kind === "approval" ? (matched as WorkflowApprovalAction | undefined)?.due ?? action.due : action.due,
-    source: action.kind === "task" ? (matched as WorkflowTaskAction | undefined)?.source ?? action.source : action.source,
+    due: action.kind === "approval" ? ((matched as WorkflowApprovalAction | undefined)?.due ?? action.due) : action.due,
+    source: action.kind === "task" ? ((matched as WorkflowTaskAction | undefined)?.source ?? action.source) : action.source,
     status: matched?.status ?? action.status,
     clientStatus: matched?.clientStatus,
   };
@@ -426,11 +417,7 @@ function MarkdownArtifact({
           li: ({ children }) => {
             const action = resolveMarkdownWorkflowAction(textFromReactNode(children), workflowActions);
             return (
-              <li className="pl-1">
-                {action ? (
-                  <InlineWorkflowAction action={action} workflowActions={workflowActions} />
-                ) : children}
-              </li>
+              <li className="pl-1">{action ? <InlineWorkflowAction action={action} workflowActions={workflowActions} /> : children}</li>
             );
           },
           ol: ({ children }) => <ol className="space-y-1 pl-5 list-decimal">{children}</ol>,
@@ -477,21 +464,17 @@ function WorkflowActionList({
   );
 }
 
-function InlineWorkflowAction({
-  action,
-  workflowActions,
-}: {
-  action: ParsedWorkflowAction;
-  workflowActions?: WorkflowActionContext;
-}) {
+function InlineWorkflowAction({ action, workflowActions }: { action: ParsedWorkflowAction; workflowActions?: WorkflowActionContext }) {
   const resolved = resolveWorkflowAction(action, workflowActions);
   const isTask = resolved.kind === "task";
   const isPending = Boolean(
-    resolved.clientStatus === "pending"
-    || (isTask && workflowActions?.pendingTaskTitle && titleMatches(workflowActions.pendingTaskTitle, resolved.title))
-    || (isTask && resolved.id && workflowActions?.pendingTaskRemovalId === resolved.id),
+    resolved.clientStatus === "pending" ||
+    (isTask && workflowActions?.pendingTaskTitle && titleMatches(workflowActions.pendingTaskTitle, resolved.title)) ||
+    (isTask && resolved.id && workflowActions?.pendingTaskRemovalId === resolved.id),
   );
-  const canCreate = Boolean(workflowActions?.canEdit && !resolved.id && workflowActions?.activeMode && createHandlerForKind(resolved.kind, workflowActions));
+  const canCreate = Boolean(
+    workflowActions?.canEdit && !resolved.id && workflowActions?.activeMode && createHandlerForKind(resolved.kind, workflowActions),
+  );
   const CreatedIcon = iconForWorkflowKind(resolved.kind);
 
   return (
@@ -500,12 +483,7 @@ function InlineWorkflowAction({
       {resolved.id ? (
         <CreatedIcon className="inline size-3.5 align-[-2px] text-primary" aria-label={`${workflowKindLabel(resolved.kind)} created`} />
       ) : (
-        <InlineActionMenu
-          action={resolved}
-          canCreate={canCreate}
-          isPending={isPending}
-          workflowActions={workflowActions}
-        />
+        <InlineActionMenu action={resolved} canCreate={canCreate} isPending={isPending} workflowActions={workflowActions} />
       )}
     </>
   );
@@ -563,7 +541,10 @@ function InlineActionMenu({
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
               onClick={() => {
                 setOpen(false);
-                createHandlerForKind(action.kind, workflowActions)?.({
+                createHandlerForKind(
+                  action.kind,
+                  workflowActions,
+                )?.({
                   mode: workflowActions?.activeMode ?? "Personal",
                   projectId: workflowActions?.activeProjectId ?? null,
                   title: action.title,
@@ -607,9 +588,7 @@ function workflowKindLabel(kind: WorkflowActionKind) {
 function HighlightedCodeBlock({ className, code, language }: { className?: string; code: string; language: string }) {
   return (
     <div className={cn("overflow-hidden rounded-md border bg-foreground text-background", className)}>
-      <div className="border-b border-background/10 px-3 py-2 text-xs font-medium uppercase text-background/70">
-        {language || "text"}
-      </div>
+      <div className="border-b border-background/10 px-3 py-2 text-xs font-medium uppercase text-background/70">{language || "text"}</div>
       <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed">
         <code>{highlightCode(code, language)}</code>
       </pre>
@@ -622,9 +601,13 @@ function highlightCode(code: string, language: string) {
   if (!pattern) return code;
   const parts = code.split(pattern);
   return parts.map((part, index) =>
-    part.match(pattern)
-      ? <span className="font-semibold text-accent" key={`${part}-${index}`}>{part}</span>
-      : part,
+    part.match(pattern) ? (
+      <span className="font-semibold text-accent" key={`${part}-${index}`}>
+        {part}
+      </span>
+    ) : (
+      part
+    ),
   );
 }
 
@@ -670,32 +653,35 @@ function normalizeWorkflowKind(value: unknown): WorkflowActionKind | null {
   const normalized = value.toLowerCase().replace(/[^a-z]/g, "");
   if (["approval", "approvals", "pendingapproval", "pendingapprovals"].includes(normalized)) return "approval";
   if (["decision", "decisions"].includes(normalized)) return "decision";
-  if ([
-    "idea",
-    "ideas",
-    "suggestedidea",
-    "suggestedideas",
-    "potentialidea",
-    "potentialideas",
-    "opportunity",
-    "opportunities",
-    "proposal",
-    "proposals",
-    "concept",
-    "concepts",
-    "pilot",
-    "pilots",
-    "experiment",
-    "experiments",
-    "suggestion",
-    "suggestions",
-    "improvement",
-    "improvements",
-    "enhancement",
-    "enhancements",
-    "innovation",
-    "innovations",
-  ].includes(normalized)) return "idea";
+  if (
+    [
+      "idea",
+      "ideas",
+      "suggestedidea",
+      "suggestedideas",
+      "potentialidea",
+      "potentialideas",
+      "opportunity",
+      "opportunities",
+      "proposal",
+      "proposals",
+      "concept",
+      "concepts",
+      "pilot",
+      "pilots",
+      "experiment",
+      "experiments",
+      "suggestion",
+      "suggestions",
+      "improvement",
+      "improvements",
+      "enhancement",
+      "enhancements",
+      "innovation",
+      "innovations",
+    ].includes(normalized)
+  )
+    return "idea";
   if (["task", "tasks", "assignedtask", "assignedtasks", "todo", "todos"].includes(normalized)) return "task";
   return null;
 }
@@ -724,11 +710,15 @@ function cleanActionTitle(value: string) {
 }
 
 function hasIdeaLanguage(value: string) {
-  return /\b(idea|opportunit(?:y|ies)|proposal|concept|pilot|experiment|suggestion|improvement|enhancement|innovation|streamline|automate|optimi[sz]e)\b/i.test(value);
+  return /\b(idea|opportunit(?:y|ies)|proposal|concept|pilot|experiment|suggestion|improvement|enhancement|innovation|streamline|automate|optimi[sz]e)\b/i.test(
+    value,
+  );
 }
 
 function hasFollowThroughLanguage(value: string) {
-  return /\b(task|todo|to do|follow[- ]?up|action item|next step|assign(?:ed)? to|owner\s*:|due\s*:|deadline|needs follow[- ]?up|requires follow[- ]?through|send|schedule|update|prepare|confirm|publish|deliver|resolve)\b/i.test(value);
+  return /\b(task|todo|to do|follow[- ]?up|action item|next step|assign(?:ed)? to|owner\s*:|due\s*:|deadline|needs follow[- ]?up|requires follow[- ]?through|send|schedule|update|prepare|confirm|publish|deliver|resolve)\b/i.test(
+    value,
+  );
 }
 
 function isSuggestionSizedText(value: string) {
@@ -737,7 +727,10 @@ function isSuggestionSizedText(value: string) {
 }
 
 function normalizeActionText(value: string) {
-  return cleanActionTitle(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return cleanActionTitle(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function textFromReactNode(node: unknown): string {

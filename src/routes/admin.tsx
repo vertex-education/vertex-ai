@@ -14,7 +14,7 @@ export const Route = createFileRoute("/admin")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Admin Settings | Vertex AI Command Center" }],
+    meta: [{ title: "Admin Settings | VertexAI" }],
   }),
   component: AdminLayout,
 });

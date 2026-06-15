@@ -19,7 +19,11 @@ export function utcTimeLabel(date: Date) {
   return date.toISOString().slice(11, 16) + " UTC";
 }
 
-export function resolveInstructionPlaceholders(promptInstructions: string | null | undefined, project: BriefingFormatProject, windowEnd: Date) {
+export function resolveInstructionPlaceholders(
+  promptInstructions: string | null | undefined,
+  project: BriefingFormatProject,
+  windowEnd: Date,
+) {
   const instructions = promptInstructions?.trim();
   if (!instructions) return "";
 
@@ -115,7 +119,9 @@ export function normalizeBriefingMarkdown(markdown: string) {
     .map((line, index) => {
       const trimmed = line.trim();
       if (!trimmed || /^#{1,6}\s+/.test(trimmed) || /^[-*]\s+/.test(trimmed)) return line;
-      const labelWithBody = trimmed.match(/^(Status|Status Summary|Risks|Decisions Requiring Executive Input|Decisions Made Within Workstream Scope):\s+(.+)$/i);
+      const labelWithBody = trimmed.match(
+        /^(Status|Status Summary|Risks|Decisions Requiring Executive Input|Decisions Made Within Workstream Scope):\s+(.+)$/i,
+      );
       if (labelWithBody?.[1] && labelWithBody[2]) return `## ${labelWithBody[1]}\n${labelWithBody[2]}`;
       const normalized = trimmed.replace(/:$/, "").toLowerCase();
       if (index > 0 && sectionLabels.has(normalized)) return `## ${trimmed.replace(/:$/, "")}`;

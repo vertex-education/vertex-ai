@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatCustomInstructionTemplate,
-  normalizeBriefingMarkdown,
-  resolveInstructionPlaceholders,
-} from "@/lib/briefing-formatting";
+import { formatCustomInstructionTemplate, normalizeBriefingMarkdown, resolveInstructionPlaceholders } from "@/lib/briefing-formatting";
 
 const project = {
   name: "Vertex Hub",
@@ -28,14 +24,16 @@ describe("briefing custom instruction formatting", () => {
   });
 
   it("turns plain user-friendly labels into markdown structure before prompting Gemma", () => {
-    const formatted = formatCustomInstructionTemplate([
-      "Title: {Project Name} - Weekly Status Update - {MM/DD/YY}",
-      "",
-      "Status (On Track, Off Track - choose based on analysis of the project)",
-      "",
-      "Status Summary",
-      "Give a summary of the week in 100 words or less.",
-    ].join("\n"));
+    const formatted = formatCustomInstructionTemplate(
+      [
+        "Title: {Project Name} - Weekly Status Update - {MM/DD/YY}",
+        "",
+        "Status (On Track, Off Track - choose based on analysis of the project)",
+        "",
+        "Status Summary",
+        "Give a summary of the week in 100 words or less.",
+      ].join("\n"),
+    );
 
     expect(formatted).toContain("# {Project Name} - Weekly Status Update - {MM/DD/YY}");
     expect(formatted).toContain("## Status\nOn Track, Off Track - choose based on analysis of the project");
@@ -43,17 +41,13 @@ describe("briefing custom instruction formatting", () => {
   });
 
   it("preserves user-entered bullets while promoting section labels", () => {
-    const formatted = formatCustomInstructionTemplate([
-      "Risks",
-      "- List elevated risks supported by source data.",
-      "- Leave blank if no risks are supported.",
-    ].join("\n"));
+    const formatted = formatCustomInstructionTemplate(
+      ["Risks", "- List elevated risks supported by source data.", "- Leave blank if no risks are supported."].join("\n"),
+    );
 
-    expect(formatted).toBe([
-      "## Risks",
-      "- List elevated risks supported by source data.",
-      "- Leave blank if no risks are supported.",
-    ].join("\n"));
+    expect(formatted).toBe(
+      ["## Risks", "- List elevated risks supported by source data.", "- Leave blank if no risks are supported."].join("\n"),
+    );
   });
 
   it("normalizes compressed model output into renderable markdown headings and bullets", () => {
@@ -70,15 +64,17 @@ describe("briefing custom instruction formatting", () => {
   });
 
   it("promotes known plain section labels returned by the model", () => {
-    const normalized = normalizeBriefingMarkdown([
-      "Vertex Hub summary text.",
-      "",
-      "Risks",
-      "- Human error during manual handoffs.",
-      "",
-      "Decisions Made Within Workstream Scope",
-      "- Defined v1 and v2 roadmap distinction.",
-    ].join("\n"));
+    const normalized = normalizeBriefingMarkdown(
+      [
+        "Vertex Hub summary text.",
+        "",
+        "Risks",
+        "- Human error during manual handoffs.",
+        "",
+        "Decisions Made Within Workstream Scope",
+        "- Defined v1 and v2 roadmap distinction.",
+      ].join("\n"),
+    );
 
     expect(normalized).toContain("## Risks");
     expect(normalized).toContain("## Decisions Made Within Workstream Scope");

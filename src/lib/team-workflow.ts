@@ -4,7 +4,16 @@ import { runTrackedAiGateway } from "@/lib/ai-gateway";
 import { getAuth } from "@/lib/auth";
 import { publishChatMessageInserts, type ChatMessageInsertEvent } from "@/lib/chat-sync";
 import { lightweightChatTitleModelId } from "@/lib/prompts";
-import { avatarAlex, getConversationKey, parseChatAttachments, type ChatMessage, type ChatSection, type ChatSummary, type ProjectSummary, type WorkspaceMode } from "@/lib/pmo-data";
+import {
+  avatarAlex,
+  getConversationKey,
+  parseChatAttachments,
+  type ChatMessage,
+  type ChatSection,
+  type ChatSummary,
+  type ProjectSummary,
+  type WorkspaceMode,
+} from "@/lib/pmo-data";
 import { recordRealtimeMutationEvent, type RealtimeInvalidationTarget } from "@/lib/realtime-events";
 import { getRequest } from "@tanstack/start-server-core";
 
@@ -140,11 +149,23 @@ function scopeForMode(mode: WorkspaceMode) {
 }
 
 function projectId(name: string) {
-  return `project-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 44) || "untitled"}-${crypto.randomUUID()}`;
+  return `project-${
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 44) || "untitled"
+  }-${crypto.randomUUID()}`;
 }
 
 function chatId(title: string) {
-  return `chat-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 44) || "untitled"}-${crypto.randomUUID()}`;
+  return `chat-${
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 44) || "untitled"
+  }-${crypto.randomUUID()}`;
 }
 
 function messageId(prefix: string, value: string) {
@@ -196,27 +217,32 @@ async function generateInitialChatTitle(context: unknown, text: string) {
 
   try {
     const result = await Promise.race([
-      runTrackedAiGateway(ai, lightweightChatTitleModelId, {
-        messages: [
-          {
-            role: "system",
-            content: [
-              "Name this chat from the user's initial message.",
-              "Return only a concise title, no quotes, no punctuation at the end.",
-              "Use 3 to 7 words. Preserve useful project, artifact, or technical nouns.",
-            ].join(" "),
-          },
-          { role: "user", content: text.slice(0, 2_000) },
-        ],
-        max_completion_tokens: 24,
-        temperature: 0.1,
-      }, {
-        feature: "stream-chat-title",
-        metadata: {
-          feature: "stream-chat-title",
-          model: lightweightChatTitleModelId,
+      runTrackedAiGateway(
+        ai,
+        lightweightChatTitleModelId,
+        {
+          messages: [
+            {
+              role: "system",
+              content: [
+                "Name this chat from the user's initial message.",
+                "Return only a concise title, no quotes, no punctuation at the end.",
+                "Use 3 to 7 words. Preserve useful project, artifact, or technical nouns.",
+              ].join(" "),
+            },
+            { role: "user", content: text.slice(0, 2_000) },
+          ],
+          max_completion_tokens: 24,
+          temperature: 0.1,
         },
-      }),
+        {
+          feature: "stream-chat-title",
+          metadata: {
+            feature: "stream-chat-title",
+            model: lightweightChatTitleModelId,
+          },
+        },
+      ),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("Chat title model timed out.")), 5_000);
       }),
@@ -293,27 +319,32 @@ async function generateBranchChatTitle(context: unknown, sourceChatTitle: string
 
   try {
     const result = await Promise.race([
-      runTrackedAiGateway(ai, lightweightChatTitleModelId, {
-        messages: [
-          {
-            role: "system",
-            content: [
-              "Name a branched chat from the selected source message.",
-              "Return only the contextual title without the word Branch.",
-              "Use 3 to 7 words. Preserve useful project, artifact, or technical nouns.",
-            ].join(" "),
-          },
-          { role: "user", content: messageText.slice(0, 2_000) },
-        ],
-        max_completion_tokens: 24,
-        temperature: 0.1,
-      }, {
-        feature: "branch-title",
-        metadata: {
-          feature: "branch-title",
-          model: lightweightChatTitleModelId,
+      runTrackedAiGateway(
+        ai,
+        lightweightChatTitleModelId,
+        {
+          messages: [
+            {
+              role: "system",
+              content: [
+                "Name a branched chat from the selected source message.",
+                "Return only the contextual title without the word Branch.",
+                "Use 3 to 7 words. Preserve useful project, artifact, or technical nouns.",
+              ].join(" "),
+            },
+            { role: "user", content: messageText.slice(0, 2_000) },
+          ],
+          max_completion_tokens: 24,
+          temperature: 0.1,
         },
-      }),
+        {
+          feature: "branch-title",
+          metadata: {
+            feature: "branch-title",
+            model: lightweightChatTitleModelId,
+          },
+        },
+      ),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("Chat title model timed out.")), 5_000);
       }),
@@ -382,7 +413,7 @@ async function recordScopedMutation({
     sourceClientId: currentClientId(),
     sourceUserId,
     teamId: mode === "Team" ? teamId : null,
-    workspaceId: workspaceId ?? await getWorkspaceId(mode),
+    workspaceId: workspaceId ?? (await getWorkspaceId(mode)),
   });
 }
 
@@ -534,7 +565,7 @@ export const listMyScopedProjects = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const user = await currentUser();
     const scope = scopeForMode(data.mode);
-    const teamId = data.mode === "Team" ? data.teamId ?? "" : null;
+    const teamId = data.mode === "Team" ? (data.teamId ?? "") : null;
     const result = await getDb()
       .prepare(
         `SELECT p.id,
@@ -577,10 +608,7 @@ export const createScopedProject = createServerFn({ method: "POST" })
     if (data.mode === "Team" && !data.teamId) throw new Error("Select a team before creating a team project.");
 
     const scope = scopeForMode(data.mode);
-    const workspace = await getDb()
-      .prepare("SELECT id FROM workspaces WHERE scope = ? LIMIT 1")
-      .bind(scope)
-      .first<{ id: string }>();
+    const workspace = await getDb().prepare("SELECT id FROM workspaces WHERE scope = ? LIMIT 1").bind(scope).first<{ id: string }>();
     if (!workspace) throw new Error(`${data.mode} workspace was not found.`);
 
     const sort = await getDb()
@@ -635,13 +663,15 @@ export const updateScopedProjectInstructions = createServerFn({ method: "POST" }
     if (!data.projectId) throw new Error("Project is required.");
     if (data.mode === "Team" && !data.teamId) throw new Error("Select a team before editing a team project.");
 
-    await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? data.teamId ?? null : null);
+    await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? (data.teamId ?? null) : null);
 
     const description = data.description.trim();
     const projectInstructions = data.projectInstructions.trim();
     const asanaTaskStatusSource = data.asanaTaskStatusSource === "custom_field" ? "custom_field" : "native";
-    const asanaTaskStatusCustomFieldGid = asanaTaskStatusSource === "custom_field" ? data.asanaTaskStatusCustomFieldGid?.trim() || null : null;
-    const asanaTaskStatusCustomFieldName = asanaTaskStatusSource === "custom_field" ? data.asanaTaskStatusCustomFieldName?.trim() || null : null;
+    const asanaTaskStatusCustomFieldGid =
+      asanaTaskStatusSource === "custom_field" ? data.asanaTaskStatusCustomFieldGid?.trim() || null : null;
+    const asanaTaskStatusCustomFieldName =
+      asanaTaskStatusSource === "custom_field" ? data.asanaTaskStatusCustomFieldName?.trim() || null : null;
     if (asanaTaskStatusSource === "custom_field" && !asanaTaskStatusCustomFieldGid && !asanaTaskStatusCustomFieldName) {
       throw new Error("Select an Asana custom field before using custom field task status.");
     }
@@ -655,7 +685,14 @@ export const updateScopedProjectInstructions = createServerFn({ method: "POST" }
              asana_task_status_custom_field_name = ?
          WHERE id = ?`,
       )
-      .bind(description, projectInstructions, asanaTaskStatusSource, asanaTaskStatusCustomFieldGid, asanaTaskStatusCustomFieldName, data.projectId)
+      .bind(
+        description,
+        projectInstructions,
+        asanaTaskStatusSource,
+        asanaTaskStatusCustomFieldGid,
+        asanaTaskStatusCustomFieldName,
+        data.projectId,
+      )
       .run();
 
     const project = await getDb()
@@ -703,7 +740,7 @@ export const deleteScopedProject = createServerFn({ method: "POST" })
     const user = await requireManager();
     if (!data.projectId) throw new Error("Project is required.");
     if (data.mode === "Team" && !data.teamId) throw new Error("Select a team before deleting a team project.");
-    await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? data.teamId ?? null : null);
+    await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? (data.teamId ?? null) : null);
 
     const project = await getDb()
       .prepare(
@@ -718,10 +755,7 @@ export const deleteScopedProject = createServerFn({ method: "POST" })
       .first<{ id: string; workspaceId: string }>();
     if (!project) throw new Error("Project was not found.");
 
-    const projectChats = await getDb()
-      .prepare("SELECT id FROM chats WHERE project_id = ?")
-      .bind(data.projectId)
-      .all<{ id: string }>();
+    const projectChats = await getDb().prepare("SELECT id FROM chats WHERE project_id = ?").bind(data.projectId).all<{ id: string }>();
     const chatIds = (projectChats.results ?? []).map((chat) => chat.id);
     if (chatIds.length > 0) {
       const placeholders = chatIds.map(() => "?").join(", ");
@@ -739,18 +773,9 @@ export const deleteScopedProject = createServerFn({ method: "POST" })
         .run();
     }
 
-    await getDb()
-      .prepare("DELETE FROM scoped_invites WHERE scope = 'project' AND target_id = ?")
-      .bind(data.projectId)
-      .run();
-    await getDb()
-      .prepare("DELETE FROM project_members WHERE project_id = ?")
-      .bind(data.projectId)
-      .run();
-    await getDb()
-      .prepare("DELETE FROM projects WHERE id = ?")
-      .bind(data.projectId)
-      .run();
+    await getDb().prepare("DELETE FROM scoped_invites WHERE scope = 'project' AND target_id = ?").bind(data.projectId).run();
+    await getDb().prepare("DELETE FROM project_members WHERE project_id = ?").bind(data.projectId).run();
+    await getDb().prepare("DELETE FROM projects WHERE id = ?").bind(data.projectId).run();
     await recordScopedMutation({
       entity: "project",
       entityId: data.projectId,
@@ -783,7 +808,7 @@ async function listProjectChatsForUser(userId: string, mode: WorkspaceMode, team
          )
        ORDER BY c.sort_order ASC, c.title ASC`,
     )
-    .bind(scope, userId, scope, mode === "Team" ? teamId ?? "" : null, scope)
+    .bind(scope, userId, scope, mode === "Team" ? (teamId ?? "") : null, scope)
     .all<ChatSummary & { projectId: string }>();
 
   return (result.results ?? []).reduce<Record<string, ChatSummary[]>>((groups, chat) => {
@@ -848,9 +873,10 @@ async function listMessagesForChats({
       avatar: message.avatar ?? undefined,
       time: message.time,
       text: message.text,
-      artifact: message.artifactTitle && message.artifactType && message.artifactMeta
-        ? { title: message.artifactTitle, type: message.artifactType, meta: message.artifactMeta }
-        : undefined,
+      artifact:
+        message.artifactTitle && message.artifactType && message.artifactMeta
+          ? { title: message.artifactTitle, type: message.artifactType, meta: message.artifactMeta }
+          : undefined,
       attachments: parseChatAttachments(message.attachmentsJson),
     });
     return groups;
@@ -929,7 +955,7 @@ export const persistScopedRagChatTurn = createServerFn({ method: "POST" })
     if (data.mode === "Team" && !data.teamId) throw new Error("Select a team before using this team project chat.");
 
     const workspaceId = await getWorkspaceId(data.mode);
-    await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? data.teamId ?? null : null);
+    await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? (data.teamId ?? null) : null);
     const chat = await getDb()
       .prepare(
         `SELECT id,
@@ -949,14 +975,10 @@ export const persistScopedRagChatTurn = createServerFn({ method: "POST" })
       .first<{ id: string; title: string; description: string | null; messageCount: number }>();
     if (!chat) throw new Error("Chat was not found in this project.");
 
-    const generatedTitle = chat.messageCount === 0 && shouldAutoRenameInitialChat(chat)
-      ? await generateInitialChatTitle(context, prompt)
-      : null;
+    const generatedTitle =
+      chat.messageCount === 0 && shouldAutoRenameInitialChat(chat) ? await generateInitialChatTitle(context, prompt) : null;
     if (generatedTitle && generatedTitle !== chat.title) {
-      await getDb()
-        .prepare("UPDATE chats SET title = ? WHERE id = ?")
-        .bind(generatedTitle, data.chatId)
-        .run();
+      await getDb().prepare("UPDATE chats SET title = ? WHERE id = ?").bind(generatedTitle, data.chatId).run();
     }
 
     const userMessage: ChatMessage = {
@@ -1041,11 +1063,14 @@ export const createScopedChat = createServerFn({ method: "POST" })
     if (data.section === "project" && !data.projectId) throw new Error("Select a project before creating a project chat.");
     if (data.mode === "Team" && !data.teamId) throw new Error("Select a team before creating a team chat.");
     if (data.section === "workspace" && data.mode === "Team") await requireTeamMember(user.id, data.teamId ?? "");
-    if (data.section === "project") await requireProjectMember(user.id, data.projectId ?? "", data.mode === "Team" ? data.teamId ?? null : null);
+    if (data.section === "project")
+      await requireProjectMember(user.id, data.projectId ?? "", data.mode === "Team" ? (data.teamId ?? null) : null);
 
     const workspaceId = await getWorkspaceId(data.mode);
     const sort = await getDb()
-      .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 as sortOrder FROM chats WHERE workspace_id = ? AND section = ? AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)")
+      .prepare(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 as sortOrder FROM chats WHERE workspace_id = ? AND section = ? AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)",
+      )
       .bind(workspaceId, data.section, data.projectId ?? null, data.projectId ?? null)
       .first<{ sortOrder: number }>();
 
@@ -1058,7 +1083,7 @@ export const createScopedChat = createServerFn({ method: "POST" })
     if (data.section === "workspace") {
       await getDb()
         .prepare("INSERT INTO chat_members (chat_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
-        .bind(id, data.mode === "Team" ? null : user.id, data.mode === "Team" ? data.teamId ?? null : null, Date.now())
+        .bind(id, data.mode === "Team" ? null : user.id, data.mode === "Team" ? (data.teamId ?? null) : null, Date.now())
         .run();
     }
     await recordScopedMutation({
@@ -1068,7 +1093,7 @@ export const createScopedChat = createServerFn({ method: "POST" })
       invalidates: ["chats", "projects"],
       mode: data.mode,
       operation: "insert",
-      projectId: data.section === "project" ? data.projectId ?? null : null,
+      projectId: data.section === "project" ? (data.projectId ?? null) : null,
       sourceUserId: user.id,
       teamId: data.teamId ?? null,
       workspaceId,
@@ -1089,9 +1114,11 @@ export const branchScopedChat = createServerFn({ method: "POST" })
     let sourceChat: ChatSummary | null = null;
     if (data.section === "project") {
       if (!data.projectId) throw new Error("Project is required.");
-      await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? data.teamId ?? null : null);
+      await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? (data.teamId ?? null) : null);
       sourceChat = await getDb()
-        .prepare("SELECT id, title, description FROM chats WHERE id = ? AND workspace_id = ? AND section = 'project' AND project_id = ? LIMIT 1")
+        .prepare(
+          "SELECT id, title, description FROM chats WHERE id = ? AND workspace_id = ? AND section = 'project' AND project_id = ? LIMIT 1",
+        )
         .bind(data.chatId, workspaceId, data.projectId)
         .first<ChatSummary>();
     } else if (data.mode === "Team") {
@@ -1162,7 +1189,9 @@ export const branchScopedChat = createServerFn({ method: "POST" })
     if (!sourceMessage) throw new Error("Message was not found in this chat.");
 
     const sort = await getDb()
-      .prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 as sortOrder FROM chats WHERE workspace_id = ? AND section = ? AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)")
+      .prepare(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 as sortOrder FROM chats WHERE workspace_id = ? AND section = ? AND ((? IS NULL AND project_id IS NULL) OR project_id = ?)",
+      )
       .bind(workspaceId, data.section, data.projectId ?? null, data.projectId ?? null)
       .first<{ sortOrder: number }>();
     const title = await generateBranchChatTitle(context, sourceChat.title, sourceMessage.text);
@@ -1170,13 +1199,21 @@ export const branchScopedChat = createServerFn({ method: "POST" })
     const nextChatId = chatId(title);
     await getDb()
       .prepare("INSERT INTO chats (id, workspace_id, project_id, section, title, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(nextChatId, workspaceId, data.section === "project" ? data.projectId : null, data.section, title, description, sort?.sortOrder ?? 1)
+      .bind(
+        nextChatId,
+        workspaceId,
+        data.section === "project" ? data.projectId : null,
+        data.section,
+        title,
+        description,
+        sort?.sortOrder ?? 1,
+      )
       .run();
 
     if (data.section === "workspace") {
       await getDb()
         .prepare("INSERT INTO chat_members (chat_id, user_id, team_id, created_at) VALUES (?, ?, ?, ?)")
-        .bind(nextChatId, data.mode === "Team" ? null : user.id, data.mode === "Team" ? data.teamId ?? null : null, Date.now())
+        .bind(nextChatId, data.mode === "Team" ? null : user.id, data.mode === "Team" ? (data.teamId ?? null) : null, Date.now())
         .run();
     }
 
@@ -1188,9 +1225,10 @@ export const branchScopedChat = createServerFn({ method: "POST" })
       avatar: sourceMessage.avatar ?? undefined,
       time: sourceMessage.time,
       text: sourceMessage.text,
-      artifact: sourceMessage.artifactTitle && sourceMessage.artifactType && sourceMessage.artifactMeta
-        ? { title: sourceMessage.artifactTitle, type: sourceMessage.artifactType, meta: sourceMessage.artifactMeta }
-        : undefined,
+      artifact:
+        sourceMessage.artifactTitle && sourceMessage.artifactType && sourceMessage.artifactMeta
+          ? { title: sourceMessage.artifactTitle, type: sourceMessage.artifactType, meta: sourceMessage.artifactMeta }
+          : undefined,
       attachments: parseChatAttachments(sourceMessage.attachmentsJson),
     };
     await getDb()
@@ -1236,7 +1274,7 @@ export const branchScopedChat = createServerFn({ method: "POST" })
       invalidates: ["chats", "projects"],
       mode: data.mode,
       operation: "branch",
-      projectId: data.section === "project" ? data.projectId ?? null : null,
+      projectId: data.section === "project" ? (data.projectId ?? null) : null,
       sourceUserId: user.id,
       teamId: data.teamId ?? null,
       workspaceId,
@@ -1258,7 +1296,7 @@ export const deleteScopedChat = createServerFn({ method: "POST" })
     const workspaceId = await getWorkspaceId(data.mode);
     if (data.section === "project") {
       if (!data.projectId) throw new Error("Project is required.");
-      await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? data.teamId ?? null : null);
+      await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? (data.teamId ?? null) : null);
       const chat = await getDb()
         .prepare("SELECT id FROM chats WHERE id = ? AND workspace_id = ? AND section = 'project' AND project_id = ? LIMIT 1")
         .bind(data.chatId, workspaceId, data.projectId)
@@ -1310,7 +1348,7 @@ export const deleteScopedChat = createServerFn({ method: "POST" })
       invalidates: ["chats", "projects"],
       mode: data.mode,
       operation: "delete",
-      projectId: data.section === "project" ? data.projectId ?? null : null,
+      projectId: data.section === "project" ? (data.projectId ?? null) : null,
       sourceUserId: user.id,
       teamId: data.teamId ?? null,
       workspaceId,
@@ -1331,7 +1369,7 @@ export const renameScopedChat = createServerFn({ method: "POST" })
     const workspaceId = await getWorkspaceId(data.mode);
     if (data.section === "project") {
       if (!data.projectId) throw new Error("Project is required.");
-      await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? data.teamId ?? null : null);
+      await requireProjectMember(user.id, data.projectId, data.mode === "Team" ? (data.teamId ?? null) : null);
       const chat = await getDb()
         .prepare("SELECT id FROM chats WHERE id = ? AND workspace_id = ? AND section = 'project' AND project_id = ? LIMIT 1")
         .bind(data.chatId, workspaceId, data.projectId)
@@ -1381,7 +1419,7 @@ export const renameScopedChat = createServerFn({ method: "POST" })
       invalidates: ["chats", "projects"],
       mode: data.mode,
       operation: "rename",
-      projectId: data.section === "project" ? data.projectId ?? null : null,
+      projectId: data.section === "project" ? (data.projectId ?? null) : null,
       sourceUserId: user.id,
       teamId: data.teamId ?? null,
       workspaceId,
@@ -1390,7 +1428,9 @@ export const renameScopedChat = createServerFn({ method: "POST" })
   });
 
 export const createScopedInvite = createServerFn({ method: "POST" })
-  .validator((data: { scope: ScopedInviteScope; targetId: string; targetName: string; email: string; targetTeamId?: string | null }) => data)
+  .validator(
+    (data: { scope: ScopedInviteScope; targetId: string; targetName: string; email: string; targetTeamId?: string | null }) => data,
+  )
   .handler(async ({ data }) => {
     const user = await requireManager();
     const email = normalizeEmail(data.email);
@@ -1425,7 +1465,16 @@ export const listMyScopedInvites = createServerFn({ method: "GET" }).handler(asy
        ORDER BY created_at DESC`,
     )
     .bind(normalizeEmail(user.email))
-    .all<{ id: string; scope: ScopedInviteScope; targetId: string; targetName: string; email: string; acceptedAt: number | null; revokedAt: number | null; createdAt: number }>();
+    .all<{
+      id: string;
+      scope: ScopedInviteScope;
+      targetId: string;
+      targetName: string;
+      email: string;
+      acceptedAt: number | null;
+      revokedAt: number | null;
+      createdAt: number;
+    }>();
 
   return (result.results ?? []).map((invite) => ({
     ...invite,
@@ -1443,7 +1492,16 @@ export const acceptScopedInvite = createServerFn({ method: "POST" })
         "SELECT id, scope, target_id as targetId, target_team_id as targetTeamId, target_name as targetName, email, accepted_at as acceptedAt, revoked_at as revokedAt FROM scoped_invites WHERE id = ? LIMIT 1",
       )
       .bind(data.inviteId)
-      .first<{ id: string; scope: ScopedInviteScope; targetId: string; targetTeamId: string | null; targetName: string; email: string; acceptedAt: number | null; revokedAt: number | null }>();
+      .first<{
+        id: string;
+        scope: ScopedInviteScope;
+        targetId: string;
+        targetTeamId: string | null;
+        targetName: string;
+        email: string;
+        acceptedAt: number | null;
+        revokedAt: number | null;
+      }>();
 
     if (!invite) throw new Error("Invite was not found.");
     if (normalizeEmail(invite.email) !== normalizeEmail(user.email)) throw new Error("This invite belongs to another email address.");

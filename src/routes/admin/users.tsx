@@ -4,14 +4,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Ban, Save, Trash2, UserPlus, UsersRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -35,7 +28,7 @@ export const Route = createFileRoute("/admin/users")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Users | Vertex AI Command Center" }],
+    meta: [{ title: "Users | VertexAI" }],
   }),
   component: AdminUsersPage,
 });
@@ -93,7 +86,11 @@ function AdminUsersPage() {
   const createInviteMutation = useMutation({
     mutationFn: (data: { email: string; name: string; role: InviteRole }) => createUserInvite({ data }),
     onSuccess: async (result) => {
-      setMessage(result.emailResult.sent ? `Invite sent to ${result.email}.` : `Invite created, but email was not sent: ${result.emailResult.reason}`);
+      setMessage(
+        result.emailResult.sent
+          ? `Invite sent to ${result.email}.`
+          : `Invite created, but email was not sent: ${result.emailResult.reason}`,
+      );
       setInviteLink(result.emailResult.sent ? "" : result.inviteLink);
       await queryClient.invalidateQueries({ queryKey: invitesQueryKey });
     },
@@ -103,7 +100,8 @@ function AdminUsersPage() {
   });
 
   const saveUserMutation = useMutation({
-    mutationFn: ({ userId, name, role }: { userId: string; name: string; role: ManagedUserRole; email: string }) => updateManagedUser({ data: { userId, name, role } }),
+    mutationFn: ({ userId, name, role }: { userId: string; name: string; role: ManagedUserRole; email: string }) =>
+      updateManagedUser({ data: { userId, name, role } }),
     onSuccess: async (_result, variables) => {
       setMessage(`Updated ${variables.email}.`);
       await queryClient.invalidateQueries({ queryKey: usersQueryKey });
@@ -180,88 +178,195 @@ function AdminUsersPage() {
 
   return (
     <>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-2xl font-semibold">Users</h2>
-            <p className="text-sm text-muted-foreground">Manage user accounts, roles, and account invitations for Vertex AI Command Center.</p>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-semibold">Users</h2>
+          <p className="text-sm text-muted-foreground">Manage user accounts, roles, and account invitations for VertexAI.</p>
         </div>
+      </div>
 
-        <div className="flex w-fit rounded-md border bg-background p-1">
-          <Button type="button" variant={activeTab === "users" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("users")}>
-            <UsersRound className="size-4" />
-            Users
-          </Button>
-          <Button type="button" variant={activeTab === "invites" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("invites")}>
-            <UserPlus className="size-4" />
-            Invites
-          </Button>
-        </div>
+      <div className="flex w-fit rounded-md border bg-background p-1">
+        <Button type="button" variant={activeTab === "users" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("users")}>
+          <UsersRound className="size-4" />
+          Users
+        </Button>
+        <Button type="button" variant={activeTab === "invites" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("invites")}>
+          <UserPlus className="size-4" />
+          Invites
+        </Button>
+      </div>
 
-        {message ? <p className="rounded-md border bg-background p-3 text-sm text-muted-foreground">{message}</p> : null}
-        {inviteLink ? (
-          <a className="block break-all rounded-md border bg-background p-3 text-sm font-medium text-primary" href={inviteLink}>
-            {inviteLink}
-          </a>
-        ) : null}
+      {message ? <p className="rounded-md border bg-background p-3 text-sm text-muted-foreground">{message}</p> : null}
+      {inviteLink ? (
+        <a className="block break-all rounded-md border bg-background p-3 text-sm font-medium text-primary" href={inviteLink}>
+          {inviteLink}
+        </a>
+      ) : null}
 
-        {activeTab === "users" ? (
+      {activeTab === "users" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>User Accounts</CardTitle>
+            <CardDescription>Edit names, change roles, and remove accounts that should no longer have access.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {usersQuery.isLoading ? <p className="text-sm text-muted-foreground">Loading users...</p> : null}
+            {usersQuery.isError ? <p className="text-sm text-destructive">Could not load users.</p> : null}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Verified</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell className="font-medium">{user.email}</TableCell>
+                    <TableCell>
+                      <Input
+                        value={userDrafts[user.id]?.name ?? user.name}
+                        onChange={(event) => updateUserDraft(user.id, { name: event.target.value })}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <select
+                        className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        value={userDrafts[user.id]?.role ?? user.role}
+                        onChange={(event) => updateUserDraft(user.id, { role: event.target.value as ManagedUserRole })}
+                      >
+                        <option value="viewer">Viewer</option>
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </TableCell>
+                    <TableCell>{user.emailVerified ? "Yes" : "No"}</TableCell>
+                    <TableCell>{user.updatedLabel}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={saveUserMutation.isPending && saveUserMutation.variables?.userId === user.id}
+                          onClick={() => handleSaveUser(user)}
+                        >
+                          <Save className="size-4" />
+                          Save
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            user.id === session.user.id ||
+                            (deleteUserMutation.isPending && deleteUserMutation.variables?.userId === user.id)
+                          }
+                          onClick={() => handleDeleteUser(user)}
+                        >
+                          <Trash2 className="size-4" />
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-5">
           <Card>
-              <CardHeader>
-                <CardTitle>User Accounts</CardTitle>
-                <CardDescription>Edit names, change roles, and remove accounts that should no longer have access.</CardDescription>
-              </CardHeader>
-              <CardContent>
-              {usersQuery.isLoading ? <p className="text-sm text-muted-foreground">Loading users...</p> : null}
-              {usersQuery.isError ? <p className="text-sm text-destructive">Could not load users.</p> : null}
+            <CardHeader>
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 place-items-center rounded-md bg-primary text-primary-foreground">
+                  <UserPlus className="size-5" />
+                </span>
+                <div>
+                  <CardTitle>Create Invite</CardTitle>
+                  <CardDescription>
+                    Only vertexeducation.com addresses are allowed, plus rogerleecormier@gmail.com for this test.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <form className="grid gap-4 md:grid-cols-[1fr_1fr_140px_auto]" onSubmit={handleCreateInvite}>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-email">Email</Label>
+                  <Input id="invite-email" value={email} onChange={(event) => setEmail(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-name">Name</Label>
+                  <Input id="invite-name" value={name} onChange={(event) => setName(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-role">Role</Label>
+                  <select
+                    id="invite-role"
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    value={role}
+                    onChange={(event) => setRole(event.target.value as InviteRole)}
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <Button className="w-full" type="submit" disabled={createInviteMutation.isPending}>
+                    Invite
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Invites</CardTitle>
+              <CardDescription>Recent account invitations and first-use status.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {invitesQuery.isLoading ? <p className="text-sm text-muted-foreground">Loading invites...</p> : null}
+              {invitesQuery.isError ? <p className="text-sm text-destructive">Could not load invites.</p> : null}
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Email</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Role</TableHead>
-                    <TableHead>Verified</TableHead>
-                    <TableHead>Updated</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Expires</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map((user) => (
-                    <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.email}</TableCell>
-                      <TableCell>
-                        <Input value={userDrafts[user.id]?.name ?? user.name} onChange={(event) => updateUserDraft(user.id, { name: event.target.value })} />
-                      </TableCell>
-                      <TableCell>
-                        <select
-                          className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                          value={userDrafts[user.id]?.role ?? user.role}
-                          onChange={(event) => updateUserDraft(user.id, { role: event.target.value as ManagedUserRole })}
-                        >
-                          <option value="viewer">Viewer</option>
-                          <option value="user">User</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </TableCell>
-                      <TableCell>{user.emailVerified ? "Yes" : "No"}</TableCell>
-                      <TableCell>{user.updatedLabel}</TableCell>
+                  {invites.map((invite) => (
+                    <TableRow key={invite.id}>
+                      <TableCell>{invite.email}</TableCell>
+                      <TableCell>{invite.name}</TableCell>
+                      <TableCell>{invite.role}</TableCell>
+                      <TableCell>{invite.status}</TableCell>
+                      <TableCell>{invite.expiresLabel}</TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button type="button" variant="outline" size="sm" disabled={saveUserMutation.isPending && saveUserMutation.variables?.userId === user.id} onClick={() => handleSaveUser(user)}>
-                            <Save className="size-4" />
-                            Save
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={user.id === session.user.id || (deleteUserMutation.isPending && deleteUserMutation.variables?.userId === user.id)}
-                            onClick={() => handleDeleteUser(user)}
-                          >
-                            <Trash2 className="size-4" />
-                            Delete
-                          </Button>
-                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            invite.status !== "Pending" || (revokeInviteMutation.isPending && revokeInviteMutation.variables === invite.id)
+                          }
+                          onClick={() => handleRevokeInvite(invite.id)}
+                        >
+                          <Ban className="size-4" />
+                          Revoke
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -269,116 +374,19 @@ function AdminUsersPage() {
               </Table>
             </CardContent>
           </Card>
-        ) : (
-          <div className="grid gap-5">
-            <Card>
-              <CardHeader>
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 place-items-center rounded-md bg-primary text-primary-foreground">
-                    <UserPlus className="size-5" />
-                  </span>
-                  <div>
-                    <CardTitle>Create Invite</CardTitle>
-                    <CardDescription>Only vertexeducation.com addresses are allowed, plus rogerleecormier@gmail.com for this test.</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <form className="grid gap-4 md:grid-cols-[1fr_1fr_140px_auto]" onSubmit={handleCreateInvite}>
-                  <div className="space-y-2">
-                    <Label htmlFor="invite-email">Email</Label>
-                    <Input id="invite-email" value={email} onChange={(event) => setEmail(event.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="invite-name">Name</Label>
-                    <Input id="invite-name" value={name} onChange={(event) => setName(event.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="invite-role">Role</Label>
-                    <select
-                      id="invite-role"
-                      className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      value={role}
-                      onChange={(event) => setRole(event.target.value as InviteRole)}
-                    >
-                      <option value="viewer">Viewer</option>
-                      <option value="user">User</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </div>
-                  <div className="flex items-end">
-                    <Button className="w-full" type="submit" disabled={createInviteMutation.isPending}>
-                      Invite
-                    </Button>
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Invites</CardTitle>
-                <CardDescription>Recent account invitations and first-use status.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {invitesQuery.isLoading ? <p className="text-sm text-muted-foreground">Loading invites...</p> : null}
-                {invitesQuery.isError ? <p className="text-sm text-destructive">Could not load invites.</p> : null}
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Expires</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {invites.map((invite) => (
-                      <TableRow key={invite.id}>
-                        <TableCell>{invite.email}</TableCell>
-                        <TableCell>{invite.name}</TableCell>
-                        <TableCell>{invite.role}</TableCell>
-                        <TableCell>{invite.status}</TableCell>
-                        <TableCell>{invite.expiresLabel}</TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={invite.status !== "Pending" || (revokeInviteMutation.isPending && revokeInviteMutation.variables === invite.id)}
-                            onClick={() => handleRevokeInvite(invite.id)}
-                          >
-                            <Ban className="size-4" />
-                            Revoke
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-        <AdminConfirmDialog
-          state={confirmDialog}
-          onOpenChange={(open) => {
-            if (!open) setConfirmDialog(null);
-          }}
-        />
+        </div>
+      )}
+      <AdminConfirmDialog
+        state={confirmDialog}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDialog(null);
+        }}
+      />
     </>
   );
 }
 
-function AdminConfirmDialog({
-  state,
-  onOpenChange,
-}: {
-  state: AdminConfirmDialogState;
-  onOpenChange: (open: boolean) => void;
-}) {
+function AdminConfirmDialog({ state, onOpenChange }: { state: AdminConfirmDialogState; onOpenChange: (open: boolean) => void }) {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState("");
 
@@ -409,7 +417,7 @@ function AdminConfirmDialog({
             Cancel
           </Button>
           <Button type="button" variant="destructive" disabled={isPending} onClick={handleConfirm}>
-            {isPending ? "Working..." : state?.actionLabel ?? "Confirm"}
+            {isPending ? "Working..." : (state?.actionLabel ?? "Confirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

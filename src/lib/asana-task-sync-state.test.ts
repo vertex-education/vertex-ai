@@ -41,11 +41,13 @@ describe("Asana task sync state", () => {
   });
 
   it("shows a manual sync button for editable unsynced tasks", () => {
-    expect(getTaskAsanaSyncControlState({
-      asanaTaskGid: null,
-      canEdit: true,
-      isSyncing: false,
-    })).toEqual({
+    expect(
+      getTaskAsanaSyncControlState({
+        asanaTaskGid: null,
+        canEdit: true,
+        isSyncing: false,
+      }),
+    ).toEqual({
       disabled: false,
       label: "Sync to Asana",
       visible: true,
@@ -53,10 +55,12 @@ describe("Asana task sync state", () => {
   });
 
   it("disables the manual sync button while the task is syncing", () => {
-    expect(getTaskAsanaSyncControlState({
-      canEdit: true,
-      isSyncing: true,
-    })).toEqual({
+    expect(
+      getTaskAsanaSyncControlState({
+        canEdit: true,
+        isSyncing: true,
+      }),
+    ).toEqual({
       disabled: true,
       label: "Syncing...",
       visible: true,
@@ -64,11 +68,13 @@ describe("Asana task sync state", () => {
   });
 
   it("persists synced tasks as a disabled synced control", () => {
-    expect(getTaskAsanaSyncControlState({
-      asanaTaskGid: "1202515054453280",
-      canEdit: true,
-      isSyncing: false,
-    })).toEqual({
+    expect(
+      getTaskAsanaSyncControlState({
+        asanaTaskGid: "1202515054453280",
+        canEdit: true,
+        isSyncing: false,
+      }),
+    ).toEqual({
       disabled: true,
       label: "Synced",
       visible: true,
@@ -76,11 +82,13 @@ describe("Asana task sync state", () => {
   });
 
   it("does not show manual Asana sync controls to read-only users before sync", () => {
-    expect(getTaskAsanaSyncControlState({
-      asanaTaskGid: null,
-      canEdit: false,
-      isSyncing: false,
-    })).toEqual({
+    expect(
+      getTaskAsanaSyncControlState({
+        asanaTaskGid: null,
+        canEdit: false,
+        isSyncing: false,
+      }),
+    ).toEqual({
       disabled: true,
       label: "",
       visible: false,

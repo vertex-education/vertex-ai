@@ -149,10 +149,7 @@ const migrations = [
   {
     name: "0005_realtime_events",
     isComplete: () =>
-      tableExists("events") &&
-      indexExists("events_scope_idx") &&
-      indexExists("events_source_user_idx") &&
-      indexExists("events_entity_idx"),
+      tableExists("events") && indexExists("events_scope_idx") && indexExists("events_source_user_idx") && indexExists("events_entity_idx"),
     statements: [
       `CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -271,7 +268,8 @@ const migrations = [
     steps: [
       {
         isComplete: () => columnExists("workspace_actions", "project_id"),
-        statement: "ALTER TABLE workspace_actions ADD COLUMN project_id text REFERENCES projects(id) ON UPDATE no action ON DELETE set null;",
+        statement:
+          "ALTER TABLE workspace_actions ADD COLUMN project_id text REFERENCES projects(id) ON UPDATE no action ON DELETE set null;",
       },
       {
         isComplete: () => columnExists("workspace_actions", "original_text"),
@@ -618,10 +616,7 @@ const migrations = [
   {
     name: "0022_risks",
     isComplete: () =>
-      tableExists("risks") &&
-      indexExists("risks_scope_idx") &&
-      indexExists("risks_severity_idx") &&
-      indexExists("risks_status_idx"),
+      tableExists("risks") && indexExists("risks_scope_idx") && indexExists("risks_severity_idx") && indexExists("risks_status_idx"),
     statements: [
       `CREATE TABLE IF NOT EXISTS risks (
   id TEXT PRIMARY KEY,

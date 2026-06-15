@@ -232,10 +232,7 @@ async function requireScopedProjectAccess(workspaceId: string, projectId: string
   const userId = await currentUserId();
   const db = getDb();
 
-  const activeUser = await db
-    .prepare('SELECT role FROM "user" WHERE id = ? LIMIT 1')
-    .bind(userId)
-    .first<{ role: string | null }>();
+  const activeUser = await db.prepare('SELECT role FROM "user" WHERE id = ? LIMIT 1').bind(userId).first<{ role: string | null }>();
   if (!activeUser) throw new Error("Signed-in user was not found.");
   const role = normalizeAuthorizationRole(activeUser.role);
 
@@ -383,18 +380,23 @@ async function embedTexts(
   for (let index = 0; index < texts.length; index += embeddingBatchSize) {
     const batch = texts.slice(index, index + embeddingBatchSize);
     const feature = scope?.feature ?? "scoped-rag-embedding";
-    const result = (await runTrackedAiGateway(ai, embeddingModelId, { text: batch, pooling: "cls" }, {
-      feature,
-      teamId: scope?.teamId,
-      projectId: scope?.projectId,
-      metadata: {
+    const result = (await runTrackedAiGateway(
+      ai,
+      embeddingModelId,
+      { text: batch, pooling: "cls" },
+      {
         feature,
-        model: embeddingModelId,
-        workspaceId: scope?.workspaceId ?? null,
-        batchSize: batch.length,
-        batchIndex: index / embeddingBatchSize,
+        teamId: scope?.teamId,
+        projectId: scope?.projectId,
+        metadata: {
+          feature,
+          model: embeddingModelId,
+          workspaceId: scope?.workspaceId ?? null,
+          batchSize: batch.length,
+          batchIndex: index / embeddingBatchSize,
+        },
       },
-    })) as EmbeddingResponse;
+    )) as EmbeddingResponse;
     if (!result.data || result.data.length !== batch.length) {
       throw new Error("Embedding response did not match the requested chunk count.");
     }
@@ -488,10 +490,12 @@ function buildScopedVectorFilter(projectId: string, authorization: ScopedAccessC
   return {
     project_id: { $eq: projectId },
     ...(authorization.workspaceScope === "team" && authorization.teamId ? { team_id: { $eq: authorization.teamId } } : {}),
-    ...(authorization.canAccessConfidentialArtifacts ? {} : {
-      confidentiality: { $ne: "Confidential" },
-      restricted: { $ne: true },
-    }),
+    ...(authorization.canAccessConfidentialArtifacts
+      ? {}
+      : {
+          confidentiality: { $ne: "Confidential" },
+          restricted: { $ne: true },
+        }),
   };
 }
 
@@ -584,7 +588,10 @@ function sseEncode(event: string, data: unknown) {
 function extractTextFromAiContent(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    return value.map((item) => extractTextFromAiContent(item)).filter(Boolean).join("");
+    return value
+      .map((item) => extractTextFromAiContent(item))
+      .filter(Boolean)
+      .join("");
   }
   if (!isRecord(value)) return "";
 
@@ -639,43 +646,48 @@ async function repairOperationalEntityJson({
   teamId: string | null;
   workspaceId: string;
 }) {
-  const result = await runTrackedAiGateway(ai, entityExtractionModelId, {
-    messages: [
-      {
-        role: "system",
-        content: [
-          "You repair malformed entity extraction output into strict JSON.",
-          schema,
-          "Use only facts already present in the malformed output. Do not add new entities.",
-          "Return [] if no valid entity can be recovered.",
-        ].join("\n\n"),
-      },
-      {
-        role: "user",
-        content: [
-          "Malformed extraction output:",
-          truncateForRagPrompt(rawOutput, 6_000),
-          "",
-          "Return only the repaired strict JSON array.",
-        ].join("\n"),
-      },
-    ],
-    max_completion_tokens: 700,
-    temperature: 0,
-  }, {
-    feature: "scoped-rag-entity-json-repair",
-    teamId,
-    projectId,
-    chatId,
-    metadata: {
-      feature: "scoped-rag-entity-repair",
-      model: entityExtractionModelId,
-      teamId: teamId?.slice(0, 80) ?? null,
-      projectId: projectId.slice(0, 80),
-      chatId: chatId?.slice(0, 80) ?? null,
-      workspaceId,
+  const result = await runTrackedAiGateway(
+    ai,
+    entityExtractionModelId,
+    {
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You repair malformed entity extraction output into strict JSON.",
+            schema,
+            "Use only facts already present in the malformed output. Do not add new entities.",
+            "Return [] if no valid entity can be recovered.",
+          ].join("\n\n"),
+        },
+        {
+          role: "user",
+          content: [
+            "Malformed extraction output:",
+            truncateForRagPrompt(rawOutput, 6_000),
+            "",
+            "Return only the repaired strict JSON array.",
+          ].join("\n"),
+        },
+      ],
+      max_completion_tokens: 700,
+      temperature: 0,
     },
-  });
+    {
+      feature: "scoped-rag-entity-json-repair",
+      teamId,
+      projectId,
+      chatId,
+      metadata: {
+        feature: "scoped-rag-entity-repair",
+        model: entityExtractionModelId,
+        teamId: teamId?.slice(0, 80) ?? null,
+        projectId: projectId.slice(0, 80),
+        chatId: chatId?.slice(0, 80) ?? null,
+        workspaceId,
+      },
+    },
+  );
 
   return parseChatOperationalEntityJson(extractAiTextResponse(result));
 }
@@ -723,38 +735,43 @@ async function extractOperationalEntities({
 
   try {
     const ai = getAi();
-    const result = await runTrackedAiGateway(ai, entityExtractionModelId, {
-      messages: [
-        { role: "system", content: schema },
-        {
-          role: "user",
-          content: [
-            "Analyze this chat turn for operational entities.",
-            "",
-            "User prompt:",
-            trimmedPrompt,
-            "",
-            "Assistant response:",
-            trimmedResponse,
-          ].join("\n"),
-        },
-      ],
-      max_completion_tokens: 700,
-      temperature: 0,
-    }, {
-      feature: "scoped-rag-entity-extraction",
-      teamId,
-      projectId,
-      chatId,
-      metadata: {
-        feature: "scoped-rag-entities",
-        model: entityExtractionModelId,
-        teamId: teamId?.slice(0, 80) ?? null,
-        projectId: projectId.slice(0, 80),
-        chatId: chatId?.slice(0, 80) ?? null,
-        workspaceId,
+    const result = await runTrackedAiGateway(
+      ai,
+      entityExtractionModelId,
+      {
+        messages: [
+          { role: "system", content: schema },
+          {
+            role: "user",
+            content: [
+              "Analyze this chat turn for operational entities.",
+              "",
+              "User prompt:",
+              trimmedPrompt,
+              "",
+              "Assistant response:",
+              trimmedResponse,
+            ].join("\n"),
+          },
+        ],
+        max_completion_tokens: 700,
+        temperature: 0,
       },
-    });
+      {
+        feature: "scoped-rag-entity-extraction",
+        teamId,
+        projectId,
+        chatId,
+        metadata: {
+          feature: "scoped-rag-entities",
+          model: entityExtractionModelId,
+          teamId: teamId?.slice(0, 80) ?? null,
+          projectId: projectId.slice(0, 80),
+          chatId: chatId?.slice(0, 80) ?? null,
+          workspaceId,
+        },
+      },
+    );
     const text = extractAiTextResponse(result);
     try {
       return parseChatOperationalEntityJson(text);
@@ -871,7 +888,7 @@ function createAiSseResponse(
   return new Response(stream, {
     headers: {
       "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
       "Content-Type": "text/event-stream; charset=utf-8",
       "X-Accel-Buffering": "no",
     },
@@ -914,22 +931,29 @@ async function createDirectGenerationResponse({
 }) {
   const ai = getAi();
   const systemPrompt = prependScopedAuthorizationToSystemPrompt(
-    prependScopedContextToSystemPrompt(`${buildVertexAiSystemPrompt()} ${buildStreamReasoningInstruction(reasoningLevel)}`, scopedPromptContext),
+    prependScopedContextToSystemPrompt(
+      `${buildVertexAiSystemPrompt()} ${buildStreamReasoningInstruction(reasoningLevel)}`,
+      scopedPromptContext,
+    ),
     authorization,
   );
   const messages: StreamTraceMessage[] = [
     { role: "system", content: systemPrompt },
     ...(asanaContext
-      ? [{
-        role: "user" as const,
-        content: `Current Asana project context:\n${asanaContext}`,
-      }]
+      ? [
+          {
+            role: "user" as const,
+            content: `Current Asana project context:\n${asanaContext}`,
+          },
+        ]
       : []),
     ...(contextNotice
-      ? [{
-        role: "user" as const,
-        content: `Context budget notice: ${contextNotice}`,
-      }]
+      ? [
+          {
+            role: "user" as const,
+            content: `Context budget notice: ${contextNotice}`,
+          },
+        ]
       : []),
     {
       role: "user",
@@ -942,37 +966,42 @@ async function createDirectGenerationResponse({
     },
     { role: "user", content: prompt },
   ];
-  const aiStream = (await runTrackedAiGateway(ai, generationModelId, {
-    messages,
-    max_completion_tokens: maxCompletionTokens,
-    reasoning_effort: reasoningProfile.reasoningEffort,
-    stream: true,
-    chat_template_kwargs: {
-      enable_thinking: reasoningProfile.thinkingEnabled,
-      thinking: reasoningProfile.thinkingEnabled,
+  const aiStream = (await runTrackedAiGateway(
+    ai,
+    generationModelId,
+    {
+      messages,
+      max_completion_tokens: maxCompletionTokens,
+      reasoning_effort: reasoningProfile.reasoningEffort,
+      stream: true,
+      chat_template_kwargs: {
+        enable_thinking: reasoningProfile.thinkingEnabled,
+        thinking: reasoningProfile.thinkingEnabled,
+      },
+      temperature: 0.2,
     },
-    temperature: 0.2,
-  }, {
-    feature: intent === "ARTIFACT_GENERATION" ? "scoped-rag-artifact-generation" : "scoped-rag-direct-chat",
-    teamId,
-    projectId,
-    chatId,
-    metadata: {
-      feature: intent === "ARTIFACT_GENERATION" ? "scoped-rag-artifact" : "scoped-rag-direct",
-      model: generationModelId,
-      teamId: teamId?.slice(0, 80) ?? null,
-      projectId: projectId.slice(0, 80),
-      chatId: chatId?.slice(0, 80) ?? null,
-      workspaceId,
-      intent,
-      vectorizeBypassed: false,
-      userRole: authorization.role,
-      confidentialFiltered: !authorization.canAccessConfidentialArtifacts,
-      maxCompletionTokens,
-      streamed: true,
-      citations: historicalContext.citations.length,
+    {
+      feature: intent === "ARTIFACT_GENERATION" ? "scoped-rag-artifact-generation" : "scoped-rag-direct-chat",
+      teamId,
+      projectId,
+      chatId,
+      metadata: {
+        feature: intent === "ARTIFACT_GENERATION" ? "scoped-rag-artifact" : "scoped-rag-direct",
+        model: generationModelId,
+        teamId: teamId?.slice(0, 80) ?? null,
+        projectId: projectId.slice(0, 80),
+        chatId: chatId?.slice(0, 80) ?? null,
+        workspaceId,
+        intent,
+        vectorizeBypassed: false,
+        userRole: authorization.role,
+        confidentialFiltered: !authorization.canAccessConfidentialArtifacts,
+        maxCompletionTokens,
+        streamed: true,
+        citations: historicalContext.citations.length,
+      },
     },
-  })) as unknown as ReadableStream<Uint8Array>;
+  )) as unknown as ReadableStream<Uint8Array>;
 
   return createAiSseResponse(
     aiStream,
@@ -1041,20 +1070,8 @@ async function createWebSearchGenerationResponse({
     "Real-Time Web Context:",
     webContext,
     "",
-    ...(contextNotice
-      ? [
-        "Context budget notice:",
-        contextNotice,
-        "",
-      ]
-      : []),
-    ...(asanaContext
-      ? [
-        "Asana project context:",
-        asanaContext,
-        "",
-      ]
-      : []),
+    ...(contextNotice ? ["Context budget notice:", contextNotice, ""] : []),
+    ...(asanaContext ? ["Asana project context:", asanaContext, ""] : []),
     "Scoped historical chunks:",
     historicalContext.context,
   ].join("\n");
@@ -1064,37 +1081,42 @@ async function createWebSearchGenerationResponse({
     { role: "system", content: systemPrompt },
     { role: "user", content: prompt },
   ];
-  const aiStream = (await runTrackedAiGateway(ai, generationModelId, {
-    messages,
-    max_completion_tokens: maxCompletionTokens,
-    reasoning_effort: reasoningProfile.reasoningEffort,
-    stream: true,
-    chat_template_kwargs: {
-      enable_thinking: reasoningProfile.thinkingEnabled,
-      thinking: reasoningProfile.thinkingEnabled,
+  const aiStream = (await runTrackedAiGateway(
+    ai,
+    generationModelId,
+    {
+      messages,
+      max_completion_tokens: maxCompletionTokens,
+      reasoning_effort: reasoningProfile.reasoningEffort,
+      stream: true,
+      chat_template_kwargs: {
+        enable_thinking: reasoningProfile.thinkingEnabled,
+        thinking: reasoningProfile.thinkingEnabled,
+      },
+      temperature: 0.2,
     },
-    temperature: 0.2,
-  }, {
-    feature: "scoped-rag-web-search",
-    teamId,
-    projectId,
-    chatId,
-    metadata: {
-      feature: "scoped-rag-web",
-      model: generationModelId,
-      teamId: teamId?.slice(0, 80) ?? null,
-      projectId: projectId.slice(0, 80),
-      chatId: chatId?.slice(0, 80) ?? null,
-      workspaceId,
-      intent: "WEB_SEARCH",
-      vectorizeBypassed: false,
-      userRole: authorization.role,
-      confidentialFiltered: !authorization.canAccessConfidentialArtifacts,
-      maxCompletionTokens,
-      streamed: true,
-      citations: historicalContext.citations.length,
+    {
+      feature: "scoped-rag-web-search",
+      teamId,
+      projectId,
+      chatId,
+      metadata: {
+        feature: "scoped-rag-web",
+        model: generationModelId,
+        teamId: teamId?.slice(0, 80) ?? null,
+        projectId: projectId.slice(0, 80),
+        chatId: chatId?.slice(0, 80) ?? null,
+        workspaceId,
+        intent: "WEB_SEARCH",
+        vectorizeBypassed: false,
+        userRole: authorization.role,
+        confidentialFiltered: !authorization.canAccessConfidentialArtifacts,
+        maxCompletionTokens,
+        streamed: true,
+        citations: historicalContext.citations.length,
+      },
     },
-  })) as unknown as ReadableStream<Uint8Array>;
+  )) as unknown as ReadableStream<Uint8Array>;
 
   return createAiSseResponse(
     aiStream,
@@ -1192,7 +1214,7 @@ export function createTextSseResponse(message: string, citations: ChatWithScoped
   return new Response(stream, {
     headers: {
       "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
       "Content-Type": "text/event-stream; charset=utf-8",
       "X-Accel-Buffering": "no",
     },
@@ -1212,11 +1234,7 @@ export function applyContextBudgets({
   reasoningLevel: StreamReasoningLevel;
   webContext?: string | null;
 }) {
-  const rawContexts = [
-    historicalContext.context,
-    asanaContext ?? "",
-    webContext ?? "",
-  ].filter(Boolean);
+  const rawContexts = [historicalContext.context, asanaContext ?? "", webContext ?? ""].filter(Boolean);
   const rawContextTokens = rawContexts.reduce((total, item) => total + estimateTokens(item), 0);
   const hardOverage = rawContextTokens > budget.maxContextTokens * budget.softOverageMultiplier;
 
@@ -1263,7 +1281,7 @@ async function fetchJsonWithTimeout<T>(url: string, init: RequestInit, timeoutMs
     });
 
     if (!response.ok) throw new Error(`${provider} search failed with HTTP ${response.status}.`);
-    return await response.json() as T;
+    return (await response.json()) as T;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`${provider} search timed out after ${timeoutMs} ms.`);
@@ -1275,39 +1293,49 @@ async function fetchJsonWithTimeout<T>(url: string, init: RequestInit, timeoutMs
 }
 
 async function fetchTavilySearch(query: string, apiKey: string) {
-  return fetchJsonWithTimeout<TavilySearchPayload>("https://api.tavily.com/search", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
+  return fetchJsonWithTimeout<TavilySearchPayload>(
+    "https://api.tavily.com/search",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        search_depth: "advanced",
+        include_answer: true,
+        include_raw_content: false,
+        max_results: 5,
+      }),
     },
-    body: JSON.stringify({
-      query,
-      search_depth: "advanced",
-      include_answer: true,
-      include_raw_content: false,
-      max_results: 5,
-    }),
-  }, webSearchTimeoutMs, "Tavily");
+    webSearchTimeoutMs,
+    "Tavily",
+  );
 }
 
 async function fetchFirecrawlSearch(query: string, apiKey: string) {
-  return fetchJsonWithTimeout<FirecrawlSearchPayload>("https://api.firecrawl.dev/v1/search", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: JSON.stringify({
-      query,
-      limit: 5,
-      scrapeOptions: {
-        formats: ["markdown"],
+  return fetchJsonWithTimeout<FirecrawlSearchPayload>(
+    "https://api.firecrawl.dev/v1/search",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
-    }),
-  }, webSearchTimeoutMs, "Firecrawl");
+      body: JSON.stringify({
+        query,
+        limit: 5,
+        scrapeOptions: {
+          formats: ["markdown"],
+        },
+      }),
+    },
+    webSearchTimeoutMs,
+    "Firecrawl",
+  );
 }
 
 export function tavilySummaryFromPayload(payload: TavilySearchPayload) {
@@ -1335,13 +1363,14 @@ export function firecrawlMarkdownFromPayload(payload: FirecrawlSearchPayload) {
       if (!isRecord(item)) return "";
       const title = typeof item.title === "string" ? item.title : `Result ${index + 1}`;
       const url = typeof item.url === "string" ? item.url : "";
-      const markdown = typeof item.markdown === "string"
-        ? item.markdown
-        : typeof item.content === "string"
-          ? item.content
-          : typeof item.description === "string"
-            ? item.description
-            : "";
+      const markdown =
+        typeof item.markdown === "string"
+          ? item.markdown
+          : typeof item.content === "string"
+            ? item.content
+            : typeof item.description === "string"
+              ? item.description
+              : "";
       if (!markdown.trim()) return "";
       return [`### ${title}`, url ? `URL: ${url}` : "", truncateForRagPrompt(markdown, 2_400)].filter(Boolean).join("\n");
     })
@@ -1365,64 +1394,72 @@ export async function fetchConsolidatedWebSearch(
 
   if (env.TAVILY_API_KEY) {
     const startedAt = Date.now();
-    tasks.push(fetchTavilySearch(query, env.TAVILY_API_KEY).then(async (payload) => {
-      await recordAdminUsageEvent({
-        provider: "tavily",
-        feature: "web-search",
-        durationMs: Date.now() - startedAt,
-        teamId: usageScope.teamId,
-        projectId: usageScope.projectId,
-        chatId: usageScope.chatId,
-        metadata: { queryLength: query.length, ...usageScope.metadata },
-      });
-      return { provider: "tavily" as const, payload };
-    }).catch(async (error) => {
-      await recordAdminUsageEvent({
-        provider: "tavily",
-        feature: "web-search-error",
-        durationMs: Date.now() - startedAt,
-        teamId: usageScope.teamId,
-        projectId: usageScope.projectId,
-        chatId: usageScope.chatId,
-        metadata: {
-          queryLength: query.length,
-          ...usageScope.metadata,
-          error: error instanceof Error ? error.message : "Unknown Tavily error.",
-        },
-      });
-      throw error;
-    }));
+    tasks.push(
+      fetchTavilySearch(query, env.TAVILY_API_KEY)
+        .then(async (payload) => {
+          await recordAdminUsageEvent({
+            provider: "tavily",
+            feature: "web-search",
+            durationMs: Date.now() - startedAt,
+            teamId: usageScope.teamId,
+            projectId: usageScope.projectId,
+            chatId: usageScope.chatId,
+            metadata: { queryLength: query.length, ...usageScope.metadata },
+          });
+          return { provider: "tavily" as const, payload };
+        })
+        .catch(async (error) => {
+          await recordAdminUsageEvent({
+            provider: "tavily",
+            feature: "web-search-error",
+            durationMs: Date.now() - startedAt,
+            teamId: usageScope.teamId,
+            projectId: usageScope.projectId,
+            chatId: usageScope.chatId,
+            metadata: {
+              queryLength: query.length,
+              ...usageScope.metadata,
+              error: error instanceof Error ? error.message : "Unknown Tavily error.",
+            },
+          });
+          throw error;
+        }),
+    );
   }
 
   if (env.FIRECRAWL_API_KEY) {
     const startedAt = Date.now();
-    tasks.push(fetchFirecrawlSearch(query, env.FIRECRAWL_API_KEY).then(async (payload) => {
-      await recordAdminUsageEvent({
-        provider: "firecrawl",
-        feature: "web-search",
-        durationMs: Date.now() - startedAt,
-        teamId: usageScope.teamId,
-        projectId: usageScope.projectId,
-        chatId: usageScope.chatId,
-        metadata: { queryLength: query.length, ...usageScope.metadata },
-      });
-      return { provider: "firecrawl" as const, payload };
-    }).catch(async (error) => {
-      await recordAdminUsageEvent({
-        provider: "firecrawl",
-        feature: "web-search-error",
-        durationMs: Date.now() - startedAt,
-        teamId: usageScope.teamId,
-        projectId: usageScope.projectId,
-        chatId: usageScope.chatId,
-        metadata: {
-          queryLength: query.length,
-          ...usageScope.metadata,
-          error: error instanceof Error ? error.message : "Unknown Firecrawl error.",
-        },
-      });
-      throw error;
-    }));
+    tasks.push(
+      fetchFirecrawlSearch(query, env.FIRECRAWL_API_KEY)
+        .then(async (payload) => {
+          await recordAdminUsageEvent({
+            provider: "firecrawl",
+            feature: "web-search",
+            durationMs: Date.now() - startedAt,
+            teamId: usageScope.teamId,
+            projectId: usageScope.projectId,
+            chatId: usageScope.chatId,
+            metadata: { queryLength: query.length, ...usageScope.metadata },
+          });
+          return { provider: "firecrawl" as const, payload };
+        })
+        .catch(async (error) => {
+          await recordAdminUsageEvent({
+            provider: "firecrawl",
+            feature: "web-search-error",
+            durationMs: Date.now() - startedAt,
+            teamId: usageScope.teamId,
+            projectId: usageScope.projectId,
+            chatId: usageScope.chatId,
+            metadata: {
+              queryLength: query.length,
+              ...usageScope.metadata,
+              error: error instanceof Error ? error.message : "Unknown Firecrawl error.",
+            },
+          });
+          throw error;
+        }),
+    );
   }
 
   if (tasks.length === 0) {
@@ -1430,8 +1467,12 @@ export async function fetchConsolidatedWebSearch(
   }
 
   const settled = await Promise.allSettled(tasks);
-  let tavilySummary = env.TAVILY_API_KEY ? "Tavily search failed or returned no usable summary." : "Tavily summary unavailable: TAVILY_API_KEY is not configured.";
-  let firecrawlMarkdown = env.FIRECRAWL_API_KEY ? "Firecrawl search failed or returned no markdown content." : "Firecrawl markdown unavailable: FIRECRAWL_API_KEY is not configured.";
+  let tavilySummary = env.TAVILY_API_KEY
+    ? "Tavily search failed or returned no usable summary."
+    : "Tavily summary unavailable: TAVILY_API_KEY is not configured.";
+  let firecrawlMarkdown = env.FIRECRAWL_API_KEY
+    ? "Firecrawl search failed or returned no markdown content."
+    : "Firecrawl markdown unavailable: FIRECRAWL_API_KEY is not configured.";
   const issues: string[] = [];
 
   for (const result of settled) {
@@ -1454,7 +1495,9 @@ export async function fetchConsolidatedWebSearch(
     "Deep Dive Content",
     firecrawlMarkdown,
     issues.length ? `\nProvider issues:\n${issues.map((issue) => `- ${issue}`).join("\n")}` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export const ingestGeneratedArtifact = createServerFn({ method: "POST" })
@@ -1532,15 +1575,15 @@ export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput
     }),
     data.webSearchEnabled
       ? fetchConsolidatedWebSearch(prompt, runtimeEnv, {
-        teamId: authorization.teamId,
-        projectId,
-        chatId,
-        metadata: {
-          workspaceId,
-          reasoningLevel,
-          source: "scoped-rag-stream",
-        },
-      })
+          teamId: authorization.teamId,
+          projectId,
+          chatId,
+          metadata: {
+            workspaceId,
+            reasoningLevel,
+            source: "scoped-rag-stream",
+          },
+        })
       : Promise.resolve(null),
   ]);
   const budgetedContext = applyContextBudgets({

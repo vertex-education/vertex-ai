@@ -1,11 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  deleteAsanaTokens,
-  getAsanaTokens,
-  getValidAsanaTokens,
-  storeAsanaTokens,
-  type AsanaTokenVaultEnv,
-} from "@/lib/asana-token-vault";
+import { deleteAsanaTokens, getAsanaTokens, getValidAsanaTokens, storeAsanaTokens, type AsanaTokenVaultEnv } from "@/lib/asana-token-vault";
 import {
   deleteMicrosoftGraphTokens,
   getMicrosoftGraphTokens,
@@ -91,12 +85,18 @@ describe("encrypted token vaults", () => {
       MICROSOFT_ENTRA_CLIENT_SECRET: "client-secret",
       MICROSOFT_ENTRA_TENANT_ID: "tenant-id",
     } as MicrosoftTokenVaultEnv;
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      access_token: "new-access",
-      expires_in: 3600,
-      scope: "offline_access User.Read",
-      token_type: "Bearer",
-    }), { status: 200 }));
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "new-access",
+            expires_in: 3600,
+            scope: "offline_access User.Read",
+            token_type: "Bearer",
+          }),
+          { status: 200 },
+        ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await storeMicrosoftGraphTokens({
@@ -114,9 +114,12 @@ describe("encrypted token vaults", () => {
       refreshToken: "old-refresh",
       tokenType: "Bearer",
     });
-    expect(fetchMock).toHaveBeenCalledWith("https://login.microsoftonline.com/tenant-id/oauth2/v2.0/token", expect.objectContaining({
-      method: "POST",
-    }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://login.microsoftonline.com/tenant-id/oauth2/v2.0/token",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
   });
 
   it("stores, decrypts, and deletes Asana tokens in the shared encrypted vault", async () => {
@@ -156,12 +159,18 @@ describe("encrypted token vaults", () => {
       ASANA_CLIENT_ID: "asana-client",
       ASANA_CLIENT_SECRET: "asana-secret",
     } as AsanaTokenVaultEnv;
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      access_token: "new-asana-access",
-      refresh_token: "new-asana-refresh",
-      expires_in: 1800,
-      token_type: "bearer",
-    }), { status: 200 }));
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "new-asana-access",
+            refresh_token: "new-asana-refresh",
+            expires_in: 1800,
+            token_type: "bearer",
+          }),
+          { status: 200 },
+        ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await storeAsanaTokens({
@@ -179,9 +188,12 @@ describe("encrypted token vaults", () => {
       refreshToken: "new-asana-refresh",
       tokenType: "bearer",
     });
-    expect(fetchMock).toHaveBeenCalledWith("https://app.asana.com/-/oauth_token", expect.objectContaining({
-      method: "POST",
-    }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://app.asana.com/-/oauth_token",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
   });
 
   it("rejects invalid vault input early", async () => {
@@ -190,24 +202,28 @@ describe("encrypted token vaults", () => {
       TOKEN_VAULT_KEY: base64Key(),
     } as MicrosoftTokenVaultEnv;
 
-    await expect(storeMicrosoftGraphTokens({
-      env,
-      userId: "user-1",
-      tokens: {
-        accessToken: "",
-        refreshToken: "refresh",
-        expiresAt: Date.now() + 60_000,
-      },
-    })).rejects.toThrow("access and refresh tokens are required");
+    await expect(
+      storeMicrosoftGraphTokens({
+        env,
+        userId: "user-1",
+        tokens: {
+          accessToken: "",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 60_000,
+        },
+      }),
+    ).rejects.toThrow("access and refresh tokens are required");
 
-    await expect(storeMicrosoftGraphTokens({
-      env,
-      userId: "",
-      tokens: {
-        accessToken: "access",
-        refreshToken: "refresh",
-        expiresAt: Date.now() + 60_000,
-      },
-    })).rejects.toThrow("A user id is required");
+    await expect(
+      storeMicrosoftGraphTokens({
+        env,
+        userId: "",
+        tokens: {
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 60_000,
+        },
+      }),
+    ).rejects.toThrow("A user id is required");
   });
 });

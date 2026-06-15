@@ -28,7 +28,7 @@ export const Route = createFileRoute("/workspace/$workspaceId/project/$projectId
     return { dashboard };
   },
   head: () => ({
-    meta: [{ title: "Risks | Vertex AI Command Center" }],
+    meta: [{ title: "Risks | VertexAI" }],
   }),
   component: ProjectRisksPage,
 });
@@ -87,24 +87,22 @@ function ProjectRisksPage() {
     () => [
       {
         accessorKey: "severity",
-        header: ({ column }) => (
-          <SortButton label="Severity" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")} />
-        ),
+        header: ({ column }) => <SortButton label="Severity" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")} />,
         cell: ({ row }) => <SeverityBadge severity={row.original.severity} />,
         sortingFn: (a, b) => severityOrder[a.original.severity] - severityOrder[b.original.severity],
       },
       {
         accessorKey: "status",
-        header: ({ column }) => (
-          <SortButton label="Status" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")} />
+        header: ({ column }) => <SortButton label="Status" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")} />,
+        cell: ({ row }) => (
+          <Badge variant="outline" className="capitalize">
+            {row.original.status}
+          </Badge>
         ),
-        cell: ({ row }) => <Badge variant="outline" className="capitalize">{row.original.status}</Badge>,
       },
       {
         accessorKey: "description",
-        header: ({ column }) => (
-          <SortButton label="Risk" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")} />
-        ),
+        header: ({ column }) => <SortButton label="Risk" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")} />,
         cell: ({ row }) => <div className="max-w-[32rem] text-sm leading-6">{row.original.description}</div>,
       },
       {
@@ -171,18 +169,11 @@ function ProjectRisksPage() {
               onChange={(value) => setSeverityFilter(value as RiskSeverity | "all")}
               options={["all", "critical", "high", "medium", "low"]}
             />
-            <FilterSelect
-              label="Status"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={["all", ...statuses]}
-            />
+            <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={["all", ...statuses]} />
           </div>
         </header>
 
-        {message ? (
-          <div className="rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground">{message}</div>
-        ) : null}
+        {message ? <div className="rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground">{message}</div> : null}
 
         <Card>
           <CardHeader className="gap-1">
@@ -231,7 +222,11 @@ function ProjectRisksPage() {
 
 function SortButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-xs font-semibold uppercase text-muted-foreground">
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-xs font-semibold uppercase text-muted-foreground"
+    >
       {label}
       <ArrowDownUp className="size-3" />
     </button>
@@ -269,7 +264,11 @@ function FilterSelect({
 
 function SeverityBadge({ severity }: { severity: RiskSeverity }) {
   const variant = severity === "critical" ? "destructive" : severity === "high" ? "warning" : severity === "medium" ? "info" : "success";
-  return <Badge variant={variant} className="capitalize">{severity}</Badge>;
+  return (
+    <Badge variant={variant} className="capitalize">
+      {severity}
+    </Badge>
+  );
 }
 
 function titleCase(value: string) {

@@ -42,7 +42,7 @@ export function createScopedRagErrorResponse(message: string) {
     status: 200,
     headers: {
       "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
       "Content-Type": "text/event-stream; charset=utf-8",
       "X-Accel-Buffering": "no",
     },

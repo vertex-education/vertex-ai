@@ -61,7 +61,13 @@ describe("PMO workspace data helpers", () => {
 
   it("sanitizes and parses persisted chat attachments", () => {
     const sanitized = sanitizeChatAttachments([
-      { ...attachment, name: "a".repeat(200), mimeType: "text/plain".repeat(30), extractedText: "x".repeat(21_000), error: "e".repeat(300) },
+      {
+        ...attachment,
+        name: "a".repeat(200),
+        mimeType: "text/plain".repeat(30),
+        extractedText: "x".repeat(21_000),
+        error: "e".repeat(300),
+      },
       { ...attachment, name: "" },
     ]);
 
@@ -80,19 +86,23 @@ describe("PMO workspace data helpers", () => {
     expect(buildAttachmentPromptContext([attachment])).toContain("[Attachment 1] Source Notes.txt");
     expect(buildAttachmentPromptContext([{ ...attachment, status: "error", extractedText: "" }])).toBeNull();
 
-    expect(buildWebSearchPromptContext({
-      enabled: false,
-      query: "ignored",
-      provider: "none",
-      results: [],
-    })).toBeNull();
-    expect(buildWebSearchPromptContext({
-      enabled: true,
-      query: "Vertex Education",
-      provider: "Tavily + Firecrawl",
-      results: [],
-      error: "No provider configured.",
-    })).toContain("No usable web results were available");
+    expect(
+      buildWebSearchPromptContext({
+        enabled: false,
+        query: "ignored",
+        provider: "none",
+        results: [],
+      }),
+    ).toBeNull();
+    expect(
+      buildWebSearchPromptContext({
+        enabled: true,
+        query: "Vertex Education",
+        provider: "Tavily + Firecrawl",
+        results: [],
+        error: "No provider configured.",
+      }),
+    ).toContain("No usable web results were available");
   });
 
   it("cycles workflow statuses in the UI order", () => {
@@ -118,24 +128,23 @@ describe("PMO workspace data helpers", () => {
     };
 
     expect(titleMatchesTask("Follow up with ops", "Follow-up with ops")).toBe(true);
-    expect(buildAsanaNotesForWorkflowTask(task)).toBe([
-      "Original text: Ops needs follow-up.",
-      "Owner: Maya",
-      "Source: Chat",
-      "Created from VertexAI Command Center.",
-    ].join("\n"));
+    expect(buildAsanaNotesForWorkflowTask(task)).toBe(
+      ["Original text: Ops needs follow-up.", "Owner: Maya", "Source: Chat", "Created from VertexAI."].join("\n"),
+    );
   });
 
   it("bounds idea scores and extracts JSON objects from model output", () => {
     expect(boundedScore("105", 50)).toBe(100);
     expect(boundedScore("-10", 50)).toBe(0);
     expect(boundedScore("bad", 50)).toBe(50);
-    expect(extractJsonObject("```json\n{\"impact\":80}\n```")).toEqual({ impact: 80 });
+    expect(extractJsonObject('```json\n{"impact":80}\n```')).toEqual({ impact: 80 });
     expect(extractJsonObject("not-json")).toBeNull();
   });
 
   it("scrubs HTML timeout errors before showing chat users", () => {
-    expect(chatSafeAiErrorMessage(new Error("<html>504 Gateway Time-out</html>"))).toBe("Workers AI gateway timed out before returning a response.");
+    expect(chatSafeAiErrorMessage(new Error("<html>504 Gateway Time-out</html>"))).toBe(
+      "Workers AI gateway timed out before returning a response.",
+    );
     expect(chatSafeAiErrorMessage(new Error("  Service   unavailable  "))).toBe("Service unavailable");
   });
 });

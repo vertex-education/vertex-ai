@@ -2,7 +2,7 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 
 export const allowedChatAttachmentExtensions = ["pdf", "xlsx", "pptx", "docx", "csv", "txt"] as const;
 
-export type AllowedChatAttachmentExtension = typeof allowedChatAttachmentExtensions[number];
+export type AllowedChatAttachmentExtension = (typeof allowedChatAttachmentExtensions)[number];
 
 export type ExtractedChatAttachment = {
   id: string;
@@ -57,7 +57,7 @@ export async function extractChatAttachment(file: File): Promise<ExtractedChatAt
 function extensionFromName(name: string): AllowedChatAttachmentExtension | null {
   const extension = name.split(".").pop()?.toLowerCase();
   return allowedChatAttachmentExtensions.includes(extension as AllowedChatAttachmentExtension)
-    ? extension as AllowedChatAttachmentExtension
+    ? (extension as AllowedChatAttachmentExtension)
     : null;
 }
 
@@ -79,7 +79,7 @@ async function extractPdfText(file: File) {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
     const text = content.items
-      .map((item) => "str" in item ? item.str : "")
+      .map((item) => ("str" in item ? item.str : ""))
       .filter(Boolean)
       .join(" ");
     pages.push(`Page ${pageNumber}\n${text}`);
@@ -97,7 +97,10 @@ async function extractXlsxText(file: File) {
     sheet.eachRow((row, rowNumber) => {
       const values = row.values;
       const cells = Array.isArray(values)
-        ? values.slice(1).map((value) => cellValueToText(value)).filter(Boolean)
+        ? values
+            .slice(1)
+            .map((value) => cellValueToText(value))
+            .filter(Boolean)
         : [];
       if (cells.length > 0) rows.push(`R${rowNumber}: ${cells.join(" | ")}`);
     });
@@ -120,10 +123,12 @@ async function extractPptxText(file: File) {
   const slideFiles = Object.keys(zip.files)
     .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
     .sort((a, b) => slideNumber(a) - slideNumber(b));
-  const slides = await Promise.all(slideFiles.map(async (path, index) => {
-    const xml = await zip.file(path)?.async("text");
-    return `Slide ${index + 1}\n${xml ? xmlTextRunsToText(xml) : ""}`;
-  }));
+  const slides = await Promise.all(
+    slideFiles.map(async (path, index) => {
+      const xml = await zip.file(path)?.async("text");
+      return `Slide ${index + 1}\n${xml ? xmlTextRunsToText(xml) : ""}`;
+    }),
+  );
   return slides.join("\n\n");
 }
 

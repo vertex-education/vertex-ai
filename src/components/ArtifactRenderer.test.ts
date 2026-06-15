@@ -16,22 +16,24 @@ describe("artifact preview normalization", () => {
   });
 
   it("normalizes object-row table previews with explicit columns", () => {
-    expect(normalizeTablePreview({
-      columns: ["Name", "Status"],
-      rows: [
-        { Name: "Vertex Hub", Status: "In Progress", Extra: "ignored by explicit columns" },
-      ],
-    })).toEqual({
+    expect(
+      normalizeTablePreview({
+        columns: ["Name", "Status"],
+        rows: [{ Name: "Vertex Hub", Status: "In Progress", Extra: "ignored by explicit columns" }],
+      }),
+    ).toEqual({
       columns: ["Name", "Status"],
       rows: [["Vertex Hub", "In Progress"]],
     });
   });
 
   it("normalizes array-row table previews by deriving headers from the first row", () => {
-    expect(normalizeTablePreview([
-      ["Project", "Status"],
-      ["Vertex Hub", "Blocked"],
-    ])).toEqual({
+    expect(
+      normalizeTablePreview([
+        ["Project", "Status"],
+        ["Vertex Hub", "Blocked"],
+      ]),
+    ).toEqual({
       columns: ["Project", "Status"],
       rows: [["Vertex Hub", "Blocked"]],
     });
@@ -55,11 +57,13 @@ describe("artifact preview normalization", () => {
   });
 
   it("normalizes structured workflow action previews", () => {
-    expect(normalizeWorkflowActionPreview({
-      pendingApprovals: [{ id: "approval-1", title: "Confirm launch readiness", owner: "Maya", due: "Friday" }],
-      assignedTasks: [{ title: "Prepare steering update", owner: "Jordan" }],
-      suggestedIdeas: [{ title: "Automate project health summaries" }],
-    })).toMatchObject([
+    expect(
+      normalizeWorkflowActionPreview({
+        pendingApprovals: [{ id: "approval-1", title: "Confirm launch readiness", owner: "Maya", due: "Friday" }],
+        assignedTasks: [{ title: "Prepare steering update", owner: "Jordan" }],
+        suggestedIdeas: [{ title: "Automate project health summaries" }],
+      }),
+    ).toMatchObject([
       { kind: "approval", id: "approval-1", title: "Confirm launch readiness", owner: "Maya", due: "Friday" },
       { kind: "task", title: "Prepare steering update", owner: "Jordan" },
       { kind: "idea", title: "Automate project health summaries" },

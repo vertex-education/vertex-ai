@@ -1,6 +1,6 @@
 export const chatEntityTypes = ["Task", "Approval", "Idea", "Risk"] as const;
 
-export type ChatEntityType = typeof chatEntityTypes[number];
+export type ChatEntityType = (typeof chatEntityTypes)[number];
 
 export type ChatEntityStatus = "active" | "acknowledged" | "rejected" | "synced";
 

@@ -30,10 +30,10 @@ type AuthEnv = Env & {
   MICROSOFT_ENTRA_TENANT_ID?: string;
 };
 
-const internalSignupHeader = "x-ai-command-center-invite-flow";
+const internalSignupHeader = "x-vertex-ai-invite-flow";
 const microsoftEntraProviderId = "microsoft-entra-id";
-const localDevSecret = "ai-command-center-local-dev-secret-change-before-production";
-const sender = { email: "noreply@rcormier.dev", name: "Vertex AI Command Center" };
+const localDevSecret = "vertex-ai-local-dev-secret-change-before-production";
+const sender = { email: "noreply@rcormier.dev", name: "VertexAI" };
 const sessionExpiresInSeconds = 60 * 60 * 24 * 30;
 const sessionUpdateAgeSeconds = 60 * 60 * 24;
 const localDevTrustedOrigins = Array.from({ length: 11 }, (_value, index) => {
@@ -56,9 +56,9 @@ export function getMicrosoftEntraProviderId() {
 export function isMicrosoftEntraConfigured() {
   const runtimeEnv = getRuntimeEnv();
   return Boolean(
-    runtimeEnv.MICROSOFT_ENTRA_CLIENT_ID?.trim()
-      && runtimeEnv.MICROSOFT_ENTRA_CLIENT_SECRET?.trim()
-      && runtimeEnv.MICROSOFT_ENTRA_TENANT_ID?.trim(),
+    runtimeEnv.MICROSOFT_ENTRA_CLIENT_ID?.trim() &&
+    runtimeEnv.MICROSOFT_ENTRA_CLIENT_SECRET?.trim() &&
+    runtimeEnv.MICROSOFT_ENTRA_TENANT_ID?.trim(),
   );
 }
 
@@ -129,9 +129,9 @@ export function getAuth(request?: Request) {
         await sendAuthEmail({
           actionUrl: url,
           to: user.email,
-          subject: "Verify your Vertex AI Command Center email",
-          text: `Verify your email address to finish creating your Vertex AI Command Center account: ${url}`,
-          html: `<p>Verify your email address to finish creating your Vertex AI Command Center account.</p><p><a href="${url}">Verify email</a></p>`,
+          subject: "Verify your VertexAI email",
+          text: `Verify your email address to finish creating your VertexAI account: ${url}`,
+          html: `<p>Verify your email address to finish creating your VertexAI account.</p><p><a href="${url}">Verify email</a></p>`,
         });
       },
     },
@@ -164,7 +164,9 @@ function getMicrosoftEntraPlugins() {
   const tenantId = runtimeEnv.MICROSOFT_ENTRA_TENANT_ID?.trim();
   if (!clientId || !clientSecret || !tenantId) return [];
   if (["common", "organizations", "consumers"].includes(tenantId.toLowerCase())) {
-    console.warn("Microsoft Entra sign-in is disabled because MICROSOFT_ENTRA_TENANT_ID must be an authorized tenant ID, not a multi-tenant alias.");
+    console.warn(
+      "Microsoft Entra sign-in is disabled because MICROSOFT_ENTRA_TENANT_ID must be an authorized tenant ID, not a multi-tenant alias.",
+    );
     return [];
   }
 
@@ -245,7 +247,10 @@ function decodeJwtPayload(token: string) {
   if (!payload) throw new APIError("UNAUTHORIZED", { message: "Microsoft returned an invalid ID token." });
 
   try {
-    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    const base64 = payload
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(payload.length / 4) * 4, "=");
     return JSON.parse(atob(base64)) as { iss?: string };
   } catch {
     throw new APIError("UNAUTHORIZED", { message: "Microsoft returned an unreadable ID token." });

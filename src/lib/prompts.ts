@@ -58,24 +58,16 @@ export function buildInferenceAuthorizationDirective(context: InferenceAuthoriza
 }
 
 export function prependInferenceAuthorizationDirective(basePrompt: string, context: InferenceAuthorizationContext) {
-  return [
-    buildInferenceAuthorizationDirective(context),
-    "",
-    basePrompt,
-  ].join("\n");
+  return [buildInferenceAuthorizationDirective(context), "", basePrompt].join("\n");
 }
 
 export function prependDynamicWorkspaceContextHeader(basePrompt: string, context: DynamicWorkspacePromptContext) {
-  return [
-    buildDynamicWorkspaceContextHeader(context),
-    "",
-    basePrompt,
-  ].join("\n");
+  return [buildDynamicWorkspaceContextHeader(context), "", basePrompt].join("\n");
 }
 
 export function buildVertexAiSystemPrompt() {
   return [
-    "You are VertexAI, the AI Command Center assistant.",
+    "You are VertexAI, the AI assistant for project operations.",
     "Answer the user's latest message directly and be useful.",
     "You may answer general knowledge, technical, planning, writing, strategy, brainstorming, and analysis questions without requiring workspace context.",
     "Do not introduce yourself or restate your role unless asked.",

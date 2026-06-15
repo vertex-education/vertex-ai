@@ -1,23 +1,13 @@
 import { describe, expect, it } from "vitest";
-import {
-  chunkText,
-  customTagsIndexValue,
-  inferSensitivityLabel,
-  isConfidentialTag,
-} from "@/lib/document-ingestion-queue";
+import { chunkText, customTagsIndexValue, inferSensitivityLabel, isConfidentialTag } from "@/lib/document-ingestion-queue";
 
 describe("document ingestion utilities", () => {
   it("chunks markdown on top-level headings while preserving section text", () => {
-    const chunks = chunkText([
-      "# Launch Plan",
-      "Intro paragraph.",
-      "",
-      "## Workstream A",
-      "Detailed notes.",
-      "",
-      "### Evidence",
-      "Source-backed evidence.",
-    ].join("\n"));
+    const chunks = chunkText(
+      ["# Launch Plan", "Intro paragraph.", "", "## Workstream A", "Detailed notes.", "", "### Evidence", "Source-backed evidence."].join(
+        "\n",
+      ),
+    );
 
     expect(chunks).toHaveLength(3);
     expect(chunks[0]).toContain("# Launch Plan");
@@ -26,15 +16,7 @@ describe("document ingestion utilities", () => {
   });
 
   it("does not split fenced code blocks as blank-line text sections", () => {
-    const chunks = chunkText([
-      "# Query",
-      "```sql",
-      "SELECT *",
-      "FROM projects;",
-      "```",
-      "",
-      "Explanation after the query.",
-    ].join("\n"));
+    const chunks = chunkText(["# Query", "```sql", "SELECT *", "FROM projects;", "```", "", "Explanation after the query."].join("\n"));
 
     expect(chunks.join("\n\n")).toContain("```sql\nSELECT *\nFROM projects;\n```");
     expect(chunks.join("\n\n")).toContain("Explanation after the query.");
@@ -52,10 +34,12 @@ describe("document ingestion utilities", () => {
 
   it("infers sensitivity from tags, metadata, or document name", () => {
     expect(inferSensitivityLabel({ customTags: ["Confidential"], documentName: "plan.md" })).toBe("Confidential");
-    expect(inferSensitivityLabel({
-      documentName: "brief.md",
-      metadata: { restricted: "restricted" },
-    })).toBe("Confidential");
+    expect(
+      inferSensitivityLabel({
+        documentName: "brief.md",
+        metadata: { restricted: "restricted" },
+      }),
+    ).toBe("Confidential");
     expect(inferSensitivityLabel({ documentName: "restricted-roadmap.md" })).toBe("Confidential");
     expect(inferSensitivityLabel({ customTags: ["PMO"], documentName: "roadmap.md" })).toBe("Standard");
   });

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  acceptedChatAttachmentTypes,
-  allowedChatAttachmentExtensions,
-  extractChatAttachment,
-} from "@/lib/attachment-extraction";
+import { acceptedChatAttachmentTypes, allowedChatAttachmentExtensions, extractChatAttachment } from "@/lib/attachment-extraction";
 
 describe("chat attachment extraction", () => {
   it("advertises the supported chat attachment extensions", () => {
@@ -33,8 +29,6 @@ describe("chat attachment extraction", () => {
   });
 
   it("rejects unsupported file names before extraction work starts", async () => {
-    await expect(extractChatAttachment(new File(["bad"], "image.png"))).rejects.toThrow(
-      "Attach PDF, XLSX, PPTX, DOCX, CSV, or TXT files.",
-    );
+    await expect(extractChatAttachment(new File(["bad"], "image.png"))).rejects.toThrow("Attach PDF, XLSX, PPTX, DOCX, CSV, or TXT files.");
   });
 });

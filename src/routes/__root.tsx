@@ -1,10 +1,5 @@
 /// <reference types="vite/client" />
-import {
-  HeadContent,
-  Outlet,
-  Scripts,
-  createRootRouteWithContext,
-} from "@tanstack/react-router";
+import { HeadContent, Outlet, Scripts, createRootRouteWithContext } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { DefaultCatchBoundary } from "@/components/DefaultCatchBoundary";
@@ -18,11 +13,10 @@ export const Route = createRootRouteWithContext<{
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Vertex AI Command Center" },
+      { title: "VertexAI" },
       {
         name: "description",
-        content:
-          "Vertex AI Command Center workspace powered by TanStack Start, Query, Table, shadcn/ui, and Tailwind CSS.",
+        content: "VertexAI workspace powered by TanStack Start, Query, Table, shadcn/ui, and Tailwind CSS.",
       },
     ],
     links: [{ rel: "icon", href: "/favicon.svg" }],

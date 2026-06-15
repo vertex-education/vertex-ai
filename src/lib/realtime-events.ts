@@ -93,8 +93,8 @@ function parseInvalidates(value: string): RealtimeInvalidationTarget[] {
   try {
     const parsed = JSON.parse(value);
     if (!Array.isArray(parsed)) return ["workspace"];
-    return parsed.filter((item): item is RealtimeInvalidationTarget =>
-      item === "workspace" || item === "teams" || item === "projects" || item === "chats",
+    return parsed.filter(
+      (item): item is RealtimeInvalidationTarget => item === "workspace" || item === "teams" || item === "projects" || item === "chats",
     );
   } catch {
     return ["workspace"];

@@ -96,13 +96,7 @@ function splitOversizedTextBlock(block: string) {
     const lineBreak = candidate.lastIndexOf("\n");
     const sentenceBreak = candidate.lastIndexOf(". ");
     const wordBreak = candidate.lastIndexOf(" ");
-    const breakAt = lineBreak > 200
-      ? lineBreak
-      : sentenceBreak > 200
-        ? sentenceBreak + 1
-        : wordBreak > 200
-          ? wordBreak
-          : candidate.length;
+    const breakAt = lineBreak > 200 ? lineBreak : sentenceBreak > 200 ? sentenceBreak + 1 : wordBreak > 200 ? wordBreak : candidate.length;
 
     chunks.push(block.slice(start, start + breakAt).trim());
     start += breakAt;
@@ -160,9 +154,7 @@ function splitOversizedSection(section: string) {
   let current = "";
 
   for (const block of blocks) {
-    const blockChunks = block.kind === "code" || block.text.length <= maxChunkChars
-      ? [block.text]
-      : splitOversizedTextBlock(block.text);
+    const blockChunks = block.kind === "code" || block.text.length <= maxChunkChars ? [block.text] : splitOversizedTextBlock(block.text);
 
     for (const blockChunk of blockChunks) {
       if (!current) {
@@ -216,9 +208,7 @@ export function chunkText(rawText: string) {
   const tail = trimBlock(current);
   if (tail) sections.push(tail);
 
-  return sections.flatMap((section) => (
-    section.length <= maxChunkChars ? [section] : splitOversizedSection(section)
-  )).filter(Boolean);
+  return sections.flatMap((section) => (section.length <= maxChunkChars ? [section] : splitOversizedSection(section))).filter(Boolean);
 }
 
 async function embedTexts(
@@ -235,19 +225,24 @@ async function embedTexts(
 
   for (let index = 0; index < texts.length; index += embeddingBatchSize) {
     const batch = texts.slice(index, index + embeddingBatchSize);
-    const result = (await runTrackedAiGateway(env.AI, embeddingModelId, { text: batch, pooling: "cls" }, {
-      feature: scope.feature,
-      usageDb: env.DB,
-      teamId: scope.teamId,
-      projectId: scope.projectId,
-      metadata: {
+    const result = (await runTrackedAiGateway(
+      env.AI,
+      embeddingModelId,
+      { text: batch, pooling: "cls" },
+      {
         feature: scope.feature,
-        model: embeddingModelId,
-        batchSize: batch.length,
-        batchIndex: index / embeddingBatchSize,
-        ...scope.metadata,
+        usageDb: env.DB,
+        teamId: scope.teamId,
+        projectId: scope.projectId,
+        metadata: {
+          feature: scope.feature,
+          model: embeddingModelId,
+          batchSize: batch.length,
+          batchIndex: index / embeddingBatchSize,
+          ...scope.metadata,
+        },
       },
-    })) as EmbeddingResponse;
+    )) as EmbeddingResponse;
     if (!result.data || result.data.length !== batch.length) {
       throw new Error("Embedding response did not match the requested chunk count.");
     }
@@ -258,7 +253,10 @@ async function embedTexts(
 }
 
 export function customTagsIndexValue(customTags: string[]) {
-  return customTags.map((tag) => tag.trim().toLowerCase()).filter(Boolean).join(",");
+  return customTags
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean)
+    .join(",");
 }
 
 export function isConfidentialTag(value: string) {
@@ -289,7 +287,13 @@ export function inferSensitivityLabel({
   return values.some(isConfidentialTag) ? "Confidential" : "Standard";
 }
 
-async function updateArtifactStatus(env: DocumentIngestionEnv, artifactId: string, status: "processing" | "completed" | "failed", errorMessage?: string, chunkCount = 0) {
+async function updateArtifactStatus(
+  env: DocumentIngestionEnv,
+  artifactId: string,
+  status: "processing" | "completed" | "failed",
+  errorMessage?: string,
+  chunkCount = 0,
+) {
   const completedAt = status === "completed" ? new Date().toISOString() : null;
   await env.DB.prepare(
     `UPDATE artifacts_registry

@@ -17,7 +17,7 @@ Current namespace binding:
 ```jsonc
 {
   "binding": "MICROSOFT_TOKEN_VAULT",
-  "id": "79a29da0fd4a4b6ca90aa77aed5a39d8"
+  "id": "79a29da0fd4a4b6ca90aa77aed5a39d8",
 }
 ```
 

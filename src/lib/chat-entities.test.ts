@@ -1,25 +1,23 @@
 import { describe, expect, it } from "vitest";
-import {
-  extractChatEntityJsonArrayCandidate,
-  normalizeChatOperationalEntities,
-  parseChatOperationalEntityJson,
-} from "@/lib/chat-entities";
+import { extractChatEntityJsonArrayCandidate, normalizeChatOperationalEntities, parseChatOperationalEntityJson } from "@/lib/chat-entities";
 
 describe("chat entity JSON extraction", () => {
   it("parses a strict JSON array into normalized operational entities", () => {
-    const entities = parseChatOperationalEntityJson(JSON.stringify([
-      {
-        id: "task-1",
-        type: "Task",
-        title: "Follow up with operations",
-        description: "Operations needs a follow-up on the rollout plan.",
-        owner: "Ops",
-        dueDate: "Friday",
-        priority: "High",
-        sourceQuote: "follow up with operations",
-        confidence: 0.92,
-      },
-    ]));
+    const entities = parseChatOperationalEntityJson(
+      JSON.stringify([
+        {
+          id: "task-1",
+          type: "Task",
+          title: "Follow up with operations",
+          description: "Operations needs a follow-up on the rollout plan.",
+          owner: "Ops",
+          dueDate: "Friday",
+          priority: "High",
+          sourceQuote: "follow up with operations",
+          confidence: 0.92,
+        },
+      ]),
+    );
 
     expect(entities).toEqual([
       {

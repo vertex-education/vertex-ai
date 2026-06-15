@@ -9,7 +9,7 @@ import { acceptInvite, getInvitePreview } from "@/lib/auth-workflow";
 
 export const Route = createFileRoute("/accept-invite")({
   head: () => ({
-    meta: [{ title: "Accept invite | Vertex AI Command Center" }],
+    meta: [{ title: "Accept invite | VertexAI" }],
   }),
   component: AcceptInvitePage,
 });
@@ -84,7 +84,9 @@ function AcceptInvitePage() {
           <VertexAIBrand className="mb-3" logoClassName="h-10 w-fit" aiClassName="text-[1.75rem]" />
           <CardTitle>{isComplete ? "Check your email" : "Create your account"}</CardTitle>
           <CardDescription>
-            {isComplete ? "Your account was created. Verify your email address before signing in." : "Set your password, then verify your email before signing in."}
+            {isComplete
+              ? "Your account was created. Verify your email address before signing in."
+              : "Set your password, then verify your email before signing in."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -105,11 +107,23 @@ function AcceptInvitePage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <Input id="password" autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                <Input
+                  id="password"
+                  autoComplete="new-password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm password</Label>
-                <Input id="confirmPassword" autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+                <Input
+                  id="confirmPassword"
+                  autoComplete="new-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
               </div>
               <Button className="w-full" type="submit" disabled={isPending || !preview}>
                 Create account

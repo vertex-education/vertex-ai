@@ -184,13 +184,13 @@ function parseMetadata(value: string | null | undefined): UsageMetadata {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>)
-        .filter(([, metadataValue]) => (
+      Object.entries(parsed as Record<string, unknown>).filter(
+        ([, metadataValue]) =>
           metadataValue === null ||
           typeof metadataValue === "string" ||
           typeof metadataValue === "number" ||
-          typeof metadataValue === "boolean"
-        )),
+          typeof metadataValue === "boolean",
+      ),
     ) as UsageMetadata;
   } catch {
     return {};
@@ -199,9 +199,7 @@ function parseMetadata(value: string | null | undefined): UsageMetadata {
 
 function getAiGatewayLogIdFromMetadata(value: string | null | undefined) {
   const metadata = parseMetadata(value);
-  return typeof metadata.aiGatewayLogId === "string" && metadata.aiGatewayLogId.trim()
-    ? metadata.aiGatewayLogId.trim()
-    : null;
+  return typeof metadata.aiGatewayLogId === "string" && metadata.aiGatewayLogId.trim() ? metadata.aiGatewayLogId.trim() : null;
 }
 
 async function getAiGatewayLog(logId: string) {
@@ -212,7 +210,9 @@ async function getAiGatewayLog(logId: string) {
   const ai = getRuntimeEnv().AI;
   if (!ai) return null;
 
-  const promise = ai.gateway(defaultAiGatewayId).getLog(logId)
+  const promise = ai
+    .gateway(defaultAiGatewayId)
+    .getLog(logId)
     .then((log) => {
       gatewayLogCache.set(logId, {
         expiresAt: Date.now() + gatewayLogSuccessCacheTtlMs,
@@ -244,10 +244,12 @@ async function getAiGatewayLogs(logIds: string[], limit = gatewayLogSampleLimit)
 
   for (let index = 0; index < uniqueLogIds.length; index += gatewayLogLookupConcurrency) {
     const chunk = uniqueLogIds.slice(index, index + gatewayLogLookupConcurrency);
-    const logs = await Promise.all(chunk.map(async (logId) => {
-      const log = await getAiGatewayLog(logId);
-      return log ? [logId, log] as [string, AiGatewayLog] : null;
-    }));
+    const logs = await Promise.all(
+      chunk.map(async (logId) => {
+        const log = await getAiGatewayLog(logId);
+        return log ? ([logId, log] as [string, AiGatewayLog]) : null;
+      }),
+    );
 
     for (const log of logs) {
       if (log) entries.push(log);
@@ -277,7 +279,12 @@ function summarizeGatewayLogs(logs: AiGatewayLog[]): GatewayUsageSummary {
 }
 
 async function countRows(sql: string, ...params: unknown[]) {
-  const row = await (await getDb()).prepare(sql).bind(...params).first<{ count: number }>();
+  const row = await (
+    await getDb()
+  )
+    .prepare(sql)
+    .bind(...params)
+    .first<{ count: number }>();
   return row?.count ?? 0;
 }
 
@@ -290,7 +297,9 @@ async function optionalCountRows(sql: string, ...params: unknown[]) {
 }
 
 async function getMostActiveProject(since: number) {
-  const eventRow = await (await getDb())
+  const eventRow = await (
+    await getDb()
+  )
     .prepare(
       `SELECT p.name as name, COUNT(*) as count
        FROM events e
@@ -306,7 +315,9 @@ async function getMostActiveProject(since: number) {
 
   if (eventRow) return eventRow;
 
-  const messageRow = await (await getDb())
+  const messageRow = await (
+    await getDb()
+  )
     .prepare(
       `SELECT p.name as name, COUNT(*) as count
        FROM chat_messages m
@@ -322,7 +333,9 @@ async function getMostActiveProject(since: number) {
 }
 
 async function getMostActiveTeam(since: number) {
-  const eventRow = await (await getDb())
+  const eventRow = await (
+    await getDb()
+  )
     .prepare(
       `SELECT t.name as name, COUNT(*) as count
        FROM events e
@@ -338,7 +351,9 @@ async function getMostActiveTeam(since: number) {
 
   if (eventRow) return eventRow;
 
-  const membershipRow = await (await getDb())
+  const membershipRow = await (
+    await getDb()
+  )
     .prepare(
       `SELECT t.name as name, COUNT(tm.user_id) as count
        FROM teams t
@@ -354,7 +369,9 @@ async function getMostActiveTeam(since: number) {
 
 async function getUsageRows(since: number) {
   await ensureUsageTable();
-  const result = await (await getDb())
+  const result = await (
+    await getDb()
+  )
     .prepare(
       `SELECT CASE WHEN provider = 'cloudflare-workers-ai' THEN 'ai-gateway' ELSE provider END as provider,
               COUNT(*) as requests,
@@ -378,7 +395,9 @@ async function getUsageRows(since: number) {
 async function getProviderUsageRow(provider: AdminUsageProvider, since: number) {
   await ensureUsageTable();
   if (provider === "ai-gateway") {
-    return await (await getDb())
+    return await (
+      await getDb()
+    )
       .prepare(
         `SELECT 'ai-gateway' as provider,
                 COUNT(*) as requests,
@@ -398,7 +417,9 @@ async function getProviderUsageRow(provider: AdminUsageProvider, since: number) 
       .first<UsageRow>();
   }
 
-  return await (await getDb())
+  return await (
+    await getDb()
+  )
     .prepare(
       `SELECT provider,
               COUNT(*) as requests,
@@ -420,7 +441,9 @@ async function getProviderUsageRow(provider: AdminUsageProvider, since: number) 
 
 async function getAiGatewayModelUsageRow(model: string, since: number) {
   await ensureUsageTable();
-  return await (await getDb())
+  return await (
+    await getDb()
+  )
     .prepare(
       `SELECT 'ai-gateway' as provider,
               COUNT(*) as requests,
@@ -443,7 +466,9 @@ async function getAiGatewayModelUsageRow(model: string, since: number) {
 
 async function getRecentUsageRows() {
   await ensureUsageTable();
-  const result = await (await getDb())
+  const result = await (
+    await getDb()
+  )
     .prepare(
       `SELECT id,
               CASE WHEN provider = 'cloudflare-workers-ai' THEN 'ai-gateway' ELSE provider END as provider,
@@ -470,7 +495,9 @@ async function getRecentUsageRows() {
 
 async function getGatewayUsageSummary() {
   await ensureUsageTable();
-  const result = await (await getDb())
+  const result = await (
+    await getDb()
+  )
     .prepare(
       `SELECT metadata_json as metadataJson, created_at as createdAt
        FROM admin_usage_events
@@ -481,9 +508,13 @@ async function getGatewayUsageSummary() {
     .bind(...aiGatewayUsageProviders)
     .all<{ metadataJson: string; createdAt: number }>();
 
-  const logIds = Array.from(new Set((result.results ?? [])
-    .map((row) => getAiGatewayLogIdFromMetadata(row.metadataJson))
-    .filter((value): value is string => Boolean(value))));
+  const logIds = Array.from(
+    new Set(
+      (result.results ?? [])
+        .map((row) => getAiGatewayLogIdFromMetadata(row.metadataJson))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
 
   if (!logIds.length) {
     return {
@@ -513,7 +544,13 @@ async function buildSingleMetricCard(metricId: string): Promise<MetricCard> {
         countRows("SELECT COUNT(DISTINCT userId) as count FROM session WHERE expiresAt > ?", now),
         countRows("SELECT COUNT(*) as count FROM session WHERE expiresAt > ?", now),
       ]);
-      return { id: metricId, label: "Current concurrent users", value: activeUsers.toLocaleString(), detail: `${activeSessions.toLocaleString()} active sessions`, status: "ok" };
+      return {
+        id: metricId,
+        label: "Current concurrent users",
+        value: activeUsers.toLocaleString(),
+        detail: `${activeSessions.toLocaleString()} active sessions`,
+        status: "ok",
+      };
     }
     case "average-concurrent-users": {
       const [activeUsers, sessionsUpdatedToday] = await Promise.all([
@@ -521,41 +558,86 @@ async function buildSingleMetricCard(metricId: string): Promise<MetricCard> {
         countRows("SELECT COUNT(DISTINCT userId) as count FROM session WHERE updatedAt >= ?", oneDayAgo),
       ]);
       const estimatedAverageConcurrentUsers = Math.round((activeUsers + sessionsUpdatedToday / 24) * 10) / 10;
-      return { id: metricId, label: "Avg concurrent users", value: estimatedAverageConcurrentUsers.toLocaleString(), detail: "Estimated from active sessions and 24h session updates", status: "muted" };
+      return {
+        id: metricId,
+        label: "Avg concurrent users",
+        value: estimatedAverageConcurrentUsers.toLocaleString(),
+        detail: "Estimated from active sessions and 24h session updates",
+        status: "muted",
+      };
     }
     case "max-concurrent-users": {
       const activeSessions = await countRows("SELECT COUNT(*) as count FROM session WHERE expiresAt > ?", now);
-      return { id: metricId, label: "Max concurrent users", value: activeSessions.toLocaleString(), detail: "Highest observable from current active sessions until sampling is added", status: "muted" };
+      return {
+        id: metricId,
+        label: "Max concurrent users",
+        value: activeSessions.toLocaleString(),
+        detail: "Highest observable from current active sessions until sampling is added",
+        status: "muted",
+      };
     }
     case "total-chats-initiated": {
       const [totalChats, totalMessages] = await Promise.all([
         countRows("SELECT COUNT(*) as count FROM chats"),
         countRows("SELECT COUNT(*) as count FROM chat_messages"),
       ]);
-      return { id: metricId, label: "Total chats initiated", value: totalChats.toLocaleString(), detail: `${totalMessages.toLocaleString()} messages stored`, status: "ok" };
+      return {
+        id: metricId,
+        label: "Total chats initiated",
+        value: totalChats.toLocaleString(),
+        detail: `${totalMessages.toLocaleString()} messages stored`,
+        status: "ok",
+      };
     }
     case "gemma-token-usage": {
       const usage = await getAiGatewayModelUsageRow(vertexAiModelId, thirtyDaysAgo);
-      return { id: metricId, label: "Gemma 4 token usage", value: formatNumber(usage?.totalTokens), detail: `${usage?.requests ?? 0} Gemma 4 requests in 30 days`, status: usage ? "ok" : "watch" };
+      return {
+        id: metricId,
+        label: "Gemma 4 token usage",
+        value: formatNumber(usage?.totalTokens),
+        detail: `${usage?.requests ?? 0} Gemma 4 requests in 30 days`,
+        status: usage ? "ok" : "watch",
+      };
     }
     case "ai-gateway-token-usage": {
-      const [usage, gatewayUsage] = await Promise.all([
-        getProviderUsageRow("ai-gateway", thirtyDaysAgo),
-        getGatewayUsageSummary(),
-      ]);
-      return { id: metricId, label: "AI Gateway tokens", value: formatNumber(usage?.totalTokens), detail: `${usage?.requests ?? 0} AI Gateway requests in 30 days; ${gatewayUsage.requests.toLocaleString()} logs sampled`, status: usage ? "ok" : "watch" };
+      const [usage, gatewayUsage] = await Promise.all([getProviderUsageRow("ai-gateway", thirtyDaysAgo), getGatewayUsageSummary()]);
+      return {
+        id: metricId,
+        label: "AI Gateway tokens",
+        value: formatNumber(usage?.totalTokens),
+        detail: `${usage?.requests ?? 0} AI Gateway requests in 30 days; ${gatewayUsage.requests.toLocaleString()} logs sampled`,
+        status: usage ? "ok" : "watch",
+      };
     }
     case "ai-gateway-cost": {
       const gatewayUsage = await getGatewayUsageSummary();
-      return { id: metricId, label: "AI Gateway cost", value: formatCurrency(gatewayUsage.cost), detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`, status: gatewayUsage.requests ? "ok" : "watch" };
+      return {
+        id: metricId,
+        label: "AI Gateway cost",
+        value: formatCurrency(gatewayUsage.cost),
+        detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`,
+        status: gatewayUsage.requests ? "ok" : "watch",
+      };
     }
     case "tavily-credits-used": {
       const usage = await getProviderUsageRow("tavily", thirtyDaysAgo);
-      return { id: metricId, label: "Tavily credits used", value: formatNumber(usage?.creditsUsed), detail: `${usage?.requests ?? 0} searches tracked in 30 days`, status: usage ? "ok" : "watch" };
+      return {
+        id: metricId,
+        label: "Tavily credits used",
+        value: formatNumber(usage?.creditsUsed),
+        detail: `${usage?.requests ?? 0} searches tracked in 30 days`,
+        status: usage ? "ok" : "watch",
+      };
     }
     case "firecrawl-credits-used": {
       const usage = await getProviderUsageRow("firecrawl", thirtyDaysAgo);
-      return { id: metricId, label: "Firecrawl credits used", value: formatNumber(usage?.creditsUsed), detail: `${usage?.requests ?? 0} searches tracked in 30 days`, status: usage ? "ok" : "watch" };
+      return {
+        id: metricId,
+        label: "Firecrawl credits used",
+        value: formatNumber(usage?.creditsUsed),
+        detail: `${usage?.requests ?? 0} searches tracked in 30 days`,
+        status: usage ? "ok" : "watch",
+      };
     }
     case "files-stored": {
       const [totalArtifacts, legacyDocumentFiles, v2ArtifactFiles, totalChunks] = await Promise.all([
@@ -564,29 +646,59 @@ async function buildSingleMetricCard(metricId: string): Promise<MetricCard> {
         optionalCountRows("SELECT COUNT(*) as count FROM artifacts_registry"),
         countRows("SELECT COUNT(*) as count FROM document_chunks"),
       ]);
-      return { id: metricId, label: "Files stored", value: (totalArtifacts + legacyDocumentFiles + v2ArtifactFiles).toLocaleString(), detail: `${totalChunks.toLocaleString()} searchable chunks`, status: "ok" };
+      return {
+        id: metricId,
+        label: "Files stored",
+        value: (totalArtifacts + legacyDocumentFiles + v2ArtifactFiles).toLocaleString(),
+        detail: `${totalChunks.toLocaleString()} searchable chunks`,
+        status: "ok",
+      };
     }
     case "teams": {
       const [totalTeams, pendingInvites] = await Promise.all([
         countRows("SELECT COUNT(*) as count FROM teams"),
         countRows("SELECT COUNT(*) as count FROM auth_invites WHERE accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?", now),
       ]);
-      return { id: metricId, label: "Teams", value: totalTeams.toLocaleString(), detail: `${pendingInvites.toLocaleString()} pending invites`, status: "ok" };
+      return {
+        id: metricId,
+        label: "Teams",
+        value: totalTeams.toLocaleString(),
+        detail: `${pendingInvites.toLocaleString()} pending invites`,
+        status: "ok",
+      };
     }
     case "projects": {
       const [totalProjects, recentEvents] = await Promise.all([
         countRows("SELECT COUNT(*) as count FROM projects"),
         countRows("SELECT COUNT(*) as count FROM events WHERE created_at >= ?", sevenDaysAgo),
       ]);
-      return { id: metricId, label: "Projects", value: totalProjects.toLocaleString(), detail: `${recentEvents.toLocaleString()} admin-visible events in 7 days`, status: "ok" };
+      return {
+        id: metricId,
+        label: "Projects",
+        value: totalProjects.toLocaleString(),
+        detail: `${recentEvents.toLocaleString()} admin-visible events in 7 days`,
+        status: "ok",
+      };
     }
     case "most-active-project": {
       const mostActiveProject = await getMostActiveProject(thirtyDaysAgo);
-      return { id: metricId, label: "Most active project", value: mostActiveProject.name, detail: `${mostActiveProject.count.toLocaleString()} activity records`, status: mostActiveProject.count ? "ok" : "muted" };
+      return {
+        id: metricId,
+        label: "Most active project",
+        value: mostActiveProject.name,
+        detail: `${mostActiveProject.count.toLocaleString()} activity records`,
+        status: mostActiveProject.count ? "ok" : "muted",
+      };
     }
     case "most-active-team": {
       const mostActiveTeam = await getMostActiveTeam(thirtyDaysAgo);
-      return { id: metricId, label: "Most active team", value: mostActiveTeam.name, detail: `${mostActiveTeam.count.toLocaleString()} activity records or members`, status: mostActiveTeam.count ? "ok" : "muted" };
+      return {
+        id: metricId,
+        label: "Most active team",
+        value: mostActiveTeam.name,
+        detail: `${mostActiveTeam.count.toLocaleString()} activity records or members`,
+        status: mostActiveTeam.count ? "ok" : "muted",
+      };
     }
     default:
       throw new Error("Metric was not found.");
@@ -652,28 +764,110 @@ async function getHealthMetrics() {
   const tavilyUsage = providerRowsByName.get("tavily");
   const firecrawlUsage = providerRowsByName.get("firecrawl");
   const recentGatewayLogs = await getAiGatewayLogs(
-    recentUsage
-      .map((row) => getAiGatewayLogIdFromMetadata(row.metadataJson))
-      .filter((value): value is string => Boolean(value)),
+    recentUsage.map((row) => getAiGatewayLogIdFromMetadata(row.metadataJson)).filter((value): value is string => Boolean(value)),
   );
 
   const runtime = getRuntimeEnv();
 
   const cards: MetricCard[] = [
-    { id: "current-concurrent-users", label: "Current concurrent users", value: activeUsers.toLocaleString(), detail: `${activeSessions.toLocaleString()} active sessions`, status: "ok" },
-    { id: "average-concurrent-users", label: "Avg concurrent users", value: estimatedAverageConcurrentUsers.toLocaleString(), detail: "Estimated from active sessions and 24h session updates", status: "muted" },
-    { id: "max-concurrent-users", label: "Max concurrent users", value: activeSessions.toLocaleString(), detail: "Highest observable from current active sessions until sampling is added", status: "muted" },
-    { id: "total-chats-initiated", label: "Total chats initiated", value: totalChats.toLocaleString(), detail: `${totalMessages.toLocaleString()} messages stored`, status: "ok" },
-    { id: "gemma-token-usage", label: "Gemma 4 token usage", value: formatNumber(gemmaUsage?.totalTokens), detail: `${gemmaUsage?.requests ?? 0} Gemma 4 requests in 30 days`, status: gemmaUsage ? "ok" : "watch" },
-    { id: "ai-gateway-token-usage", label: "AI Gateway tokens", value: formatNumber(aiGatewayEventUsage?.totalTokens), detail: `${aiGatewayEventUsage?.requests ?? 0} AI Gateway requests in 30 days; ${gatewayUsage.requests.toLocaleString()} logs sampled`, status: aiGatewayEventUsage ? "ok" : "watch" },
-    { id: "ai-gateway-cost", label: "AI Gateway cost", value: formatCurrency(gatewayUsage.cost), detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`, status: gatewayUsage.requests ? "ok" : "watch" },
-    { id: "tavily-credits-used", label: "Tavily credits used", value: formatNumber(tavilyUsage?.creditsUsed), detail: `${tavilyUsage?.requests ?? 0} searches tracked in 30 days`, status: tavilyUsage ? "ok" : "watch" },
-    { id: "firecrawl-credits-used", label: "Firecrawl credits used", value: formatNumber(firecrawlUsage?.creditsUsed), detail: `${firecrawlUsage?.requests ?? 0} searches tracked in 30 days`, status: firecrawlUsage ? "ok" : "watch" },
-    { id: "files-stored", label: "Files stored", value: totalStoredFiles.toLocaleString(), detail: `${totalChunks.toLocaleString()} searchable chunks`, status: "ok" },
-    { id: "teams", label: "Teams", value: totalTeams.toLocaleString(), detail: `${pendingInvites.toLocaleString()} pending invites`, status: "ok" },
-    { id: "projects", label: "Projects", value: totalProjects.toLocaleString(), detail: `${recentEvents.toLocaleString()} admin-visible events in 7 days`, status: "ok" },
-    { id: "most-active-project", label: "Most active project", value: mostActiveProject.name, detail: `${mostActiveProject.count.toLocaleString()} activity records`, status: mostActiveProject.count ? "ok" : "muted" },
-    { id: "most-active-team", label: "Most active team", value: mostActiveTeam.name, detail: `${mostActiveTeam.count.toLocaleString()} activity records or members`, status: mostActiveTeam.count ? "ok" : "muted" },
+    {
+      id: "current-concurrent-users",
+      label: "Current concurrent users",
+      value: activeUsers.toLocaleString(),
+      detail: `${activeSessions.toLocaleString()} active sessions`,
+      status: "ok",
+    },
+    {
+      id: "average-concurrent-users",
+      label: "Avg concurrent users",
+      value: estimatedAverageConcurrentUsers.toLocaleString(),
+      detail: "Estimated from active sessions and 24h session updates",
+      status: "muted",
+    },
+    {
+      id: "max-concurrent-users",
+      label: "Max concurrent users",
+      value: activeSessions.toLocaleString(),
+      detail: "Highest observable from current active sessions until sampling is added",
+      status: "muted",
+    },
+    {
+      id: "total-chats-initiated",
+      label: "Total chats initiated",
+      value: totalChats.toLocaleString(),
+      detail: `${totalMessages.toLocaleString()} messages stored`,
+      status: "ok",
+    },
+    {
+      id: "gemma-token-usage",
+      label: "Gemma 4 token usage",
+      value: formatNumber(gemmaUsage?.totalTokens),
+      detail: `${gemmaUsage?.requests ?? 0} Gemma 4 requests in 30 days`,
+      status: gemmaUsage ? "ok" : "watch",
+    },
+    {
+      id: "ai-gateway-token-usage",
+      label: "AI Gateway tokens",
+      value: formatNumber(aiGatewayEventUsage?.totalTokens),
+      detail: `${aiGatewayEventUsage?.requests ?? 0} AI Gateway requests in 30 days; ${gatewayUsage.requests.toLocaleString()} logs sampled`,
+      status: aiGatewayEventUsage ? "ok" : "watch",
+    },
+    {
+      id: "ai-gateway-cost",
+      label: "AI Gateway cost",
+      value: formatCurrency(gatewayUsage.cost),
+      detail: `${gatewayUsage.success.toLocaleString()} successful Gateway requests sampled`,
+      status: gatewayUsage.requests ? "ok" : "watch",
+    },
+    {
+      id: "tavily-credits-used",
+      label: "Tavily credits used",
+      value: formatNumber(tavilyUsage?.creditsUsed),
+      detail: `${tavilyUsage?.requests ?? 0} searches tracked in 30 days`,
+      status: tavilyUsage ? "ok" : "watch",
+    },
+    {
+      id: "firecrawl-credits-used",
+      label: "Firecrawl credits used",
+      value: formatNumber(firecrawlUsage?.creditsUsed),
+      detail: `${firecrawlUsage?.requests ?? 0} searches tracked in 30 days`,
+      status: firecrawlUsage ? "ok" : "watch",
+    },
+    {
+      id: "files-stored",
+      label: "Files stored",
+      value: totalStoredFiles.toLocaleString(),
+      detail: `${totalChunks.toLocaleString()} searchable chunks`,
+      status: "ok",
+    },
+    {
+      id: "teams",
+      label: "Teams",
+      value: totalTeams.toLocaleString(),
+      detail: `${pendingInvites.toLocaleString()} pending invites`,
+      status: "ok",
+    },
+    {
+      id: "projects",
+      label: "Projects",
+      value: totalProjects.toLocaleString(),
+      detail: `${recentEvents.toLocaleString()} admin-visible events in 7 days`,
+      status: "ok",
+    },
+    {
+      id: "most-active-project",
+      label: "Most active project",
+      value: mostActiveProject.name,
+      detail: `${mostActiveProject.count.toLocaleString()} activity records`,
+      status: mostActiveProject.count ? "ok" : "muted",
+    },
+    {
+      id: "most-active-team",
+      label: "Most active team",
+      value: mostActiveTeam.name,
+      detail: `${mostActiveTeam.count.toLocaleString()} activity records or members`,
+      status: mostActiveTeam.count ? "ok" : "muted",
+    },
   ];
 
   return {
@@ -740,12 +934,11 @@ async function getHealthMetrics() {
     recentUsage: recentUsage.map((row) => {
       const aiGatewayLogId = getAiGatewayLogIdFromMetadata(row.metadataJson);
       const metadata = parseMetadata(row.metadataJson);
-      const gatewayLog = aiGatewayLogId ? recentGatewayLogs.get(aiGatewayLogId) ?? null : null;
+      const gatewayLog = aiGatewayLogId ? (recentGatewayLogs.get(aiGatewayLogId) ?? null) : null;
       const gatewayTokensIn = gatewayLog?.tokens_in ?? null;
       const gatewayTokensOut = gatewayLog?.tokens_out ?? null;
-      const gatewayTotalTokens = gatewayTokensIn !== null || gatewayTokensOut !== null
-        ? (gatewayTokensIn ?? 0) + (gatewayTokensOut ?? 0)
-        : null;
+      const gatewayTotalTokens =
+        gatewayTokensIn !== null || gatewayTokensOut !== null ? (gatewayTokensIn ?? 0) + (gatewayTokensOut ?? 0) : null;
       return {
         ...row,
         metadata,
@@ -768,12 +961,15 @@ async function getHealthMetrics() {
 export async function recordAdminUsageEvent(input: AdminUsageEventInput) {
   try {
     await ensureUsageTable();
-    const totalTokens = finiteNumber(input.totalTokens)
-      ?? (finiteNumber(input.inputTokens) !== null && finiteNumber(input.outputTokens) !== null
+    const totalTokens =
+      finiteNumber(input.totalTokens) ??
+      (finiteNumber(input.inputTokens) !== null && finiteNumber(input.outputTokens) !== null
         ? Number(input.inputTokens) + Number(input.outputTokens)
         : null);
 
-    await (await getDb())
+    await (
+      await getDb()
+    )
       .prepare(
         `INSERT INTO admin_usage_events (
           id, provider, feature, model, credits_used, input_tokens, output_tokens, total_tokens,

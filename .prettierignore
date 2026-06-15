@@ -1,0 +1,10 @@
+node_modules
+dist
+.output
+.vinext
+.wrangler
+coverage
+.playwright-cli
+drizzle/meta
+src/routeTree.gen.ts
+worker-configuration.d.ts

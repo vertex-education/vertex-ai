@@ -36,7 +36,7 @@ export const Route = createFileRoute("/docs")({
     return { session };
   },
   head: () => ({
-    meta: [{ title: "Docs | Vertex AI Command Center" }],
+    meta: [{ title: "Docs | VertexAI" }],
   }),
   component: DocsPage,
 });
@@ -199,7 +199,8 @@ const docSections: DocSection[] = [
     category: "Automation",
     icon: Zap,
     status: "Available",
-    summary: "OAuth connects a user's Asana account, maps member projects to VertexAI projects, and gates task writes by captured Asana permissions.",
+    summary:
+      "OAuth connects a user's Asana account, maps member projects to VertexAI projects, and gates task writes by captured Asana permissions.",
     howTo: [
       "Open User Settings, then Asana Integration.",
       "Connect Asana and approve the requested scopes.",
@@ -452,7 +453,8 @@ const docSections: DocSection[] = [
     category: "Account",
     icon: KeyRound,
     status: "Available",
-    summary: "Signed-in users can authenticate with Microsoft or invited credentials, manage User Settings, reset passwords, review invites, relaunch onboarding, and sign out.",
+    summary:
+      "Signed-in users can authenticate with Microsoft or invited credentials, manage User Settings, reset passwords, review invites, relaunch onboarding, and sign out.",
     howTo: [
       "Open the account menu from the bottom of the persistent blue rail or from the mobile top bar.",
       "Choose User Settings to review account details.",
@@ -540,7 +542,8 @@ const docSections: DocSection[] = [
     category: "Platform",
     icon: FileText,
     status: "Partial",
-    summary: "Context-aware routing decides whether prompts need Vectorize, web search, direct chat, or artifact generation while document ingestion keeps project artifacts indexed.",
+    summary:
+      "Context-aware routing decides whether prompts need Vectorize, web search, direct chat, or artifact generation while document ingestion keeps project artifacts indexed.",
     howTo: [
       "Use Team project chat for scoped RAG behavior when the platform bindings are configured.",
       "Upload an artifact to store the raw file in R2 and queue ingestion without waiting for parsing or indexing.",
@@ -686,7 +689,8 @@ const technicalArticles: DocArticle[] = [
     category: "Technical Reference",
     icon: Search,
     status: "Partial",
-    summary: "Semantic search stores embedded document chunks in Vectorize and retrieves them with team, project, and role-sensitive confidentiality metadata filters.",
+    summary:
+      "Semantic search stores embedded document chunks in Vectorize and retrieves them with team, project, and role-sensitive confidentiality metadata filters.",
     blocks: [
       {
         title: "Implementation Details",
@@ -750,7 +754,8 @@ const technicalArticles: DocArticle[] = [
     category: "Technical Reference",
     icon: MessageCircle,
     status: "Available",
-    summary: "Chat uses optimistic React Query updates, server-side message persistence, SSE token streaming, and database-backed mutation events.",
+    summary:
+      "Chat uses optimistic React Query updates, server-side message persistence, SSE token streaming, and database-backed mutation events.",
     blocks: [
       {
         title: "Implementation Details",
@@ -905,9 +910,9 @@ function DocsPage() {
         articles: category.articles.filter((article) => {
           if (!normalized) return true;
           return [article.title, article.category, article.summary, ...article.blocks.flatMap((block) => block.items)]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalized);
+            .join(" ")
+            .toLowerCase()
+            .includes(normalized);
         }),
       }))
       .filter((category) => category.articles.length > 0);
@@ -935,7 +940,7 @@ function DocsPage() {
           <header className="grid min-h-16 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b bg-card px-4 lg:min-h-19.5 lg:px-6">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase text-primary">Documentation Library</p>
-              <h1 className="truncate text-lg font-semibold lg:text-2xl">Vertex AI Command Center Docs</h1>
+              <h1 className="truncate text-lg font-semibold lg:text-2xl">VertexAI Docs</h1>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary">{session.user.role}</Badge>
@@ -959,11 +964,7 @@ function DocsPage() {
                 </label>
               </div>
               <nav className="scrollbar-thin min-h-0 flex-1 overflow-auto p-3">
-                <DocNav
-                  activeArticleId={activeArticle.id}
-                  categories={filteredCategories}
-                  onSelectArticle={setActiveArticleId}
-                />
+                <DocNav activeArticleId={activeArticle.id} categories={filteredCategories} onSelectArticle={setActiveArticleId} />
               </nav>
             </aside>
 
@@ -979,11 +980,7 @@ function DocsPage() {
                       onChange={(event) => setSearchTerm(event.target.value)}
                     />
                   </label>
-                  <MobileDocNav
-                    activeArticleId={activeArticle.id}
-                    categories={filteredCategories}
-                    onSelectArticle={setActiveArticleId}
-                  />
+                  <MobileDocNav activeArticleId={activeArticle.id} categories={filteredCategories} onSelectArticle={setActiveArticleId} />
                 </div>
 
                 <DocHero article={activeArticle} />
@@ -1007,7 +1004,8 @@ function DocsPage() {
                           <strong className="text-sm">Access Notes</strong>
                         </div>
                         <p className="text-sm leading-6 text-muted-foreground">
-                          Docs follow the signed-in app shell. Viewer accounts can read docs and workspace data, while user and admin roles unlock write actions.
+                          Docs follow the signed-in app shell. Viewer accounts can read docs and workspace data, while user and admin roles
+                          unlock write actions.
                         </p>
                       </CardContent>
                     </Card>

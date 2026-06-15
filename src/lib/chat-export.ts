@@ -43,25 +43,18 @@ export function exportFormatLabel(format: ChatExportFormat) {
 }
 
 export async function downloadChatExport(format: ChatExportFormat, content: string, baseName: string) {
-  const safeName = format === "xlsx" ? safeXlsxFileName(baseName || "vertex-ai-chat-export") : safeFileName(baseName || "vertex-ai-chat-export");
+  const safeName =
+    format === "xlsx" ? safeXlsxFileName(baseName || "vertex-ai-chat-export") : safeFileName(baseName || "vertex-ai-chat-export");
   if (format === "csv") {
     const table = extractTables(content)[0] ?? contentTable(content);
     return downloadBlob(`${safeName}.csv`, "text/csv;charset=utf-8", buildCsv(table.rows));
   }
   if (format === "xlsx") {
     const tables = extractTables(content);
-    return downloadBlob(
-      `${safeName}.xlsx`,
-      xlsxMimeType,
-      await buildXlsx(tables.length ? tables : [contentTable(content)]),
-    );
+    return downloadBlob(`${safeName}.xlsx`, xlsxMimeType, await buildXlsx(tables.length ? tables : [contentTable(content)]));
   }
   if (format === "docx") {
-    return downloadBlob(
-      `${safeName}.docx`,
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      buildDocx(content),
-    );
+    return downloadBlob(`${safeName}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buildDocx(content));
   }
   return downloadBlob(`${safeName}.pdf`, "application/pdf", buildPdf(content));
 }
@@ -71,11 +64,7 @@ export async function downloadRows(format: "csv" | "xlsx", title: string, rows: 
   if (format === "csv") {
     return downloadBlob(`${safeName}.csv`, "text/csv;charset=utf-8", buildCsv(rows));
   }
-  return downloadBlob(
-    `${safeName}.xlsx`,
-    xlsxMimeType,
-    await buildXlsx([{ name: title || "Chart Data", rows }]),
-  );
+  return downloadBlob(`${safeName}.xlsx`, xlsxMimeType, await buildXlsx([{ name: title || "Chart Data", rows }]));
 }
 
 export async function downloadHtmlTable(format: "csv" | "xlsx", title: string, table: HTMLTableElement) {
@@ -84,11 +73,9 @@ export async function downloadHtmlTable(format: "csv" | "xlsx", title: string, t
 
 export async function xlsxFileFromHtmlTable(title: string, table: HTMLTableElement) {
   const safeName = safeXlsxFileName(title || "table-export");
-  return new File(
-    [await buildXlsx([{ name: title || "Table Export", rows: htmlTableRows(table) }])],
-    `${safeName}.xlsx`,
-    { type: xlsxMimeType },
-  );
+  return new File([await buildXlsx([{ name: title || "Table Export", rows: htmlTableRows(table) }])], `${safeName}.xlsx`, {
+    type: xlsxMimeType,
+  });
 }
 
 export function rowsFromHtmlTable(table: HTMLTableElement) {
@@ -112,23 +99,27 @@ function downloadBlob(fileName: string, type: string, data: BlobPart) {
 }
 
 function safeFileName(value: string) {
-  return value
-    .trim()
-    .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/[^a-z0-9._-]+/gi, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 72) || "export";
+  return (
+    value
+      .trim()
+      .replace(/\.[a-z0-9]+$/i, "")
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 72) || "export"
+  );
 }
 
 function safeXlsxFileName(value: string) {
-  return value
-    .trim()
-    .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/\d+/g, " ")
-    .replace(/[^a-z0-9._-]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 72) || "vertex-workbook";
+  return (
+    value
+      .trim()
+      .replace(/\.[a-z0-9]+$/i, "")
+      .replace(/\d+/g, " ")
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 72) || "vertex-workbook"
+  );
 }
 
 function contentTable(content: string): ExportTable {
@@ -186,9 +177,7 @@ function normalizeRows(value: unknown): ExportTable["rows"] {
 
 function normalizeRow(value: unknown): Record<string, string | number | boolean | null> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return { value: scalarValue(value) };
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [key, scalarValue(nestedValue)]),
-  );
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [key, scalarValue(nestedValue)]));
 }
 
 function scalarValue(value: unknown): string | number | boolean | null {
@@ -228,7 +217,10 @@ function splitMarkdownRow(line: string) {
 }
 
 function extractCsvTable(content: string): ExportTable | null {
-  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (lines.length < 2 || !lines[0].includes(",")) return null;
   const header = parseCsvLine(lines[0]);
   if (header.length < 2) return null;
@@ -263,10 +255,7 @@ function parseCsvLine(line: string) {
 
 function buildCsv(rows: ExportTable["rows"]) {
   const columns = collectColumns(rows);
-  return [
-    columns.map(csvCell).join(","),
-    ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(",")),
-  ].join("\r\n");
+  return [columns.map(csvCell).join(","), ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(","))].join("\r\n");
 }
 
 function csvCell(value: unknown) {
@@ -308,7 +297,9 @@ function buildDocx(content: string) {
     .flatMap((block) => block.split("\n"))
     .map((line) => line.replace(/^#{1,6}\s+/, "").replace(/^[-*+]\s+/, ""))
     .filter((line) => line.trim().length > 0);
-  const body = (paragraphs.length ? paragraphs : [content]).map((line) => `<w:p><w:r><w:t xml:space="preserve">${xmlEscape(line)}</w:t></w:r></w:p>`).join("");
+  const body = (paragraphs.length ? paragraphs : [content])
+    .map((line) => `<w:p><w:r><w:t xml:space="preserve">${xmlEscape(line)}</w:t></w:r></w:p>`)
+    .join("");
   return zipFiles({
     "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
     "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
@@ -319,7 +310,7 @@ function buildDocx(content: string) {
 async function buildXlsx(tables: ExportTable[]) {
   const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Vertex AI Command Center";
+  workbook.creator = "VertexAI";
   workbook.company = "Vertex Education";
   workbook.created = new Date();
   workbook.modified = new Date();
@@ -338,12 +329,14 @@ async function buildXlsx(tables: ExportTable[]) {
 }
 
 function sanitizeSheetName(name: string) {
-  return name
-    .replace(/\d+/g, " ")
-    .replace(/[:\\/?*[\]]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 31) || "Data";
+  return (
+    name
+      .replace(/\d+/g, " ")
+      .replace(/[:\\/?*[\]]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 31) || "Data"
+  );
 }
 
 function uniqueSheetName(name: string, index: number, usedSheetNames: Set<string>) {
@@ -442,7 +435,9 @@ function buildPdf(content: string) {
   pageStreams.forEach((stream, index) => {
     const pageObject = 3 + index * 2;
     const streamObject = pageObject + 1;
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents ${streamObject} 0 R >>`);
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents ${streamObject} 0 R >>`,
+    );
     objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
   });
   return pdfDocument(objects);
@@ -501,10 +496,39 @@ function zipFiles(files: Record<string, string | Uint8Array>) {
     const data = typeof value === "string" ? encoder.encode(value) : value;
     const crc = crc32(data);
     const local = concat([
-      u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), nameBytes, data,
+      u32(0x04034b50),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(crc),
+      u32(data.length),
+      u32(data.length),
+      u16(nameBytes.length),
+      u16(0),
+      nameBytes,
+      data,
     ]);
     const central = concat([
-      u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nameBytes,
+      u32(0x02014b50),
+      u16(20),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(crc),
+      u32(data.length),
+      u32(data.length),
+      u16(nameBytes.length),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(0),
+      u32(offset),
+      nameBytes,
     ]);
     localParts.push(local);
     centralParts.push(central);
@@ -513,7 +537,14 @@ function zipFiles(files: Record<string, string | Uint8Array>) {
 
   const centralDirectory = concat(centralParts);
   const end = concat([
-    u32(0x06054b50), u16(0), u16(0), u16(centralParts.length), u16(centralParts.length), u32(centralDirectory.length), u32(offset), u16(0),
+    u32(0x06054b50),
+    u16(0),
+    u16(0),
+    u16(centralParts.length),
+    u16(centralParts.length),
+    u32(centralDirectory.length),
+    u32(offset),
+    u16(0),
   ]);
   return new Blob([concat([...localParts, centralDirectory, end])]);
 }

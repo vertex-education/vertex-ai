@@ -14,9 +14,11 @@ type AsanaWebhookEnv = Env & {
   ASANA_WEBHOOK_SOURCE_USER_ID?: string;
 };
 
-type AsanaWebhookPayload = AsanaWebhookEvent[] | {
-  events?: AsanaWebhookEvent[];
-};
+type AsanaWebhookPayload =
+  | AsanaWebhookEvent[]
+  | {
+      events?: AsanaWebhookEvent[];
+    };
 
 export type AsanaWebhookEvent = {
   action?: string;
@@ -37,12 +39,14 @@ type AsanaResource = {
   resource_type?: string;
 };
 
-type ProjectMapEntry = string | {
-  projectId?: string;
-  chatId?: string;
-  mode?: WorkspaceMode;
-  teamId?: string | null;
-};
+type ProjectMapEntry =
+  | string
+  | {
+      projectId?: string;
+      chatId?: string;
+      mode?: WorkspaceMode;
+      teamId?: string | null;
+    };
 
 type ProjectChatTarget = {
   chatId: string;
@@ -98,11 +102,13 @@ export async function handleAsanaWebhookRequest(request: Request, runtimeEnv: As
 
   const target = await resolveProjectChatTarget(events, webhookEnv);
   if (!target) {
-    console.warn(JSON.stringify({
-      event: "asana_webhook_unmatched",
-      taskGids: extractTaskGids(events),
-      projectGids: extractProjectGids(events),
-    }));
+    console.warn(
+      JSON.stringify({
+        event: "asana_webhook_unmatched",
+        taskGids: extractTaskGids(events),
+        projectGids: extractProjectGids(events),
+      }),
+    );
     return Response.json({ accepted: true, delivered: false, reason: "No matching project chat." }, { status: 202 });
   }
 
@@ -174,30 +180,19 @@ export function getSignatureHeader(headers: Headers) {
   return null;
 }
 
-export async function verifyAsanaSignature({
-  rawBody,
-  secret,
-  signature,
-}: {
-  rawBody: ArrayBuffer;
-  secret: string;
-  signature: string;
-}) {
+export async function verifyAsanaSignature({ rawBody, secret, signature }: { rawBody: ArrayBuffer; secret: string; signature: string }) {
   const signatureBytes = hexToBytes(normalizeSignature(signature));
   if (!signatureBytes) return false;
 
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["verify"],
-  );
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
   return crypto.subtle.verify("HMAC", key, signatureBytes, rawBody);
 }
 
 export function normalizeSignature(signature: string) {
-  return signature.trim().toLowerCase().replace(/^sha256=/, "");
+  return signature
+    .trim()
+    .toLowerCase()
+    .replace(/^sha256=/, "");
 }
 
 export function hexToBytes(hex: string) {
@@ -210,7 +205,9 @@ export function hexToBytes(hex: string) {
 }
 
 async function upsertAsanaTaskStates(webhookEnv: AsanaWebhookEnv, workspaceKey: string, events: AsanaWebhookEvent[]) {
-  const taskEvents = events.map((event) => normalizeTaskStateEvent(workspaceKey, event)).filter((event): event is AsanaTaskStateUpsert => Boolean(event));
+  const taskEvents = events
+    .map((event) => normalizeTaskStateEvent(workspaceKey, event))
+    .filter((event): event is AsanaTaskStateUpsert => Boolean(event));
   if (taskEvents.length === 0) return;
 
   const db = drizzle(webhookEnv.DB);
@@ -241,11 +238,7 @@ async function upsertAsanaTaskStates(webhookEnv: AsanaWebhookEnv, workspaceKey: 
 type AsanaTaskStateUpsert = typeof asanaWebhookTaskStates.$inferInsert;
 
 export function normalizeTaskStateEvent(workspaceKey: string, event: AsanaWebhookEvent): AsanaTaskStateUpsert | null {
-  const task = event.resource?.resource_type === "task"
-    ? event.resource
-    : event.parent?.resource_type === "task"
-      ? event.parent
-      : null;
+  const task = event.resource?.resource_type === "task" ? event.resource : event.parent?.resource_type === "task" ? event.parent : null;
   const asanaTaskGid = task?.gid?.trim();
   if (!task || !asanaTaskGid) return null;
 
@@ -254,7 +247,7 @@ export function normalizeTaskStateEvent(workspaceKey: string, event: AsanaWebhoo
     asanaTaskGid,
     asanaWorkspaceGid: workspaceKey,
     vertexWorkspaceId: null,
-    asanaProjectGid: event.parent?.resource_type === "project" ? event.parent.gid ?? null : null,
+    asanaProjectGid: event.parent?.resource_type === "project" ? (event.parent.gid ?? null) : null,
     taskName: task.name ?? null,
     action: event.action ?? "changed",
     changeAction: event.change?.action ?? null,
@@ -338,10 +331,12 @@ async function resolvePersistedProjectTarget(events: AsanaWebhookEvent[], webhoo
         workspaceId: row.workspaceId,
       } satisfies ProjectChatTarget;
     } catch (error) {
-      console.warn(JSON.stringify({
-        event: "asana_mapping_lookup_failed",
-        error: error instanceof Error ? error.message : "Unknown Asana mapping lookup failure",
-      }));
+      console.warn(
+        JSON.stringify({
+          event: "asana_mapping_lookup_failed",
+          error: error instanceof Error ? error.message : "Unknown Asana mapping lookup failure",
+        }),
+      );
       return null;
     }
   }
@@ -382,9 +377,7 @@ export function parseProjectMap(value: string | undefined) {
 }
 
 async function findProjectChatByProjectId(db: D1Database, projectId: string, preferredChatId?: string) {
-  const preferred = preferredChatId
-    ? await queryProjectChat(db, "c.id = ? AND p.id = ?", [preferredChatId, projectId])
-    : null;
+  const preferred = preferredChatId ? await queryProjectChat(db, "c.id = ? AND p.id = ?", [preferredChatId, projectId]) : null;
   if (preferred) return preferred;
   return queryProjectChat(db, "p.id = ?", [projectId]);
 }
@@ -437,9 +430,7 @@ export function modeForScope(scope: "personal" | "team" | "org"): WorkspaceMode 
 async function resolveSourceUserId(webhookEnv: AsanaWebhookEnv) {
   const configured = webhookEnv.ASANA_WEBHOOK_SOURCE_USER_ID?.trim();
   if (configured) {
-    const user = await webhookEnv.DB.prepare("SELECT id FROM user WHERE id = ? LIMIT 1")
-      .bind(configured)
-      .first<{ id: string }>();
+    const user = await webhookEnv.DB.prepare("SELECT id FROM user WHERE id = ? LIMIT 1").bind(configured).first<{ id: string }>();
     if (user) return user.id;
   }
 
@@ -498,7 +489,10 @@ async function persistAsanaChatMessage(target: ProjectChatTarget, message: ChatM
 
 export function buildAsanaChatMessage(events: AsanaWebhookEvent[]): ChatMessage {
   const primary = events[0];
-  const task = primary?.resource?.resource_type === "task" ? primary.resource : events.find((event) => event.resource?.resource_type === "task")?.resource;
+  const task =
+    primary?.resource?.resource_type === "task"
+      ? primary.resource
+      : events.find((event) => event.resource?.resource_type === "task")?.resource;
   const taskLabel = task?.name || (task?.gid ? `Task ${task.gid}` : "Asana task");
   const eventLines = events.slice(0, 6).map(formatAsanaEventLine).filter(Boolean);
   const remaining = events.length > eventLines.length ? `\n- ${events.length - eventLines.length} additional update(s).` : "";
@@ -520,24 +514,30 @@ export function formatAsanaEventLine(event: AsanaWebhookEvent) {
 }
 
 export function extractTaskGids(events: AsanaWebhookEvent[]) {
-  return uniqueStrings(events.flatMap((event) => [
-    event.resource?.resource_type === "task" ? event.resource.gid : undefined,
-    event.parent?.resource_type === "task" ? event.parent.gid : undefined,
-  ]));
+  return uniqueStrings(
+    events.flatMap((event) => [
+      event.resource?.resource_type === "task" ? event.resource.gid : undefined,
+      event.parent?.resource_type === "task" ? event.parent.gid : undefined,
+    ]),
+  );
 }
 
 export function extractProjectGids(events: AsanaWebhookEvent[]) {
-  return uniqueStrings(events.flatMap((event) => [
-    event.resource?.resource_type === "project" ? event.resource.gid : undefined,
-    event.parent?.resource_type === "project" ? event.parent.gid : undefined,
-  ]));
+  return uniqueStrings(
+    events.flatMap((event) => [
+      event.resource?.resource_type === "project" ? event.resource.gid : undefined,
+      event.parent?.resource_type === "project" ? event.parent.gid : undefined,
+    ]),
+  );
 }
 
 export function extractProjectNames(events: AsanaWebhookEvent[]) {
-  return uniqueStrings(events.flatMap((event) => [
-    event.resource?.resource_type === "project" ? event.resource.name : undefined,
-    event.parent?.resource_type === "project" ? event.parent.name : undefined,
-  ]));
+  return uniqueStrings(
+    events.flatMap((event) => [
+      event.resource?.resource_type === "project" ? event.resource.name : undefined,
+      event.parent?.resource_type === "project" ? event.parent.name : undefined,
+    ]),
+  );
 }
 
 export function uniqueStrings(values: Array<string | undefined>) {

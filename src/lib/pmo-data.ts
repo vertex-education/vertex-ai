@@ -10,18 +10,11 @@ import {
   fetchAsanaProjectContextForCurrentUser,
   getAsanaTaskAutoSyncEnabledForCurrentUser,
 } from "@/lib/asana-integration.server";
-import {
-  isMissingAsanaSyncColumnError,
-  normalizePersistedTaskStatus,
-  withDefaultAsanaSyncState,
-} from "@/lib/asana-task-sync-state";
+import { isMissingAsanaSyncColumnError, normalizePersistedTaskStatus, withDefaultAsanaSyncState } from "@/lib/asana-task-sync-state";
 import { getAuth } from "@/lib/auth";
 import { publishChatMessageInserts, type ChatMessageInsertEvent } from "@/lib/chat-sync";
 import { recordRealtimeMutationEvent, type RealtimeInvalidationTarget } from "@/lib/realtime-events";
-import {
-  xlsxBlobFromRows,
-  type ExportTable,
-} from "@/lib/chat-export";
+import { xlsxBlobFromRows, type ExportTable } from "@/lib/chat-export";
 import type { ChatOperationalEntity } from "@/lib/chat-entities";
 import {
   aiUnavailableMessage,
@@ -381,33 +374,34 @@ async function generateChatTitleFromInitialMessage(context: unknown, text: strin
 
   try {
     const result = await withAiTimeout(
-      (signal) => runTrackedAiGateway(
-        ai,
-        lightweightChatTitleModelId,
-        {
-          messages: [
-            {
-              role: "system",
-              content: [
-                "Name this chat from the user's initial message.",
-                "Return only a concise title, no quotes, no punctuation at the end.",
-                "Use 3 to 7 words. Preserve useful project, artifact, or technical nouns.",
-              ].join(" "),
-            },
-            { role: "user", content: text.slice(0, 2_000) },
-          ],
-          max_completion_tokens: 24,
-          temperature: 0.1,
-        },
-        {
-          feature: "chat-title",
-          signal,
-          metadata: {
-            feature: "chat-title",
-            model: lightweightChatTitleModelId,
+      (signal) =>
+        runTrackedAiGateway(
+          ai,
+          lightweightChatTitleModelId,
+          {
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "Name this chat from the user's initial message.",
+                  "Return only a concise title, no quotes, no punctuation at the end.",
+                  "Use 3 to 7 words. Preserve useful project, artifact, or technical nouns.",
+                ].join(" "),
+              },
+              { role: "user", content: text.slice(0, 2_000) },
+            ],
+            max_completion_tokens: 24,
+            temperature: 0.1,
           },
-        },
-      ),
+          {
+            feature: "chat-title",
+            signal,
+            metadata: {
+              feature: "chat-title",
+              model: lightweightChatTitleModelId,
+            },
+          },
+        ),
       5_000,
     );
     const generatedTitle = normalizeGeneratedChatTitle(extractAiResponse(result), fallback);
@@ -434,18 +428,16 @@ export type AddIdeaInput = {
   summary: string;
 };
 
-export const avatarAlex =
-  "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80";
-export const avatarJordan =
-  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80";
-export const avatarTaylor =
-  "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=120&q=80";
-export const avatarMaya =
-  "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&w=120&q=80";
-export const avatarPriya =
-  "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=120&q=80";
+export const avatarAlex = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80";
+export const avatarJordan = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80";
+export const avatarTaylor = "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=120&q=80";
+export const avatarMaya = "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&w=120&q=80";
+export const avatarPriya = "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=120&q=80";
 
-export const statusMeta: Record<IdeaStatus, { label: string; tone: "info" | "warning" | "success" | "destructive" | "secondary"; description: string }> = {
+export const statusMeta: Record<
+  IdeaStatus,
+  { label: string; tone: "info" | "warning" | "success" | "destructive" | "secondary"; description: string }
+> = {
   "Not Started": { label: "Not Started", tone: "secondary", description: "Captured and not started." },
   Reviewing: { label: "Reviewing", tone: "warning", description: "Being evaluated." },
   "Convert to Project": { label: "Convert to Project", tone: "success", description: "Converted into a scoped project." },
@@ -505,7 +497,7 @@ export function normalizeReasoningLevel(value: unknown): ChatReasoningLevel {
   if (value === "off" || value === "quick") return "low";
   if (value === "deep") return "medium";
   if (value === "max") return "high";
-  return typeof value === "string" && value in chatReasoningProfiles ? value as ChatReasoningLevel : "low";
+  return typeof value === "string" && value in chatReasoningProfiles ? (value as ChatReasoningLevel) : "low";
 }
 
 export function buildReasoningInstruction(level: ChatReasoningLevel) {
@@ -594,7 +586,14 @@ function summarizeAiResponseShape(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value)
       .slice(0, 12)
-      .map(([key, nestedValue]) => [key, Array.isArray(nestedValue) ? `array(${nestedValue.length})` : isRecord(nestedValue) ? Object.keys(nestedValue).slice(0, 8) : typeof nestedValue]),
+      .map(([key, nestedValue]) => [
+        key,
+        Array.isArray(nestedValue)
+          ? `array(${nestedValue.length})`
+          : isRecord(nestedValue)
+            ? Object.keys(nestedValue).slice(0, 8)
+            : typeof nestedValue,
+      ]),
   );
 }
 
@@ -739,12 +738,15 @@ const workspaceSeed = {
     workspaceChatsHeading: "Org Chats",
     unassignedProjectLabel: "No org project",
   },
-} satisfies Record<WorkspaceMode, {
-  projectsHeading: string;
-  projectChatsHeading: string;
-  workspaceChatsHeading: string;
-  unassignedProjectLabel: string;
-}>;
+} satisfies Record<
+  WorkspaceMode,
+  {
+    projectsHeading: string;
+    projectChatsHeading: string;
+    workspaceChatsHeading: string;
+    unassignedProjectLabel: string;
+  }
+>;
 
 function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
   const seed = workspaceSeed[mode];
@@ -773,7 +775,7 @@ function buildWorkspace(mode: WorkspaceMode): ScopedWorkspaceState {
 }
 
 const initialWorkspaceState: PmoWorkspaceState = {
-  productName: "Vertex AI Command Center",
+  productName: "VertexAI",
   workspaces: {
     Personal: buildWorkspace("Personal"),
     Team: buildWorkspace("Team"),
@@ -819,20 +821,20 @@ function createId(prefix: string) {
 }
 
 function safeArtifactFileName(value: string) {
-  return value
-    .trim()
-    .replace(/\.[a-z0-9]+$/i, "")
-    .replace(/\d+/g, " ")
-    .replace(/[^a-z0-9._-]+/gi, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 72) || "table-export";
+  return (
+    value
+      .trim()
+      .replace(/\.[a-z0-9]+$/i, "")
+      .replace(/\d+/g, " ")
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 72) || "table-export"
+  );
 }
 
 function artifactDownloadHref(r2Key: string, fallbackHref: string) {
-  return r2Key.includes("/generated/")
-    ? `/api/artifacts?key=${encodeURIComponent(r2Key)}`
-    : fallbackHref;
+  return r2Key.includes("/generated/") ? `/api/artifacts?key=${encodeURIComponent(r2Key)}` : fallbackHref;
 }
 
 function requiredFormString(formData: FormData, key: string, label: string) {
@@ -849,23 +851,31 @@ function optionalFormString(formData: FormData, key: string) {
 function rowsSample(rows: ExportTable["rows"]) {
   return rows
     .slice(0, 8)
-    .map((row) => Object.entries(row).map(([key, value]) => `${key}: ${value ?? ""}`).join("; "))
+    .map((row) =>
+      Object.entries(row)
+        .map(([key, value]) => `${key}: ${value ?? ""}`)
+        .join("; "),
+    )
     .join("\n")
     .slice(0, 2200);
 }
 
 function fallbackArtifactTitle(seedTitle: string, rows: ExportTable["rows"]) {
-  const columns = Object.keys(rows[0] ?? {}).slice(0, 4).join(" ");
+  const columns = Object.keys(rows[0] ?? {})
+    .slice(0, 4)
+    .join(" ");
   const source = `${seedTitle} ${columns}`.trim() || "Table Export";
-  return source
-    .replace(/\b(option|method|table|export|csv|xlsx)\b/gi, " ")
-    .replace(/\d+/g, " ")
-    .replace(/[^a-z0-9\s-]/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(" ")
-    .slice(0, 7)
-    .join(" ") || "Table Export";
+  return (
+    source
+      .replace(/\b(option|method|table|export|csv|xlsx)\b/gi, " ")
+      .replace(/\d+/g, " ")
+      .replace(/[^a-z0-9\s-]/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .slice(0, 7)
+      .join(" ") || "Table Export"
+  );
 }
 
 async function generateArtifactTitle(seedTitle: string, rows: ExportTable["rows"]) {
@@ -882,26 +892,27 @@ async function generateArtifactTitle(seedTitle: string, rows: ExportTable["rows"
   ].join("\n");
   try {
     const result = await withAiTimeout(
-      (signal) => runTrackedAiGateway(
-        ai,
-        vertexAiModelId,
-        {
-          messages: [
-            { role: "system", content: "You name files clearly and briefly." },
-            { role: "user", content: prompt },
-          ],
-          max_completion_tokens: 32,
-          temperature: 0.1,
-        },
-        {
-          feature: "artifact-title",
-          signal,
-          metadata: {
-            feature: "artifact-title",
-            model: vertexAiModelId,
+      (signal) =>
+        runTrackedAiGateway(
+          ai,
+          vertexAiModelId,
+          {
+            messages: [
+              { role: "system", content: "You name files clearly and briefly." },
+              { role: "user", content: prompt },
+            ],
+            max_completion_tokens: 32,
+            temperature: 0.1,
           },
-        },
-      ),
+          {
+            feature: "artifact-title",
+            signal,
+            metadata: {
+              feature: "artifact-title",
+              model: vertexAiModelId,
+            },
+          },
+        ),
       4500,
     );
     const generated = extractAiResponse(result)
@@ -921,15 +932,17 @@ async function generateArtifactTitle(seedTitle: string, rows: ExportTable["rows"
 }
 
 function fallbackWorkflowSuggestionTitle(kind: string, title: string) {
-  return title
-    .replace(/\s+/g, " ")
-    .replace(/^[-*•\s]+/, "")
-    .replace(/\b(task|approval|decision|idea)\s*[:#]\s*/i, "")
-    .trim()
-    .split(" ")
-    .slice(0, kind === "idea" ? 9 : 11)
-    .join(" ")
-    .slice(0, 120) || `${kind} suggestion`;
+  return (
+    title
+      .replace(/\s+/g, " ")
+      .replace(/^[-*•\s]+/, "")
+      .replace(/\b(task|approval|decision|idea)\s*[:#]\s*/i, "")
+      .trim()
+      .split(" ")
+      .slice(0, kind === "idea" ? 9 : 11)
+      .join(" ")
+      .slice(0, 120) || `${kind} suggestion`
+  );
 }
 
 async function generateWorkflowSuggestionTitle(kind: "approval" | "decision" | "idea" | "task", title: string) {
@@ -938,33 +951,34 @@ async function generateWorkflowSuggestionTitle(kind: "approval" | "decision" | "
   if (!ai) return fallback;
   try {
     const result = await withAiTimeout(
-      (signal) => runTrackedAiGateway(
-        ai,
-        lightweightChatTitleModelId,
-        {
-          messages: [
-            {
-              role: "system",
-              content: [
-                `Rewrite this ${kind} item as a concise list title.`,
-                "Return only the title, no quotes, no punctuation at the end.",
-                "Keep the concrete noun, owner object, or deliverable. Use 4 to 10 words.",
-              ].join(" "),
-            },
-            { role: "user", content: title.slice(0, 1200) },
-          ],
-          max_completion_tokens: 32,
-          temperature: 0.1,
-        },
-        {
-          feature: `workflow-${kind}-title`,
-          signal,
-          metadata: {
-            feature: `workflow-${kind}-title`,
-            model: lightweightChatTitleModelId,
+      (signal) =>
+        runTrackedAiGateway(
+          ai,
+          lightweightChatTitleModelId,
+          {
+            messages: [
+              {
+                role: "system",
+                content: [
+                  `Rewrite this ${kind} item as a concise list title.`,
+                  "Return only the title, no quotes, no punctuation at the end.",
+                  "Keep the concrete noun, owner object, or deliverable. Use 4 to 10 words.",
+                ].join(" "),
+              },
+              { role: "user", content: title.slice(0, 1200) },
+            ],
+            max_completion_tokens: 32,
+            temperature: 0.1,
           },
-        },
-      ),
+          {
+            feature: `workflow-${kind}-title`,
+            signal,
+            metadata: {
+              feature: `workflow-${kind}-title`,
+              model: lightweightChatTitleModelId,
+            },
+          },
+        ),
       3500,
     );
     return fallbackWorkflowSuggestionTitle(kind, extractAiResponse(result)) || fallback;
@@ -1031,9 +1045,20 @@ async function persistChatMessage({
 
 async function listPersistedChatMessages(chatId: string) {
   const result = await getDb()
-    .prepare("SELECT id, parent_id as parentId, author, role, avatar, message_time as time, body as text, attachments_json as attachmentsJson FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC")
+    .prepare(
+      "SELECT id, parent_id as parentId, author, role, avatar, message_time as time, body as text, attachments_json as attachmentsJson FROM chat_messages WHERE chat_id = ? ORDER BY created_at ASC",
+    )
     .bind(chatId)
-    .all<{ id: string; parentId: string | null; author: string; role: "user" | "assistant" | "system"; avatar: string | null; time: string; text: string; attachmentsJson: string | null }>();
+    .all<{
+      id: string;
+      parentId: string | null;
+      author: string;
+      role: "user" | "assistant" | "system";
+      avatar: string | null;
+      time: string;
+      text: string;
+      attachmentsJson: string | null;
+    }>();
 
   return (result.results ?? []).map((message) => {
     const { attachmentsJson, ...rest } = message;
@@ -1077,7 +1102,9 @@ function extractAiResponse(result: unknown) {
   if (typeof result === "string") return result;
   if (result && typeof result === "object") {
     const response = result as WorkersAiChatResponse;
-    const firstChoice = response.choices?.[0] as { delta?: { content?: unknown }; message?: { content?: unknown; text?: unknown } } | undefined;
+    const firstChoice = response.choices?.[0] as
+      | { delta?: { content?: unknown }; message?: { content?: unknown; text?: unknown } }
+      | undefined;
     const candidates = [
       response.response,
       response.text,
@@ -1104,14 +1131,21 @@ function truncateForPrompt(value: string, maxLength: number) {
 }
 
 export function truncateAttachmentContext(value: string, maxLength = 20_000) {
-  const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  const normalized = value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return normalized.length > maxLength
     ? `${normalized.slice(0, maxLength).trim()}\n[Attachment text truncated for Gemma context.]`
     : normalized;
 }
 
 export function buildAttachmentPromptContext(attachments: ChatAttachment[] | undefined) {
-  const sanitized = sanitizeChatAttachments(attachments).filter((attachment) => attachment.status !== "error" && attachment.extractedText.trim());
+  const sanitized = sanitizeChatAttachments(attachments).filter(
+    (attachment) => attachment.status !== "error" && attachment.extractedText.trim(),
+  );
   if (!sanitized.length) return null;
   let totalChars = 0;
   const maxTotalChars = 60_000;
@@ -1123,14 +1157,16 @@ export function buildAttachmentPromptContext(attachments: ChatAttachment[] | und
     if (remaining <= 0) break;
     const text = truncateAttachmentContext(attachment.extractedText, Math.min(20_000, remaining));
     totalChars += text.length;
-    sections.push([
-      `[Attachment ${index + 1}] ${attachment.name}`,
-      `Type: ${attachment.extension.toUpperCase()}`,
-      `Status: ${attachment.status}`,
-      `Size: ${attachment.size} bytes`,
-      "Extracted text:",
-      text,
-    ].join("\n"));
+    sections.push(
+      [
+        `[Attachment ${index + 1}] ${attachment.name}`,
+        `Type: ${attachment.extension.toUpperCase()}`,
+        `Status: ${attachment.status}`,
+        `Size: ${attachment.size} bytes`,
+        "Extracted text:",
+        text,
+      ].join("\n"),
+    );
   }
   return sections.join("\n\n");
 }
@@ -1176,25 +1212,31 @@ async function searchWebForPrompt(
   }
 
   try {
-    const consolidatedContext = await fetchConsolidatedWebSearch(query, env as unknown as Parameters<typeof fetchConsolidatedWebSearch>[1], {
-      projectId: usageScope.projectId,
-      chatId: usageScope.chatId,
-      metadata: {
-        mode: usageScope.mode,
-        chatTitle: usageScope.chatTitle.slice(0, 120),
-        source: "chat-web-search",
+    const consolidatedContext = await fetchConsolidatedWebSearch(
+      query,
+      env as unknown as Parameters<typeof fetchConsolidatedWebSearch>[1],
+      {
+        projectId: usageScope.projectId,
+        chatId: usageScope.chatId,
+        metadata: {
+          mode: usageScope.mode,
+          chatTitle: usageScope.chatTitle.slice(0, 120),
+          source: "chat-web-search",
+        },
       },
-    });
+    );
     return {
       enabled: true,
       query,
       provider: "Tavily + Firecrawl",
-      results: [{
-        title: "Consolidated web context",
-        url: "",
-        snippet: truncateForPrompt(consolidatedContext, 12_000),
-        source: "Tavily + Firecrawl",
-      }],
+      results: [
+        {
+          title: "Consolidated web context",
+          url: "",
+          snippet: truncateForPrompt(consolidatedContext, 12_000),
+          source: "Tavily + Firecrawl",
+        },
+      ],
     };
   } catch (error) {
     return {
@@ -1209,11 +1251,7 @@ async function searchWebForPrompt(
 
 export function buildWebSearchPromptContext(search: WebSearchTrace) {
   if (!search.enabled) return null;
-  const lines = [
-    `Web search: enabled`,
-    `Provider: ${search.provider}`,
-    `Query: ${search.query}`,
-  ];
+  const lines = [`Web search: enabled`, `Provider: ${search.provider}`, `Query: ${search.query}`];
   if (search.error) lines.push(`Search issue: ${search.error}`);
   if (search.results.length) {
     lines.push("Use the following consolidated web context only when it is relevant. Cite source URLs when the context includes them.");
@@ -1221,7 +1259,9 @@ export function buildWebSearchPromptContext(search: WebSearchTrace) {
       lines.push(`[${index + 1}] ${result.title}${result.url ? `\nURL: ${result.url}` : ""}\n${result.snippet}`);
     });
   } else {
-    lines.push("No usable web results were available. Say that live web search did not return useful results if current information is required.");
+    lines.push(
+      "No usable web results were available. Say that live web search did not return useful results if current information is required.",
+    );
   }
   return lines.join("\n");
 }
@@ -1260,9 +1300,9 @@ async function runGemmaChat({
     vertexProjectId: data.projectId,
   });
   const workspaceContext: ChatDynamicWorkspaceContext = data.projectId
-    ? await getDb()
-      .prepare(
-        `SELECT w.name as workspaceName,
+    ? ((await getDb()
+        .prepare(
+          `SELECT w.name as workspaceName,
                 p.name as projectName,
                 p.description as projectDescription,
                 COALESCE(p.project_instructions, '') as projectInstructions,
@@ -1271,25 +1311,25 @@ async function runGemmaChat({
          INNER JOIN workspaces w ON w.id = p.workspace_id
          WHERE p.id = ?
          LIMIT 1`,
-      )
-      .bind(data.projectId)
-      .first<ChatDynamicWorkspaceContext>() ?? {
+        )
+        .bind(data.projectId)
+        .first<ChatDynamicWorkspaceContext>()) ?? {
         workspaceName: `${workspaceModeLabel(data.mode)} Workspace`,
         projectName: null,
         projectDescription: null,
         projectInstructions: null,
         projectStatus: null,
-      }
+      })
     : {
-      ...(await getDb()
-      .prepare("SELECT name as workspaceName FROM workspaces WHERE scope = ? LIMIT 1")
-      .bind(workspace.scope)
-      .first<{ workspaceName: string }>() ?? { workspaceName: `${workspaceModeLabel(data.mode)} Workspace` }),
-      projectName: null,
-      projectDescription: null,
-      projectInstructions: null,
-      projectStatus: null,
-    };
+        ...((await getDb()
+          .prepare("SELECT name as workspaceName FROM workspaces WHERE scope = ? LIMIT 1")
+          .bind(workspace.scope)
+          .first<{ workspaceName: string }>()) ?? { workspaceName: `${workspaceModeLabel(data.mode)} Workspace` }),
+        projectName: null,
+        projectDescription: null,
+        projectInstructions: null,
+        projectStatus: null,
+      };
   const recentMessages: Array<{ role: "user" | "assistant"; content: string }> = existingMessages.slice(-8).map((message) => ({
     role: message.role === "assistant" ? "assistant" : "user",
     content: buildMessageContentForHistory(message),
@@ -1302,7 +1342,9 @@ async function runGemmaChat({
     `Active chat: ${data.chatTitle}`,
     "This is routing metadata for command-center record questions, not a limit on general conversation.",
     "Use this scoped context only when it is relevant to the user's request. Otherwise answer the user's request directly.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const requestPayload: LlmDevTrace["request"] & {
     chat_template_kwargs?: {
@@ -1313,38 +1355,41 @@ async function runGemmaChat({
     messages: [
       {
         role: "system" as const,
-        content: prependDynamicWorkspaceContextHeader(
-          `${buildVertexAiSystemPrompt()} ${buildReasoningInstruction(reasoningLevel)}`,
-          {
-            workspaceName: workspaceContext.workspaceName,
-            projectName: workspaceContext.projectName,
-            projectDescription: workspaceContext.projectDescription,
-            projectInstructions: workspaceContext.projectInstructions,
-            projectStatus: workspaceContext.projectStatus,
-          },
-        ),
+        content: prependDynamicWorkspaceContextHeader(`${buildVertexAiSystemPrompt()} ${buildReasoningInstruction(reasoningLevel)}`, {
+          workspaceName: workspaceContext.workspaceName,
+          projectName: workspaceContext.projectName,
+          projectDescription: workspaceContext.projectDescription,
+          projectInstructions: workspaceContext.projectInstructions,
+          projectStatus: workspaceContext.projectStatus,
+        }),
       },
       {
         role: "user" as const,
         content: `Current scoped context:\n${scopeContext}`,
       },
       ...(webSearchContext
-        ? [{
-          role: "user" as const,
-          content: `Current web context:\n${webSearchContext}`,
-        }]
+        ? [
+            {
+              role: "user" as const,
+              content: `Current web context:\n${webSearchContext}`,
+            },
+          ]
         : []),
       ...(asanaContext
-        ? [{
-          role: "user" as const,
-          content: `Current Asana project context:\n${asanaContext}`,
-        }]
+        ? [
+            {
+              role: "user" as const,
+              content: `Current Asana project context:\n${asanaContext}`,
+            },
+          ]
         : []),
       ...(attachmentContext
-        ? [{
-          role: "user" as const,
-          content: `Current file attachment context:\n${attachmentContext}`,
-        }]
+        ? [
+            {
+              role: "user" as const,
+              content: `Current file attachment context:\n${attachmentContext}`,
+            },
+          ]
         : []),
       ...recentMessages,
       {
@@ -1414,11 +1459,8 @@ async function runGemmaChat({
   const startedAt = Date.now();
   try {
     const result = await withAiTimeout(
-      (signal) => runTrackedAiGateway(
-        ai,
-        vertexAiModelId,
-        requestPayload,
-        {
+      (signal) =>
+        runTrackedAiGateway(ai, vertexAiModelId, requestPayload, {
           feature: webSearch ? "gemma-chat-with-web-search" : "gemma-chat",
           projectId: data.projectId,
           chatId: data.chatId,
@@ -1429,14 +1471,17 @@ async function runGemmaChat({
             chatId: data.chatId.slice(0, 80),
             projectId: data.projectId?.slice(0, 80) ?? null,
           },
-        },
-      ),
+        }),
       reasoningProfile.timeoutMs,
     );
 
     const responseText = extractAiResponse(result).trim();
     const thinkingText = extractThinkingFromResponse(result);
-    const text = responseText || (thinkingText ? "The model returned reasoning output but did not return a final answer. It may have exhausted the completion budget before finishing. Please try again or shorten the prompt." : emptyAiResponseMessage);
+    const text =
+      responseText ||
+      (thinkingText
+        ? "The model returned reasoning output but did not return a final answer. It may have exhausted the completion budget before finishing. Please try again or shorten the prompt."
+        : emptyAiResponseMessage);
     console.info("[VertexAI] Workers AI request completed", {
       chatId: data.chatId,
       responseLength: responseText.length,
@@ -1509,7 +1554,11 @@ export function cycleTaskStatus(status: Task["status"]): Task["status"] {
 }
 
 export function titleMatchesTask(left: string, right: string) {
-  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
   return normalize(left) === normalize(right);
 }
 
@@ -1518,8 +1567,10 @@ export function buildAsanaNotesForWorkflowTask(task: Task) {
     task.originalText ? `Original text: ${task.originalText}` : "",
     task.owner ? `Owner: ${task.owner}` : "",
     task.source ? `Source: ${task.source}` : "",
-    "Created from VertexAI Command Center.",
-  ].filter(Boolean).join("\n");
+    "Created from VertexAI.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function createAsanaSyncStateForTask(task: Task) {
@@ -1559,9 +1610,11 @@ async function loadIdeaAssessmentContext(mode: WorkspaceMode, projectId: string 
     .first<{ name: string }>();
   const project = projectId
     ? await getDb()
-      .prepare("SELECT name, description, status, COALESCE(project_instructions, '') as projectInstructions FROM projects WHERE id = ? LIMIT 1")
-      .bind(projectId)
-      .first<{ name: string; description: string; status: string; projectInstructions: string }>()
+        .prepare(
+          "SELECT name, description, status, COALESCE(project_instructions, '') as projectInstructions FROM projects WHERE id = ? LIMIT 1",
+        )
+        .bind(projectId)
+        .first<{ name: string; description: string; status: string; projectInstructions: string }>()
     : null;
   return {
     workspaceName: workspace?.name ?? `${workspaceModeLabel(mode)} Workspace`,
@@ -1592,7 +1645,7 @@ async function assessIdeaWithGemma({
       "Effort fallback: Refresh to ask Gemma 4 for a score rationale.",
       "Confidence fallback: Refresh to ask Gemma 4 for a score rationale.",
     ],
-    thread: ["Idea captured through Vertex AI Command Center.", "Gemma assessment pending until Workers AI is available."],
+    thread: ["Idea captured through VertexAI.", "Gemma assessment pending until Workers AI is available."],
   };
   const ai = (context as CloudflareContext).cloudflare?.env?.AI;
   if (!ai) return fallback;
@@ -1621,42 +1674,43 @@ async function assessIdeaWithGemma({
 
   try {
     const result = await withAiTimeout(
-      (signal) => runTrackedAiGateway(
-        ai,
-        vertexAiModelId,
-        {
-          messages: [
-            { role: "system", content: "You are Gemma 4 assessing Vertex Education PMO ideas. Be concise and do not invent facts." },
-            { role: "user", content: prompt },
-          ],
-          max_completion_tokens: 420,
-          temperature: 0.2,
-        },
-        {
-          feature: "gemma-idea-assessment",
-          projectId: idea.projectId,
-          signal,
-          metadata: {
-            feature: "idea-assessment",
-            mode,
-            projectId: idea.projectId?.slice(0, 80) ?? null,
+      (signal) =>
+        runTrackedAiGateway(
+          ai,
+          vertexAiModelId,
+          {
+            messages: [
+              { role: "system", content: "You are Gemma 4 assessing Vertex Education PMO ideas. Be concise and do not invent facts." },
+              { role: "user", content: prompt },
+            ],
+            max_completion_tokens: 420,
+            temperature: 0.2,
           },
-        },
-      ),
+          {
+            feature: "gemma-idea-assessment",
+            projectId: idea.projectId,
+            signal,
+            metadata: {
+              feature: "idea-assessment",
+              mode,
+              projectId: idea.projectId?.slice(0, 80) ?? null,
+            },
+          },
+        ),
       20_000,
     );
     const parsed = extractJsonObject(extractAiResponse(result).trim());
     if (!parsed) return fallback;
-    const consideration = typeof parsed.consideration === "string" && parsed.consideration.trim()
-      ? parsed.consideration.trim().slice(0, 240)
-      : fallback.nextStep.replace(/^(?:pro|gap|con):\s*/i, "");
-    const considerationType = typeof parsed.considerationType === "string" && ["pro", "gap", "con"].includes(parsed.considerationType.toLowerCase())
-      ? parsed.considerationType.toLowerCase()
-      : "gap";
+    const consideration =
+      typeof parsed.consideration === "string" && parsed.consideration.trim()
+        ? parsed.consideration.trim().slice(0, 240)
+        : fallback.nextStep.replace(/^(?:pro|gap|con):\s*/i, "");
+    const considerationType =
+      typeof parsed.considerationType === "string" && ["pro", "gap", "con"].includes(parsed.considerationType.toLowerCase())
+        ? parsed.considerationType.toLowerCase()
+        : "gap";
     const reason = (key: "impactReason" | "effortReason" | "confidenceReason") =>
-      typeof parsed[key] === "string" && parsed[key].trim()
-        ? parsed[key].trim().replace(/\s+/g, " ").slice(0, 120)
-        : "";
+      typeof parsed[key] === "string" && parsed[key].trim() ? parsed[key].trim().replace(/\s+/g, " ").slice(0, 120) : "";
     const impactReason = reason("impactReason");
     const effortReason = reason("effortReason");
     const confidenceReason = reason("confidenceReason");
@@ -1666,12 +1720,11 @@ async function assessIdeaWithGemma({
       effort: boundedScore(parsed.effort, fallback.effort),
       confidence: boundedScore(parsed.confidence, fallback.confidence),
       nextStep: `${considerationType}: ${consideration}`,
-      metrics: [
-        `Impact LLM: ${impactReason}`,
-        `Effort LLM: ${effortReason}`,
-        `Confidence LLM: ${confidenceReason}`,
+      metrics: [`Impact LLM: ${impactReason}`, `Effort LLM: ${effortReason}`, `Confidence LLM: ${confidenceReason}`],
+      thread: [
+        "Gemma 4 assessed impact, effort, and confidence against Vertex Education context.",
+        `Last assessment: ${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })}`,
       ],
-      thread: ["Gemma 4 assessed impact, effort, and confidence against Vertex Education context.", `Last assessment: ${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })}`],
     };
   } catch {
     return fallback;
@@ -1733,7 +1786,7 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
                 commit_message as commitMessage
          FROM artifacts`,
       )
-      .all<typeof rows[number]>();
+      .all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch {
     return root;
@@ -1779,10 +1832,11 @@ async function mergePersistedArtifacts(root: PmoWorkspaceState) {
     const workspace = root.workspaces[mode];
     workspace.artifacts = [
       latestArtifact,
-      ...workspace.artifacts.filter((item) =>
-        item.r2Key !== latestArtifact.r2Key
-        && item.id !== latestArtifact.id
-        && !(item.title === latestArtifact.title && item.projectId === latestArtifact.projectId)
+      ...workspace.artifacts.filter(
+        (item) =>
+          item.r2Key !== latestArtifact.r2Key &&
+          item.id !== latestArtifact.id &&
+          !(item.title === latestArtifact.title && item.projectId === latestArtifact.projectId),
       ),
     ];
   }
@@ -1837,7 +1891,7 @@ async function mergePersistedIdeas(root: PmoWorkspaceState) {
                 pinned
          FROM ideas`,
       )
-      .all<typeof rows[number]>();
+      .all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch {
     return root;
@@ -1912,7 +1966,7 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
                 asana_sync_error as asanaSyncError
          FROM workspace_actions`,
       )
-      .all<typeof rows[number]>();
+      .all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch (error) {
     if (!isMissingAsanaSyncColumnError(error)) return root;
@@ -1931,7 +1985,7 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
                 pinned
          FROM workspace_actions`,
       )
-      .all<Omit<typeof rows[number], "asanaTaskGid" | "asanaSyncedAt" | "asanaSyncError">>();
+      .all<Omit<(typeof rows)[number], "asanaTaskGid" | "asanaSyncedAt" | "asanaSyncError">>();
     rows = (fallback.results ?? []).map(withDefaultAsanaSyncState);
   }
 
@@ -1957,7 +2011,7 @@ async function mergePersistedWorkflowActions(root: PmoWorkspaceState) {
       workspace.tasks = [task, ...workspace.tasks.filter((item) => item.id !== task.id)];
     } else if (row.kind === "approval") {
       const status = ["Not Reviewed", "Reviewing", "Approved", "Not Approved"].includes(row.status)
-        ? row.status as Approval["status"]
+        ? (row.status as Approval["status"])
         : "Not Reviewed";
       const approval: Approval = {
         id: row.id,
@@ -2009,7 +2063,7 @@ async function mergePersistedRisks(root: PmoWorkspaceState) {
                 mitigation_strategy as mitigationStrategy
          FROM risks`,
       )
-      .all<typeof rows[number]>();
+      .all<(typeof rows)[number]>();
     rows = result.results ?? [];
   } catch {
     return root;
@@ -2055,27 +2109,29 @@ function parseStringArray(value: string) {
 }
 
 function isSeedArtifactRow(row: { id: string; r2Key: string; summary: string; owner: string }) {
-  return row.id.startsWith("artifact-personal-")
-    || row.id.startsWith("artifact-team-")
-    || row.id.startsWith("artifact-org-")
-    || row.summary.toLowerCase().includes("dummy")
-    || /^(personal|team|org)\/artifacts\//.test(row.r2Key);
+  return (
+    row.id.startsWith("artifact-personal-") ||
+    row.id.startsWith("artifact-team-") ||
+    row.id.startsWith("artifact-org-") ||
+    row.summary.toLowerCase().includes("dummy") ||
+    /^(personal|team|org)\/artifacts\//.test(row.r2Key)
+  );
 }
 
 function isSeedIdeaRow(row: { id: string; title: string }) {
-  return row.id.startsWith("personal-idea-")
-    || row.id.startsWith("team-idea-")
-    || row.id.startsWith("org-idea-");
+  return row.id.startsWith("personal-idea-") || row.id.startsWith("team-idea-") || row.id.startsWith("org-idea-");
 }
 
 function isSeedWorkflowActionRow(row: { id: string; title: string }) {
-  return row.id.startsWith("personal-task-")
-    || row.id.startsWith("team-task-")
-    || row.id.startsWith("org-task-")
-    || row.id.startsWith("personal-decision-")
-    || row.id.startsWith("team-decision-")
-    || row.id.startsWith("org-decision-")
-    || row.title.toLowerCase().includes("dummy");
+  return (
+    row.id.startsWith("personal-task-") ||
+    row.id.startsWith("team-task-") ||
+    row.id.startsWith("org-task-") ||
+    row.id.startsWith("personal-decision-") ||
+    row.id.startsWith("team-decision-") ||
+    row.id.startsWith("org-decision-") ||
+    row.title.toLowerCase().includes("dummy")
+  );
 }
 
 function parseArtifactPreview(previewJsonText: string): {
@@ -2155,11 +2211,7 @@ async function persistIdea(mode: WorkspaceMode, idea: Idea, pinned: boolean) {
     .run();
 }
 
-async function persistWorkflowAction(
-  mode: WorkspaceMode,
-  kind: "approval" | "decision" | "task",
-  item: Approval | Decision | Task,
-) {
+async function persistWorkflowAction(mode: WorkspaceMode, kind: "approval" | "decision" | "task", item: Approval | Decision | Task) {
   await getDb()
     .prepare(
       `INSERT OR REPLACE INTO workspace_actions (
@@ -2178,9 +2230,9 @@ async function persistWorkflowAction(
       kind === "task" ? (item as Task).source : null,
       item.status,
       item.pinned ? 1 : 0,
-      kind === "task" ? (item as Task).asanaTaskGid ?? null : null,
-      kind === "task" ? (item as Task).asanaSyncedAt ?? null : null,
-      kind === "task" ? (item as Task).asanaSyncError ?? null : null,
+      kind === "task" ? ((item as Task).asanaTaskGid ?? null) : null,
+      kind === "task" ? ((item as Task).asanaSyncedAt ?? null) : null,
+      kind === "task" ? ((item as Task).asanaSyncError ?? null) : null,
       Date.now(),
     )
     .run();
@@ -2288,7 +2340,7 @@ async function requireWorkspaceEditor() {
   const request = getRequest();
   const session = await getAuth(request).api.getSession({ headers: request.headers });
   const user = (session as { user?: { id?: string; name?: string | null; email?: string | null; role?: string | null } } | null)?.user;
-  if (user?.role !== "admin" && user?.role !== "user" || !user.id) {
+  if ((user?.role !== "admin" && user?.role !== "user") || !user.id) {
     throw new Error("Viewer accounts have view-only access.");
   }
   return {
@@ -2365,7 +2417,7 @@ async function requireChatContributor({
            AND ((? IS NULL AND pm.team_id IS NULL) OR pm.team_id = ?)
          LIMIT 1`,
       )
-      .bind(chatId, projectId, userId, mode === "Team" ? teamId ?? null : null, mode === "Team" ? teamId ?? null : null)
+      .bind(chatId, projectId, userId, mode === "Team" ? (teamId ?? null) : null, mode === "Team" ? (teamId ?? null) : null)
       .first<{ project_id: string }>();
     if (!membership) throw new Error("You are not assigned to this project chat.");
     return;
@@ -2456,10 +2508,7 @@ export const sendChatMessage = createServerFn({ method: "POST" })
 
     const workspaceId = await getChatWorkspaceId(data.chatId);
     if (chatTitle !== data.chatTitle) {
-      await getDb()
-        .prepare("UPDATE chats SET title = ? WHERE id = ?")
-        .bind(chatTitle, data.chatId)
-        .run();
+      await getDb().prepare("UPDATE chats SET title = ? WHERE id = ?").bind(chatTitle, data.chatId).run();
     }
     const insertedMessages = [
       await persistChatMessage({
@@ -2497,7 +2546,7 @@ export const sendChatMessage = createServerFn({ method: "POST" })
       projectId: data.projectId,
       sourceClientId: user.clientId,
       sourceUserId: user.id,
-      teamId: data.mode === "Team" ? data.teamId ?? null : null,
+      teamId: data.mode === "Team" ? (data.teamId ?? null) : null,
       workspaceId,
     });
     workspace.conversations[conversationKey] = [...existingMessages, userMessage, response];
@@ -2635,28 +2684,34 @@ export const toggleWorkflowActionPin = createServerFn({ method: "POST" })
     const user = await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
     const persistedAction = await getDb()
-      .prepare("SELECT title, project_id as projectId, pinned FROM workspace_actions WHERE id = ? AND workspace_id = ? AND kind = ? LIMIT 1")
+      .prepare(
+        "SELECT title, project_id as projectId, pinned FROM workspace_actions WHERE id = ? AND workspace_id = ? AND kind = ? LIMIT 1",
+      )
       .bind(data.id, workspaceIdForMode(data.mode), data.kind)
       .first<{ title: string; projectId: string | null; pinned: boolean | number }>();
-    const collection = data.kind === "task"
-      ? workspace.tasks
-      : data.kind === "approval"
-        ? workspace.approvals
-        : workspace.decisions;
+    const collection = data.kind === "task" ? workspace.tasks : data.kind === "approval" ? workspace.approvals : workspace.decisions;
     const item = collection.find((entry) => entry.id === data.id);
     const nextPinned = !(persistedAction ? Boolean(persistedAction.pinned) : Boolean(item?.pinned));
 
     if (data.kind === "task") {
-      workspace.tasks = workspace.tasks.map((task) => task.id === data.id ? { ...task, pinned: nextPinned } : task);
+      workspace.tasks = workspace.tasks.map((task) => (task.id === data.id ? { ...task, pinned: nextPinned } : task));
     } else if (data.kind === "approval") {
-      workspace.approvals = workspace.approvals.map((approval) => approval.id === data.id ? { ...approval, pinned: nextPinned } : approval);
+      workspace.approvals = workspace.approvals.map((approval) =>
+        approval.id === data.id ? { ...approval, pinned: nextPinned } : approval,
+      );
     } else {
-      workspace.decisions = workspace.decisions.map((decision) => decision.id === data.id ? { ...decision, pinned: nextPinned } : decision);
+      workspace.decisions = workspace.decisions.map((decision) =>
+        decision.id === data.id ? { ...decision, pinned: nextPinned } : decision,
+      );
     }
 
     await updatePersistedWorkflowActionPinned(data.mode, data.kind, data.id, nextPinned);
     const label = data.kind === "task" ? "Task" : data.kind === "approval" ? "Approval" : "Decision";
-    recordActivity(workspace, nextPinned ? `${label} pinned` : `${label} unpinned`, `${item?.title ?? persistedAction?.title ?? label} workspace pin changed.`);
+    recordActivity(
+      workspace,
+      nextPinned ? `${label} pinned` : `${label} unpinned`,
+      `${item?.title ?? persistedAction?.title ?? label} workspace pin changed.`,
+    );
     await recordWorkspaceMutation({
       entity: data.kind,
       entityId: data.id,
@@ -2680,14 +2735,15 @@ export const toggleArtifactPin = createServerFn({ method: "POST" })
       .bind(data.r2Key)
       .first<{ pinned: boolean | number }>();
     const memoryArtifact = workspace.artifacts.find((item) => item.r2Key === data.r2Key);
-    const isPinned = persistedArtifact
-      ? Boolean(persistedArtifact.pinned)
-      : Boolean(memoryArtifact?.pinnedTo.includes(data.mode));
+    const isPinned = persistedArtifact ? Boolean(persistedArtifact.pinned) : Boolean(memoryArtifact?.pinnedTo.includes(data.mode));
     const nextPinned = !isPinned;
 
     workspace.artifacts = workspace.artifacts.map((artifact) => {
       if (artifact.r2Key !== data.r2Key) return artifact;
-      return { ...artifact, pinnedTo: isPinned ? artifact.pinnedTo.filter((mode) => mode !== data.mode) : [...artifact.pinnedTo, data.mode] };
+      return {
+        ...artifact,
+        pinnedTo: isPinned ? artifact.pinnedTo.filter((mode) => mode !== data.mode) : [...artifact.pinnedTo, data.mode],
+      };
     });
     await getDb()
       .prepare("UPDATE artifacts SET pinned = ? WHERE r2_key = ?")
@@ -3037,7 +3093,9 @@ export const toggleDecisionStatus = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const user = await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
-    workspace.decisions = workspace.decisions.map((decision) => (decision.id === data.id ? { ...decision, status: cycleDecisionStatus(decision.status) } : decision));
+    workspace.decisions = workspace.decisions.map((decision) =>
+      decision.id === data.id ? { ...decision, status: cycleDecisionStatus(decision.status) } : decision,
+    );
     const decision = workspace.decisions.find((item) => item.id === data.id);
     if (decision) await updatePersistedWorkflowActionStatus(data.mode, "decision", data.id, decision.status);
     recordActivity(workspace, "Decision updated", `${decision?.title ?? "Decision"} is now ${decision?.status ?? "updated"}.`);
@@ -3059,7 +3117,9 @@ export const toggleApprovalStatus = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const user = await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
-    workspace.approvals = workspace.approvals.map((approval) => (approval.id === data.id ? { ...approval, status: cycleApprovalStatus(approval.status) } : approval));
+    workspace.approvals = workspace.approvals.map((approval) =>
+      approval.id === data.id ? { ...approval, status: cycleApprovalStatus(approval.status) } : approval,
+    );
     const approval = workspace.approvals.find((item) => item.id === data.id);
     if (approval) await updatePersistedWorkflowActionStatus(data.mode, "approval", data.id, approval.status);
     recordActivity(workspace, "Approval updated", `${approval?.title ?? "Approval"} is now ${approval?.status ?? "updated"}.`);
@@ -3125,7 +3185,9 @@ export const updateApprovalStatus = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const user = await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
-    workspace.approvals = workspace.approvals.map((approval) => (approval.id === data.id ? { ...approval, status: data.status } : approval));
+    workspace.approvals = workspace.approvals.map((approval) =>
+      approval.id === data.id ? { ...approval, status: data.status } : approval,
+    );
     const approval = workspace.approvals.find((item) => item.id === data.id);
     await updatePersistedWorkflowActionStatus(data.mode, "approval", data.id, data.status);
     recordActivity(workspace, "Approval status changed", `${approval?.title ?? "Approval"} moved to ${data.status}.`);
@@ -3147,7 +3209,9 @@ export const updateDecisionStatus = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const user = await requireWorkspaceEditor();
     const workspace = getMutableWorkspace(data.mode);
-    workspace.decisions = workspace.decisions.map((decision) => (decision.id === data.id ? { ...decision, status: data.status } : decision));
+    workspace.decisions = workspace.decisions.map((decision) =>
+      decision.id === data.id ? { ...decision, status: data.status } : decision,
+    );
     const decision = workspace.decisions.find((item) => item.id === data.id);
     await updatePersistedWorkflowActionStatus(data.mode, "decision", data.id, data.status);
     recordActivity(workspace, "Decision status changed", `${decision?.title ?? "Decision"} moved to ${data.status}.`);
@@ -3246,7 +3310,9 @@ export const createApprovalFromSuggestion = createServerFn({ method: "POST" })
     const title = (await generateWorkflowSuggestionTitle("approval", data.title)).slice(0, 140);
     if (!title) throw new Error("Approval title is required.");
     const workspace = getMutableWorkspace(data.mode);
-    const existingApproval = workspace.approvals.find((approval) => titleMatchesTask(approval.title, title) && (data.projectId ?? null) === approval.projectId);
+    const existingApproval = workspace.approvals.find(
+      (approval) => titleMatchesTask(approval.title, title) && (data.projectId ?? null) === approval.projectId,
+    );
     if (existingApproval) return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), approval: existingApproval };
     const approval: Approval = {
       id: createId(`${scopeByMode[data.mode]}-llm-approval`),
@@ -3280,7 +3346,9 @@ export const createDecisionFromSuggestion = createServerFn({ method: "POST" })
     const title = (await generateWorkflowSuggestionTitle("decision", data.title)).slice(0, 140);
     if (!title) throw new Error("Decision title is required.");
     const workspace = getMutableWorkspace(data.mode);
-    const existingDecision = workspace.decisions.find((decision) => titleMatchesTask(decision.title, title) && (data.projectId ?? null) === decision.projectId);
+    const existingDecision = workspace.decisions.find(
+      (decision) => titleMatchesTask(decision.title, title) && (data.projectId ?? null) === decision.projectId,
+    );
     if (existingDecision) return { workspace: await mergePersistedWorkspace(clone(getMutableRoot())), decision: existingDecision };
     const decision: Decision = {
       id: createId(`${scopeByMode[data.mode]}-llm-decision`),
@@ -3457,10 +3525,7 @@ export const removeSuggestedIdea = createServerFn({ method: "POST" })
     if (!idea) return mergePersistedWorkspace(clone(getMutableRoot()));
     workspace.ideas = workspace.ideas.filter((item) => item.id !== data.id);
     workspace.pinnedIdeaIds = workspace.pinnedIdeaIds.filter((id) => id !== data.id);
-    await getDb()
-      .prepare("DELETE FROM ideas WHERE id = ? AND workspace_id = ?")
-      .bind(data.id, workspaceIdForMode(data.mode))
-      .run();
+    await getDb().prepare("DELETE FROM ideas WHERE id = ? AND workspace_id = ?").bind(data.id, workspaceIdForMode(data.mode)).run();
     recordActivity(workspace, "Idea removed", `${idea.title} was removed from ideas.`);
     await recordWorkspaceMutation({
       entity: "idea",
@@ -3494,7 +3559,7 @@ export const updateAccessLevel = createServerFn({ method: "POST" })
     return clone(getMutableRoot());
   });
 
-export const pmoWorkspaceQueryKey = ["ai-command-center"] as const;
+export const pmoWorkspaceQueryKey = ["vertex-ai"] as const;
 
 export const pmoWorkspaceQueryOptions = () =>
   queryOptions({
