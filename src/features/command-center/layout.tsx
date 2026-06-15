@@ -93,6 +93,7 @@ export function Topbar({
   userName,
   onMobileMenu,
   onNotify,
+  onOpenSearch,
   onSearchTerm,
   onSignOut,
 }: {
@@ -103,6 +104,7 @@ export function Topbar({
   userName: string;
   onMobileMenu: () => void;
   onNotify: () => void;
+  onOpenSearch: () => void;
   onSearchTerm: (value: string) => void;
   onSignOut: () => void;
 }) {
@@ -116,15 +118,22 @@ export function Topbar({
       </div>
       <div className="hidden min-w-0 items-center justify-end gap-3 lg:flex">
         <WorkspacePresence users={presenceUsers} />
-        <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border bg-background px-3 text-muted-foreground">
+        <form
+          className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border bg-background px-3 text-muted-foreground"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onOpenSearch();
+          }}
+        >
           <Search className="size-4" />
           <Input
             className="h-7 border-0 px-0 shadow-none focus-visible:ring-0"
-            placeholder="Search ideas, artifacts, owners"
+            placeholder="Search workspace knowledge"
             value={searchTerm}
+            onFocus={onOpenSearch}
             onChange={(event) => onSearchTerm(event.target.value)}
           />
-        </label>
+        </form>
       </div>
       <div className="flex items-center gap-2">
         <Button type="button" variant="outline" size="icon" aria-label="Notifications" onClick={onNotify}>

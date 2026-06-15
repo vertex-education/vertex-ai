@@ -141,6 +141,40 @@ export type ChatWithScopedRagResult = {
 
 export type ChatWithScopedRagCitation = ChatWithScopedRagResult["citations"][number];
 
+export type ScopedKnowledgeSearchInput = {
+  query: string;
+  teamId?: string | null;
+  workspaceId: string;
+  projectId?: string | null;
+  projectIds?: string[];
+  limit?: number;
+};
+
+export type ScopedKnowledgeSearchResult = {
+  id: string;
+  documentName: string;
+  excerpt: string;
+  projectId: string;
+  r2Key: string;
+  rank: number;
+  restricted: boolean;
+  score: number | null;
+  sensitivityLabel: string;
+  source: "vector";
+};
+
+export type ScopedKnowledgeSearchResponse = {
+  query: string;
+  results: ScopedKnowledgeSearchResult[];
+  diagnostics: {
+    durationMs: number;
+    issues: string[];
+    requestedProjects: number;
+    searchedProjects: number;
+    vectorMatches: number;
+  };
+};
+
 type HistoricalPromptContext = {
   context: string;
   citations: ChatWithScopedRagCitation[];
@@ -153,10 +187,15 @@ type EmbeddingResponse = {
 type DocumentChunkRow = {
   id: string;
   documentName: string;
+  projectId: string;
   r2Key: string;
   content: string;
   sensitivityLabel: string;
   restricted: boolean;
+};
+
+type ScopedVectorChunkMatch = DocumentChunkRow & {
+  score: number | null;
 };
 
 type ScopedPromptContext = {
@@ -644,6 +683,41 @@ function buildContext(chunks: DocumentChunkRow[]) {
     .join("\n\n");
 }
 
+function normalizeSearchLimit(value: number | undefined) {
+  if (!Number.isFinite(value)) return 10;
+  return Math.min(20, Math.max(1, Math.floor(value ?? 10)));
+}
+
+function uniqueSearchProjectIds(projectId: string | null | undefined, projectIds: string[] | undefined) {
+  const ids = [projectId, ...(projectIds ?? [])].map((id) => (typeof id === "string" ? id.trim() : "")).filter(Boolean);
+  return Array.from(new Set(ids)).slice(0, 10);
+}
+
+export function buildSearchExcerpt(content: string, query: string, maxLength = 420) {
+  const normalizedContent = content.replace(/\s+/g, " ").trim();
+  if (!normalizedContent) return "";
+  const boundedMax = Math.min(800, Math.max(120, Math.floor(maxLength)));
+  if (normalizedContent.length <= boundedMax) return normalizedContent;
+
+  const lowerContent = normalizedContent.toLowerCase();
+  const lowerQuery = query.trim().toLowerCase();
+  const terms = Array.from(new Set(lowerQuery.split(/[^a-z0-9]+/).filter((term) => term.length >= 3))).slice(0, 8);
+  let matchIndex = lowerQuery.length >= 3 ? lowerContent.indexOf(lowerQuery) : -1;
+  if (matchIndex < 0) {
+    matchIndex =
+      terms
+        .map((term) => lowerContent.indexOf(term))
+        .filter((index) => index >= 0)
+        .sort((a, b) => a - b)[0] ?? -1;
+  }
+
+  const start = matchIndex >= 0 ? Math.max(0, matchIndex - Math.floor(boundedMax * 0.32)) : 0;
+  const end = Math.min(normalizedContent.length, start + boundedMax);
+  const prefix = start > 0 ? "... " : "";
+  const suffix = end < normalizedContent.length ? " ..." : "";
+  return `${prefix}${normalizedContent.slice(start, end)}${suffix}`;
+}
+
 export function intentRequiresVectorSearch(intent: PromptIntent) {
   return intent === "RAG_SEARCH" || intent === "WEB_SEARCH";
 }
@@ -705,13 +779,58 @@ async function fetchScopedHistoricalPromptContext({
   authorization: ScopedAccessContext;
   topK: number;
 }): Promise<HistoricalPromptContext> {
-  const [promptEmbedding] = await embedTexts([prompt], {
-    feature: "scoped-rag-query-embedding",
-    teamId,
-    userId: authorization.userId,
-    workspaceId,
+  const vectorResults = await fetchScopedVectorChunkMatches({
+    authorization,
+    feature,
     projectId,
+    prompt,
+    teamId,
+    topK,
+    workspaceId,
   });
+  const citations: ChatWithScopedRagCitation[] = vectorResults.matches.map((chunk) => ({
+    id: chunk.id,
+    documentName: chunk.documentName,
+    r2Key: chunk.r2Key,
+    score: chunk.score,
+  }));
+
+  return {
+    context: buildContext(vectorResults.matches),
+    citations,
+  };
+}
+
+async function fetchScopedVectorChunkMatches({
+  authorization,
+  feature,
+  projectId,
+  prompt,
+  promptEmbedding: providedPromptEmbedding,
+  teamId,
+  topK,
+  workspaceId,
+}: {
+  authorization: ScopedAccessContext;
+  feature: string;
+  projectId: string;
+  prompt: string;
+  promptEmbedding?: number[];
+  teamId?: string | null;
+  topK: number;
+  workspaceId: string;
+}): Promise<{ matches: ScopedVectorChunkMatch[]; vectorMatchCount: number; vectorTenantId: number }> {
+  const promptEmbedding =
+    providedPromptEmbedding ??
+    (
+      await embedTexts([prompt], {
+        feature: "scoped-rag-query-embedding",
+        teamId,
+        userId: authorization.userId,
+        workspaceId,
+        projectId,
+      })
+    )[0];
   const vectorStartedAt = Date.now();
   const vectorTenantId = await ensureVectorTenantIdForDb(getDb(), { workspaceId, teamId, projectId });
   const matches = await getVectorize().query(promptEmbedding, {
@@ -719,6 +838,7 @@ async function fetchScopedHistoricalPromptContext({
     returnMetadata: "indexed",
     filter: buildScopedVectorFilter(projectId, authorization, vectorTenantId),
   });
+  const vectorMatches = Array.isArray(matches.matches) ? matches.matches : [];
   await recordAdminUsageEvent({
     provider: "vectorize",
     feature,
@@ -728,7 +848,7 @@ async function fetchScopedHistoricalPromptContext({
     metadata: {
       workspaceId,
       topK,
-      matches: matches.matches.length,
+      matches: vectorMatches.length,
       userRole: authorization.role,
       vectorTenantId,
       workspaceScope: authorization.workspaceScope,
@@ -736,19 +856,14 @@ async function fetchScopedHistoricalPromptContext({
     },
   });
 
-  const vectorIds = matches.matches.map((match) => match.id);
+  const vectorIds = vectorMatches.map((match) => match.id);
   const chunks = await fetchChunksByIds(vectorIds, { authorization, projectId, teamId });
-  const scoresById = new Map(matches.matches.map((match) => [match.id, typeof match.score === "number" ? match.score : null]));
-  const citations: ChatWithScopedRagCitation[] = chunks.map((chunk) => ({
-    id: chunk.id,
-    documentName: chunk.documentName,
-    r2Key: chunk.r2Key,
-    score: scoresById.get(chunk.id) ?? null,
-  }));
+  const scoresById = new Map(vectorMatches.map((match) => [match.id, typeof match.score === "number" ? match.score : null]));
 
   return {
-    context: buildContext(chunks),
-    citations,
+    matches: chunks.map((chunk) => ({ ...chunk, score: scoresById.get(chunk.id) ?? null })),
+    vectorMatchCount: vectorMatches.length,
+    vectorTenantId,
   };
 }
 
@@ -779,6 +894,7 @@ async function fetchChunksByIds(
     .prepare(
       `SELECT id,
               document_name as documentName,
+              project_id as projectId,
               r2_key as r2Key,
               content,
               COALESCE(sensitivity_label, 'Standard') as sensitivityLabel,
@@ -2055,6 +2171,126 @@ export const ingestGeneratedArtifact = createServerFn({ method: "POST" })
       status: "queued",
     };
   });
+
+export async function searchScopedKnowledgeForCurrentUser(data: ScopedKnowledgeSearchInput): Promise<ScopedKnowledgeSearchResponse> {
+  const startedAt = Date.now();
+  const query = assertRequiredString(data.query, "Search query").slice(0, 500);
+  const workspaceId = assertRequiredString(data.workspaceId, "Workspace ID");
+  const teamId = data.teamId?.trim() || null;
+  const projectIds = uniqueSearchProjectIds(data.projectId, data.projectIds);
+  const limit = normalizeSearchLimit(data.limit);
+  const issues: string[] = [];
+
+  if (projectIds.length === 0) {
+    return {
+      query,
+      results: [],
+      diagnostics: {
+        durationMs: Date.now() - startedAt,
+        issues: ["No project was available for semantic RAG search."],
+        requestedProjects: 0,
+        searchedProjects: 0,
+        vectorMatches: 0,
+      },
+    };
+  }
+
+  const accessChecks = await Promise.allSettled(
+    projectIds.map(async (projectId) => ({
+      authorization: await requireScopedProjectAccess(workspaceId, projectId, teamId),
+      projectId,
+    })),
+  );
+  const accessibleProjects = accessChecks.flatMap((result, index) => {
+    if (result.status === "fulfilled") return [result.value];
+    issues.push(
+      `Project ${projectIds[index]} was skipped: ${result.reason instanceof Error ? result.reason.message : "access check failed"}`,
+    );
+    return [];
+  });
+
+  if (accessibleProjects.length === 0) {
+    return {
+      query,
+      results: [],
+      diagnostics: {
+        durationMs: Date.now() - startedAt,
+        issues,
+        requestedProjects: projectIds.length,
+        searchedProjects: 0,
+        vectorMatches: 0,
+      },
+    };
+  }
+
+  const [promptEmbedding] = await embedTexts([query], {
+    feature: "workspace-search-query-embedding",
+    teamId,
+    userId: accessibleProjects[0].authorization.userId,
+    workspaceId,
+  });
+  const topKPerProject = Math.min(12, Math.max(4, Math.ceil((limit * 2) / accessibleProjects.length)));
+  const vectorSearches = await Promise.allSettled(
+    accessibleProjects.map(({ authorization, projectId }) =>
+      fetchScopedVectorChunkMatches({
+        authorization,
+        feature: "workspace-search-vector-query",
+        projectId,
+        prompt: query,
+        promptEmbedding,
+        teamId,
+        topK: topKPerProject,
+        workspaceId,
+      }),
+    ),
+  );
+
+  let vectorMatches = 0;
+  const matches = vectorSearches.flatMap((result, index) => {
+    if (result.status === "fulfilled") {
+      vectorMatches += result.value.vectorMatchCount;
+      return result.value.matches;
+    }
+    issues.push(
+      `Project ${accessibleProjects[index]?.projectId ?? "unknown"} could not be searched: ${
+        result.reason instanceof Error ? result.reason.message : "Vector search failed"
+      }`,
+    );
+    return [];
+  });
+
+  const rankedMatches = matches
+    .sort((left, right) => {
+      if (left.score === right.score) return left.documentName.localeCompare(right.documentName);
+      if (left.score === null) return 1;
+      if (right.score === null) return -1;
+      return right.score - left.score;
+    })
+    .slice(0, limit);
+
+  return {
+    query,
+    results: rankedMatches.map((match, index) => ({
+      id: match.id,
+      documentName: match.documentName,
+      excerpt: buildSearchExcerpt(match.content, query),
+      projectId: match.projectId,
+      r2Key: match.r2Key,
+      rank: index + 1,
+      restricted: Boolean(match.restricted),
+      score: match.score,
+      sensitivityLabel: match.sensitivityLabel,
+      source: "vector",
+    })),
+    diagnostics: {
+      durationMs: Date.now() - startedAt,
+      issues,
+      requestedProjects: projectIds.length,
+      searchedProjects: accessibleProjects.length,
+      vectorMatches,
+    },
+  };
+}
 
 export async function createScopedRagStreamResponse(data: ChatWithScopedRagInput): Promise<Response> {
   const workspaceId = assertRequiredString(data.workspaceId, "Workspace ID");

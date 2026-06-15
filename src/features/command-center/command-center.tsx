@@ -69,6 +69,7 @@ import {
   workspaceModes,
 } from "@/lib/pmo-data";
 import { type ChatWithScopedRagCitation } from "@/lib/rag";
+import { searchScopedKnowledge, type ScopedKnowledgeSearchResult } from "@/lib/scoped-knowledge-search";
 import {
   deleteScopedChat,
   deleteScopedProject,
@@ -139,6 +140,7 @@ import {
 } from "./workflow";
 import { CategoryTablePage } from "./category-tables";
 import { DetailPanel } from "./detail-panel";
+import { WorkspaceSearchDialog, type WorkspaceSearchLocalResult } from "./search-dialog";
 import {
   AddIdeaDialog,
   ArtifactPatchDialog,
@@ -152,6 +154,27 @@ import {
   TutorialDialog,
   WorkflowPreviewDialog,
 } from "./dialogs";
+
+function scoreSearchCandidate(query: string, fields: Array<string | null | undefined>) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.length < 2) return 0;
+  const searchable = fields.filter(Boolean).join(" ").replace(/\s+/g, " ").toLowerCase();
+  if (!searchable) return 0;
+  let score = 0;
+  if (searchable.includes(normalizedQuery)) score += 30;
+  const terms = Array.from(new Set(normalizedQuery.split(/[^a-z0-9]+/).filter((term) => term.length >= 2))).slice(0, 8);
+  for (const term of terms) {
+    if (searchable.includes(term)) score += 8;
+  }
+  const title = fields[0]?.toLowerCase() ?? "";
+  if (title.startsWith(normalizedQuery)) score += 20;
+  if (title.includes(normalizedQuery)) score += 12;
+  return score;
+}
+
+function compactSearchDescription(value: string | null | undefined) {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
 
 export function PMOCommandCenter({ session }: { session: CommandCenterSession }) {
   const queryClient = useQueryClient();
@@ -235,6 +258,8 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
   );
   const [statusFilter, setStatusFilter] = useState<IdeaStatus | "All">("All");
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatAttachments, setChatAttachments] = useState<ExtractedChatAttachment[]>([]);
   const [isExtractingAttachment, setIsExtractingAttachment] = useState(false);
@@ -298,6 +323,11 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
     teamId: activeMode === "Team" ? (selectedTeam?.id ?? null) : null,
     userId: session.user.id,
   });
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedSearchTerm(searchTerm.trim()), 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchTerm]);
 
   useEffect(() => {
     if (shareLinkHandledRef.current || typeof window === "undefined") return;
@@ -878,6 +908,167 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
   );
   const scopedPrompts = useMemo(() => promptTemplates.map((prompt) => `${scopeContextLabel}: ${prompt}`), [scopeContextLabel]);
   const currentMessages = activeChat ? (visibleWorkspace.conversations[conversationKey] ?? []) : [];
+  const searchWorkspaceId = `ws-${visibleWorkspace.scope}`;
+  const searchTeamId = activeMode === "Team" ? (selectedTeam?.id ?? "") : "";
+  const projectNameById = useMemo(
+    () => Object.fromEntries(visibleWorkspace.projects.map((project) => [project.id, project.name])),
+    [visibleWorkspace.projects],
+  );
+  const semanticSearchProjectIds = useMemo(() => {
+    const ids = [activeProject?.id, ...visibleWorkspace.projects.map((project) => project.id)].filter((id): id is string => Boolean(id));
+    return Array.from(new Set(ids)).slice(0, 10);
+  }, [activeProject?.id, visibleWorkspace.projects]);
+  const semanticSearchQuery = useQuery({
+    enabled:
+      isSearchOpen &&
+      debouncedSearchTerm.trim().length >= 2 &&
+      semanticSearchProjectIds.length > 0 &&
+      (activeMode !== "Team" || Boolean(selectedTeam?.id)),
+    queryKey: ["scoped-knowledge-search", searchWorkspaceId, searchTeamId, semanticSearchProjectIds, debouncedSearchTerm],
+    queryFn: () =>
+      searchScopedKnowledge({
+        data: {
+          query: debouncedSearchTerm,
+          teamId: searchTeamId,
+          workspaceId: searchWorkspaceId,
+          projectIds: semanticSearchProjectIds,
+          limit: 8,
+        },
+      }),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const semanticSearchMatchesCurrentQuery = debouncedSearchTerm === searchTerm.trim();
+  const localSearchResults = useMemo<WorkspaceSearchLocalResult[]>(() => {
+    const query = searchTerm.trim();
+    if (query.length < 2) return [];
+    const results: WorkspaceSearchLocalResult[] = [];
+    const addResult = (
+      result: Omit<WorkspaceSearchLocalResult, "score"> & {
+        fields: Array<string | null | undefined>;
+      },
+    ) => {
+      const score = scoreSearchCandidate(query, [result.title, result.description, result.meta, ...result.fields]);
+      if (score <= 0) return;
+      results.push({
+        description: result.description,
+        id: result.id,
+        kind: result.kind,
+        meta: result.meta,
+        onSelect: result.onSelect,
+        score,
+        title: result.title,
+      });
+    };
+    const projectMeta = (projectId: string | null | undefined) => (projectId ? (projectNameById[projectId] ?? "Project") : "General");
+
+    visibleWorkspace.projects.forEach((project) => {
+      addResult({
+        id: project.id,
+        kind: "Project",
+        title: project.name,
+        description: compactSearchDescription(project.description),
+        meta: `${workspaceModeLabel(activeMode)} / ${project.status}`,
+        fields: [project.projectInstructions, project.status],
+        onSelect: () => selectProjectSearchResult(project),
+      });
+      project.projectChats.forEach((chat) =>
+        addResult({
+          id: chat.id,
+          kind: "Chat",
+          title: chat.title,
+          description: compactSearchDescription(chat.description),
+          meta: project.name,
+          fields: [project.name],
+          onSelect: () => selectChatSearchResult("project", chat.id),
+        }),
+      );
+    });
+    visibleWorkspace.workspaceChats.forEach((chat) =>
+      addResult({
+        id: chat.id,
+        kind: "Chat",
+        title: chat.title,
+        description: compactSearchDescription(chat.description),
+        meta: visibleWorkspace.unassignedProjectLabel,
+        fields: [visibleWorkspace.unassignedProjectLabel],
+        onSelect: () => selectChatSearchResult("workspace", chat.id),
+      }),
+    );
+    visibleWorkspace.ideas.forEach((idea) =>
+      addResult({
+        id: idea.id,
+        kind: "Idea",
+        title: idea.title,
+        description: compactSearchDescription(idea.summary || idea.originalText),
+        meta: `${projectMeta(idea.projectId)} / ${idea.status}`,
+        fields: [idea.category, idea.owner, idea.nextStep, ...idea.tags, ...idea.metrics],
+        onSelect: () => selectIdeaSearchResult(idea),
+      }),
+    );
+    visibleWorkspace.artifacts.forEach((artifact) =>
+      addResult({
+        id: artifact.id,
+        kind: "Artifact",
+        title: artifact.title,
+        description: compactSearchDescription(artifact.summary),
+        meta: `${projectMeta(artifact.projectId)} / ${artifact.type} / v${artifact.version}`,
+        fields: [artifact.owner, artifact.status, artifact.r2Key, artifact.sourceChatTitle, ...artifact.preview],
+        onSelect: () => selectArtifactSearchResult(artifact),
+      }),
+    );
+    visibleWorkspace.decisions.forEach((decision) =>
+      addResult({
+        id: decision.id,
+        kind: "Decision",
+        title: decision.title,
+        description: compactSearchDescription(decision.originalText),
+        meta: `${projectMeta(decision.projectId)} / ${decision.status}`,
+        fields: [decision.owner, decision.due],
+        onSelect: () => selectDecisionSearchResult(decision),
+      }),
+    );
+    visibleWorkspace.approvals.forEach((approval) =>
+      addResult({
+        id: approval.id,
+        kind: "Approval",
+        title: approval.title,
+        description: compactSearchDescription(approval.originalText),
+        meta: `${projectMeta(approval.projectId)} / ${approval.status}`,
+        fields: [approval.owner, approval.due],
+        onSelect: () => selectApprovalSearchResult(approval),
+      }),
+    );
+    visibleWorkspace.tasks.forEach((task) =>
+      addResult({
+        id: task.id,
+        kind: "Task",
+        title: task.title,
+        description: compactSearchDescription(task.originalText || task.source),
+        meta: `${projectMeta(task.projectId)} / ${task.status}`,
+        fields: [task.owner, task.asanaTaskGid, task.outboundStatus, task.syncStatus],
+        onSelect: () => selectTaskSearchResult(task),
+      }),
+    );
+    visibleWorkspace.risks.forEach((risk) =>
+      addResult({
+        id: risk.id,
+        kind: "Risk",
+        title: risk.title,
+        description: compactSearchDescription(risk.description || risk.mitigationStrategy),
+        meta: `${projectMeta(risk.projectId)} / ${risk.severity} / ${risk.status}`,
+        fields: [risk.mitigationStrategy],
+        onSelect: () => selectRiskSearchResult(risk),
+      }),
+    );
+
+    return results
+      .sort((left, right) => {
+        if (left.score === right.score) return left.title.localeCompare(right.title);
+        return right.score - left.score;
+      })
+      .slice(0, 12);
+  }, [activeMode, projectNameById, searchTerm, visibleWorkspace]);
 
   const selectedIdea = scopedIdeas.find((idea) => idea.id === selectedIdeaId) ?? scopedIdeas[0];
   const selectedArtifact = scopedArtifacts.find((artifact) => artifact.title === selectedArtifactTitle) ?? scopedArtifacts[0];
@@ -1196,6 +1387,105 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
     setActiveChatSection(section);
     setActiveChatId(chatId);
     setActiveTab("Chat");
+  }
+
+  function focusProjectScopeForSearch(projectId: string | null | undefined) {
+    if (!projectId) {
+      setActiveProjectId("");
+      setActiveChatSection("workspace");
+      setActiveChatId(visibleWorkspace.workspaceChats[0]?.id ?? "");
+      return;
+    }
+    const project = visibleWorkspace.projects.find((item) => item.id === projectId);
+    if (!project) return;
+    setActiveProjectId(project.id);
+    setActiveChatSection("project");
+    setActiveChatId(project.projectChats[0]?.id ?? "");
+  }
+
+  function closeSearchDialog() {
+    setIsSearchOpen(false);
+  }
+
+  function selectProjectSearchResult(project: ProjectSummary) {
+    setActiveRail("Workspaces");
+    handleProjectSelect(project);
+    closeSearchDialog();
+  }
+
+  function selectChatSearchResult(section: ChatSection, chatId: string) {
+    setActiveRail("Workspaces");
+    handleChatSelect(section, chatId);
+    setRightOpen(true);
+    closeSearchDialog();
+  }
+
+  function selectIdeaSearchResult(idea: Idea) {
+    setActiveRail("Workspaces");
+    focusProjectScopeForSearch(idea.projectId);
+    setSelectedIdeaId(idea.id);
+    setActiveTab("Ideas");
+    setRightOpen(true);
+    closeSearchDialog();
+  }
+
+  function selectArtifactSearchResult(artifact: Artifact) {
+    setActiveRail("Workspaces");
+    focusProjectScopeForSearch(artifact.projectId);
+    setSelectedArtifactTitle(artifact.title);
+    setActiveTab("Artifacts");
+    setRightOpen(true);
+    closeSearchDialog();
+  }
+
+  function selectDecisionSearchResult(decision: Decision) {
+    setActiveRail("Workspaces");
+    focusProjectScopeForSearch(decision.projectId);
+    setSelectedDecisionId(decision.id);
+    setActiveTab("Decisions");
+    setRightOpen(true);
+    closeSearchDialog();
+  }
+
+  function selectApprovalSearchResult(approval: Approval) {
+    setActiveRail("Workspaces");
+    focusProjectScopeForSearch(approval.projectId);
+    setSelectedApprovalId(approval.id);
+    setActiveTab("Approvals");
+    setRightOpen(true);
+    closeSearchDialog();
+  }
+
+  function selectTaskSearchResult(task: Task) {
+    setActiveRail("Workspaces");
+    focusProjectScopeForSearch(task.projectId);
+    setSelectedTaskId(task.id);
+    setActiveTab("Tasks");
+    setRightOpen(true);
+    closeSearchDialog();
+  }
+
+  function selectRiskSearchResult(risk: Risk) {
+    setActiveRail("Workspaces");
+    focusProjectScopeForSearch(risk.projectId);
+    setSelectedRiskId(risk.id);
+    setActiveTab("Risks");
+    setRightOpen(true);
+    closeSearchDialog();
+  }
+
+  function selectSemanticSearchResult(result: ScopedKnowledgeSearchResult) {
+    const artifact = visibleWorkspace.artifacts.find((item) => item.r2Key === result.r2Key);
+    if (artifact) {
+      selectArtifactSearchResult(artifact);
+      return;
+    }
+    const project = visibleWorkspace.projects.find((item) => item.id === result.projectId);
+    setActiveRail("Workspaces");
+    if (project) handleProjectSelect(project);
+    setActiveTab("Chat");
+    setRightOpen(true);
+    closeSearchDialog();
   }
 
   function clientTimeLabel() {
@@ -1973,6 +2263,7 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
             searchTerm={searchTerm}
             userEmail={session.user.email}
             userName={session.user.name}
+            onOpenSearch={() => setIsSearchOpen(true)}
             onSearchTerm={setSearchTerm}
             onSignOut={handleSignOut}
             onMobileMenu={() => handleRailClick("Workspaces")}
@@ -2518,6 +2809,28 @@ export function PMOCommandCenter({ session }: { session: CommandCenterSession })
           </div>
         ) : null}
       </div>
+
+      <WorkspaceSearchDialog
+        localResults={localSearchResults}
+        open={isSearchOpen}
+        projectNameById={projectNameById}
+        query={searchTerm}
+        scopeLabel={pageBreadcrumbLabel}
+        semanticError={
+          semanticSearchMatchesCurrentQuery && semanticSearchQuery.error
+            ? semanticSearchQuery.error instanceof Error
+              ? semanticSearchQuery.error.message
+              : "Semantic search failed."
+            : null
+        }
+        semanticPending={
+          semanticSearchQuery.isFetching || (isSearchOpen && searchTerm.trim().length >= 2 && !semanticSearchMatchesCurrentQuery)
+        }
+        semanticSearch={semanticSearchMatchesCurrentQuery ? semanticSearchQuery.data : undefined}
+        onOpenChange={setIsSearchOpen}
+        onQueryChange={setSearchTerm}
+        onSelectSemanticResult={selectSemanticSearchResult}
+      />
 
       <TutorialDialog
         canAct={canEdit}
