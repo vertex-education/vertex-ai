@@ -29,6 +29,8 @@ type SendEmailBinding = {
 type AuthEnv = Env & {
   AUTH_SECONDARY_STORAGE: KVNamespace;
   BETTER_AUTH_SECRET?: string;
+  BETTER_AUTH_TRUSTED_ORIGINS?: string;
+  BETTER_AUTH_URL?: string;
   EMAIL?: SendEmailBinding;
   MICROSOFT_ENTRA_CLIENT_ID?: string;
   MICROSOFT_ENTRA_CLIENT_SECRET?: string;
@@ -46,6 +48,26 @@ const localDevTrustedOrigins = Array.from({ length: 11 }, (_value, index) => {
   const port = 3000 + index;
   return [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
 }).flat();
+
+function normalizeOrigin(value: string | undefined) {
+  if (!value?.trim()) return undefined;
+
+  try {
+    return new URL(value.trim()).origin;
+  } catch {
+    console.warn("Ignoring invalid Better Auth origin.");
+    return undefined;
+  }
+}
+
+function configuredTrustedOrigins() {
+  return (
+    getRuntimeEnv()
+      .BETTER_AUTH_TRUSTED_ORIGINS?.split(",")
+      .map((origin) => normalizeOrigin(origin))
+      .filter((origin): origin is string => Boolean(origin)) ?? []
+  );
+}
 
 function getRuntimeEnv() {
   return env as AuthEnv;
@@ -74,14 +96,23 @@ export function getInternalSignupSecret() {
 
 export function getAuth(request?: Request) {
   const runtimeEnv = getRuntimeEnv();
-  const origin = request ? new URL(request.url).origin : undefined;
+  const requestOrigin = request ? new URL(request.url).origin : undefined;
+  const configuredOrigin = normalizeOrigin(runtimeEnv.BETTER_AUTH_URL);
+  const authBaseURL = configuredOrigin ?? requestOrigin;
+  const trustedOrigins = Array.from(
+    new Set(
+      [authBaseURL, requestOrigin, ...configuredTrustedOrigins(), ...localDevTrustedOrigins].filter((origin): origin is string =>
+        Boolean(origin),
+      ),
+    ),
+  );
 
   return betterAuth({
     database: runtimeEnv.DB,
     secondaryStorage: createKvSecondaryStorage(runtimeEnv.AUTH_SECONDARY_STORAGE),
     secret: getAuthSecret(),
-    baseURL: origin,
-    trustedOrigins: origin ? Array.from(new Set([origin, ...localDevTrustedOrigins])) : localDevTrustedOrigins,
+    baseURL: authBaseURL,
+    trustedOrigins,
     advanced: {
       backgroundTasks: {
         handler: (promise) => {

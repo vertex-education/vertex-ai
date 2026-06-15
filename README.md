@@ -127,6 +127,8 @@ MICROSOFT_ENTRA_CLIENT_ID=<application-client-id>
 MICROSOFT_ENTRA_CLIENT_SECRET=<application-client-secret>
 MICROSOFT_ENTRA_TENANT_ID=<authorized-tenant-guid>
 BETTER_AUTH_SECRET=<strong-random-secret>
+BETTER_AUTH_URL=https://vertexai.rcormier.dev
+BETTER_AUTH_TRUSTED_ORIGINS=https://vertexai.rcormier.dev,https://vertex-ai.rcormier.workers.dev
 ```
 
 For Cloudflare deployment, set these as Worker environment variables or secrets before deploy. For local development, add them to `.dev.vars`; keep `.dev.vars` out of source control.

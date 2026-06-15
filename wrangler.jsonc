@@ -144,6 +144,8 @@
   "vars": {
     "CLOUDFLARE_AI_GATEWAY_ID": "default",
     "BRIEFING_REPORTING_WINDOW_HOURS": "24",
+    "BETTER_AUTH_URL": "https://vertexai.rcormier.dev",
+    "BETTER_AUTH_TRUSTED_ORIGINS": "https://vertexai.rcormier.dev,https://vertex-ai.rcormier.workers.dev",
     "ASANA_WEBHOOK_ORIGIN": "https://vertex-ai.rcormier.workers.dev",
   },
   "send_email": [
